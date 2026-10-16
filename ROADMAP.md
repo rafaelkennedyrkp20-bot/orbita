@@ -143,6 +143,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] `.gitignore` para publicar sem modelos, chaves ou dados pessoais
 - [x] Licença **GNU GPL v3** (`LICENSE`, aviso no README e em Configurações › Sobre) — melhorias distribuídas continuam abertas
 - [x] Publicado no GitHub (rafaelkennedyrkp20-bot/orbita), só código-fonte
+- [x] Aviso de atualização e atualização com um clique usando o GitHub como âncora: git (`pull --ff-only`, recusa com alteração local) ou ZIP (substitui só o programa, cópia de segurança, manifesto para remoções); dados nunca tocados (`agent/core/updater.py`)
 - [x] Versionamento SemVer alfa (`agent/__init__.py`, `CHANGELOG.md`, regras no AGENTS.md); versão atual 0.1.0-alpha
 - [x] Prompt padrão para evoluir o projeto com qualquer IA (`docs/PROMPT_EVOLUCAO.md`)
 - [ ] Integração contínua no GitHub (rodar pyflakes + pytest a cada envio)
@@ -221,3 +222,12 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   `agent/gui.py`, `agent/ui/web/*` e módulos novos (sem tocar no que Grok e Argon editavam). Verificado: pyflakes 0;
   pytest 81 passando na árvore atual (13 novos: checkpoints, mentions, gui_turns); janela real com captura (autocompletar, cartão,
   diff, desfazer, refazer, Esc na confirmação). Custo medido: 0,4–0,9 s por foto numa pasta real.
+- **2026-10-16 — Claude Opus 5.5**: aviso de atualização e atualização com um clique (\gent/core/updater.py\,
+  \gent/gui.py\, \gent/ui/web\). O GitHub é a âncora: verifica a cada 6 h; mudança só em documentação não incomoda;
+  novidades agrupadas (Novidades/Correções/Desempenho/Interface) e lista do que será atualizado/removido. Modo git:
+  \pull --ff-only\, recusa com alterações locais ou commits fora do GitHub. Modo ZIP: troca só o programa, cópia de
+  segurança em \data/updates/backup-…\, remoção só do que veio de versão anterior (manifesto). Processo separado espera a
+  janela fechar, aplica e reabre pelo launcher. AgnesRiber convidada como colaboradora (escrita) no GitHub. Verificado:
+  pyflakes 0; pytest 88 na árvore atual (7 novos); ponta a ponta contra o GitHub real (instalação ZIP da 0.1.0-alpha →
+  check 1,4 s → apply 0,7 s → idêntica ao main, \data/\ e \.env\ intactos; CLI separada esperando o processo);
+  modo git na pasta de desenvolvimento corretamente sem atualização; janela real com captura (aviso, novidades, Sobre).

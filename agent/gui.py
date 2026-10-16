@@ -34,7 +34,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMainWindow, QMenu, QSystemTrayIcon
 
 from agent import __version__
-from agent.core import checkpoints, grok_cli, mentions, routing
+from agent.core import checkpoints, grok_cli, mentions, routing, updater
 from agent.core.brain import Brain
 from agent.core.config import (
     DATA_DIR, GUI_VOICE_MAX_RECORD_SECONDS, GUI_VOICE_NO_SPEECH_TIMEOUT, GUI_VOICE_SILENCE_SECONDS, LOGS_DIR,
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 WEB_INDEX = brand.WEB_DIR / "index.html"
 SETTABLE = {"theme", "user_name", "default_workspace", "native_notifications", "show_reasoning", "permission_mode",
             "economy_mode", "turn_token_budget", "daily_token_budget", "voice_replies", "auto_routing",
-            "cheap_model", "image_model", "ollama_num_ctx", "ollama_keep_alive", "checkpoints"}
+            "cheap_model", "image_model", "ollama_num_ctx", "ollama_keep_alive", "checkpoints", "update_check"}
 # Modo plano: vai junto da mensagem; as ferramentas que alteram algo ficam bloqueadas no turno.
 PLAN_NOTE = ("\n\n[Modo plano] Ainda NÃO execute: não crie, edite nem apague arquivos e não rode comandos que "
              "alterem algo — essas ferramentas estão bloqueadas neste turno. Leia e pesquise o que precisar e "
@@ -308,7 +308,15 @@ class Api(QObject):
             "quick_prompts": QUICK_PROMPTS,
             "pygments_css": render.pygments_css(),
             "version": __version__,
+            "install": self.install_info(),
         }
+
+    def install_info(self) -> dict:
+        if not hasattr(self, "_install"):
+            mode = updater.install_mode()
+            sha = updater.local_sha(mode=mode) or ""
+            self._install = {"mode": mode, "sha": sha[:7], "repo": updater.REPO}
+        return self._install
 
     def _state_json(self) -> str:
         return json.dumps(self.state(), ensure_ascii=False, default=str)
@@ -663,6 +671,46 @@ class Api(QObject):
     def copyText(self, text: str) -> None:
         QGuiApplication.clipboard().setText(text)
 
+    # ── Atualizações (GitHub) ────────────────────────────────
+
+    def check_updates(self, manual: bool = False) -> None:
+        def work():
+            try:
+                info = updater.check_cached(force=manual)
+            except Exception as error:
+                logger.info("Verificação de atualização falhou: %s", error)
+                if manual:
+                    self.push({"type": "update", "error": f"Não consegui falar com o GitHub: {error}"})
+                return
+            if manual or (info.get("available") and info.get("significant")):
+                self.push({"type": "update", "info": info, "manual": manual})
+        threading.Thread(target=work, daemon=True).start()
+
+    @pyqtSlot()
+    def checkUpdate(self) -> None:
+        self.check_updates(manual=True)
+
+    @pyqtSlot(str, result=str)
+    def applyUpdate(self, sha: str) -> str:
+        if self.win.busy:
+            return json.dumps({"error": "Espere o agente terminar a tarefa atual antes de atualizar."}, ensure_ascii=False)
+        try:
+            updater.start_detached(sha)
+        except Exception as error:
+            return json.dumps({"error": f"Não consegui iniciar o atualizador: {error}"}, ensure_ascii=False)
+        QTimer.singleShot(400, self.win.close)   # o atualizador espera a janela fechar e reabre sozinho
+        return "{}"
+
+    def report_last_update(self) -> None:
+        """Depois de reabrir: conta como foi a atualização e apaga o aviso."""
+        result_file = updater.updates_dir() / "result.json"
+        try:
+            result = json.loads(result_file.read_text(encoding="utf-8"))
+            result_file.unlink()
+        except (OSError, ValueError):
+            return
+        self.push({"type": "updated", "result": result})
+
 
 # ─────────────────────────────────────────────────────────────
 # Página e janela
@@ -727,6 +775,9 @@ class MainWindow(QMainWindow):
         brain.mcp.listeners.append(lambda: self.api.push({"type": "mcp", "servers": brain.mcp.status()}))
         self.worker.start()
         QTimer.singleShot(900, self.start_prompt_if_any)
+        QTimer.singleShot(2500, self.api.report_last_update)
+        if brain.settings.get("update_check", True):
+            QTimer.singleShot(8000, self.api.check_updates)
 
     def _make_tray(self) -> Optional[QSystemTrayIcon]:
         if not QSystemTrayIcon.isSystemTrayAvailable():

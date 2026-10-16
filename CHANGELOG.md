@@ -35,6 +35,10 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   nesse turno. Depois é só clicar em Executar plano.
 - Fechar um pedido de permissão com `Esc`, ou clicar em Parar, agora responde "não" em vez de deixar o agente travado
   esperando.
+- **Atualizações pelo próprio programa**: o Órbita avisa quando há melhorias no GitHub e mostra as novidades e o que
+  acontece com os arquivos. Atualizar agora fecha, atualiza e reabre sozinho. Conversas, configurações, chaves,
+  memória, modelos e o ambiente Python nunca são tocados. O que é substituído ou removido ganha cópia de segurança.
+  Pode ser desligado em Configurações › Sobre.
 
 ### Corrigido
 - Cancelar uma resposta enquanto o modelo já preparava chamadas de ferramenta não deixa mais chamadas incompletas no

@@ -467,6 +467,53 @@ function mentionKey(e) {
   return true;
 }
 
+// ── Atualizações ───────────────────────────────────────────────────────────────
+function onUpdate(e) {
+  if (e.error) { S.updateError = e.error; if (settingsSection === "sobre") renderSettings(); return toast("error", "Atualizações", e.error); }
+  S.update = e.info; S.updateError = "";
+  if ($("#page-settings").classList.contains("active") && settingsSection === "sobre") renderSettings();
+  const u = e.info;
+  if (!u.available) return e.manual && toast("success", "Tudo em dia", "Você já está com a versão mais recente do Órbita.");
+  const n = u.count || 0;
+  toast("update", "Atualização disponível", `${n} ${n === 1 ? "melhoria nova" : "melhorias novas"} no Órbita${u.significant ? "" : " (só documentação)"}.`, 0,
+    { label: "Ver novidades", fn: () => updateModal(u) });
+}
+function updateStatusText() {
+  const inst = S.install || {};
+  const where = inst.mode === "git" ? `cópia git${inst.sha ? " · " + esc(inst.sha) : ""}` : `código baixado${inst.sha ? " · " + esc(inst.sha) : ""}`;
+  if (S.updateError) return `<span style="color:var(--err)">${esc(S.updateError)}</span>`;
+  if (!S.update) return `v${esc(S.version || "")} · ${where}. Ainda não verificado nesta sessão.`;
+  return S.update.available ? `<span style="color:var(--warn)">● Há uma atualização disponível</span> · ${where}`
+    : `<span style="color:var(--ok)">● Em dia</span> · v${esc(S.version || "")} · ${where}`;
+}
+function updateModal(u) {
+  const f = u.files || {}, changed = (f.changed || []).length, added = (f.added || []).length, removed = f.removed || [];
+  const version = u.remote_version && u.remote_version !== S.version ? `<span class="tag grad">v${esc(S.version)} → v${esc(u.remote_version)}</span>` : "";
+  const groups = Object.entries(u.groups || {}).map(([g, items]) => `<div class="up-group"><b>${esc(g)}</b><ul>${items.slice(0, 6).map(t => `<li>${esc(t)}</li>`).join("")}${items.length > 6 ? `<li class="more">e mais ${items.length - 6}…</li>` : ""}</ul></div>`).join("");
+  const files = u.mode === "git"
+    ? `<li>Atualiza pelo <b>git</b> (<code>git pull</code>), do jeito que você clonou.</li>`
+    : `<li><b>${changed}</b> ${changed === 1 ? "arquivo do programa atualizado" : "arquivos do programa atualizados"}${added ? `, <b>${added}</b> ${added === 1 ? "novo" : "novos"}` : ""}.</li>
+       ${removed.length ? `<li><b>Serão removidos</b> (não existem mais no programa): ${removed.slice(0, 8).map(p => `<code>${esc(p)}</code>`).join(", ")}${removed.length > 8 ? "…" : ""}</li>` : "<li>Nenhum arquivo será apagado.</li>"}
+       <li>Antes de substituir ou remover, o Órbita guarda uma cópia em <code>data/updates/backup-…</code>.</li>`;
+  openModal(`<div class="modal update-modal">
+    <div class="up-head"><img src="logo.svg" alt=""><div><h2>Atualização do Órbita</h2><p class="sub">Melhorias publicadas no GitHub ${version}</p></div></div>
+    <div class="up-groups">${groups || `<p class="sub">Ajustes gerais no programa.</p>`}</div>
+    <div class="up-safe"><b>${icon("shield")} Seus arquivos</b><ul>
+      <li>Ficam intactos: conversas, configurações, perfis, chaves (<code>.env</code>), memória, modelos e o ambiente Python.</li>${files}
+      <li>O Órbita fecha, atualiza e abre de novo sozinho, em alguns segundos.</li></ul></div>
+    ${u.blocked ? `<div class="up-blocked">${icon("alert")} ${esc(u.blocked)}</div>` : ""}
+    <div class="actions"><button class="btn" id="up-gh">${icon("globe")} Ver no GitHub</button><button class="btn" id="up-later">Depois</button>
+      <button class="btn primary" id="up-go" ${u.blocked ? "disabled" : ""}>${icon("download")} Atualizar agora</button></div></div>`);
+  $("#up-gh").onclick = () => call("openUrl", u.url);
+  $("#up-later").onclick = closeModal;
+  $("#up-go").onclick = async () => {
+    if (busy) return toast("warn", "Aguarde", "Espere o agente terminar a tarefa atual.");
+    $("#up-go").disabled = true; $("#up-go").innerHTML = `<span class="spin"></span> Atualizando…`;
+    const r = await call("applyUpdate", u.remote);
+    if (r && r.error) { toast("error", "Atualização", r.error); closeModal(); }
+  };
+}
+
 // ── Pontos de restauração ──────────────────────────────────────────────────────
 function checkpointCard(e) {
   const last = $$(".msg.bot").pop();
@@ -673,6 +720,11 @@ function onEvent(e) {
     case "status": setLive(true, e.text); break;
     case "usage": S.conversation_tokens = e.total; updateMeter(e.total); break;
     case "checkpoint": checkpointCard(e); break;
+    case "update": onUpdate(e); break;
+    case "updated":
+      if (e.result.ok) toast("success", "Órbita atualizado", `${(e.result.replaced || []).length + (e.result.added || []).length} arquivos do programa atualizados. Seus dados ficaram intactos.`, 9000);
+      else toast("error", "A atualização não foi aplicada", e.result.error || "Erro desconhecido. Nada foi alterado.", 0);
+      break;
     case "turn_end": closeTurn(); if (e.plan) planActions(); refreshConvs().then(() => { S.conversation_id = e.conversation_id || S.conversation_id; S.conversation_title = e.title || S.conversation_title; renderTopbar(); renderConvs(); }); break;
     case "error": note("⚠ " + e.message, "err"); toast("error", "Erro", e.message); break;
     case "compacted": note(`Histórico compactado: ${e.messages} mensagens antigas viraram um resumo`); break;
@@ -702,15 +754,16 @@ function preview(e) {
 function lightbox(src) { openModal(`<div class="lightbox"><img src="${src}"></div>`, true); }
 
 // ── Notificações ───────────────────────────────────────────────────────────────
-function toast(kind = "info", title = "", text = "", ms = 4200) {
+function toast(kind = "info", title = "", text = "", ms = 4200, act = null) {
   const el = document.createElement("div");
   el.className = "toast " + kind;
-  const ic = { success: "check", error: "alert", warn: "alert", info: "info" }[kind] || "sparkle";
-  el.innerHTML = `<div class="ti">${icon(ic)}</div><div><b>${esc(title)}</b><span>${esc(text)}</span></div><button class="close">${icon("x")}</button><i class="life" style="animation-duration:${ms}ms"></i>`;
+  const ic = { success: "check", error: "alert", warn: "alert", info: "info", update: "download" }[kind] || "sparkle";
+  el.innerHTML = `<div class="ti">${icon(ic)}</div><div><b>${esc(title)}</b><span>${esc(text)}</span>${act ? `<button class="btn primary small t-act">${esc(act.label)}</button>` : ""}</div><button class="close">${icon("x")}</button>${ms ? `<i class="life" style="animation-duration:${ms}ms"></i>` : ""}`;
   const kill = () => { el.classList.add("out"); setTimeout(() => el.remove(), 260); };
   el.querySelector(".close").onclick = kill;
+  if (act) el.querySelector(".t-act").onclick = () => { kill(); act.fn(); };
   $("#toasts").appendChild(el);
-  setTimeout(kill, ms);
+  if (ms) setTimeout(kill, ms);   // ms = 0: fica até a pessoa fechar
   while ($("#toasts").children.length > 4) $("#toasts").firstChild.remove();
 }
 
@@ -972,7 +1025,10 @@ function renderSettings() {
     case "sobre":
       html = `<h1>Sobre</h1><div class="group" style="padding:20px"><div class="row"><img src="logo.svg" style="width:64px"><div><h2 style="margin:0">Órbita <span class="tag grad" style="vertical-align:middle">v${esc(S.version || "")}</span></h2><span style="color:var(--muted)">Seu agente pessoal de IA — suas regras, seu computador.</span></div></div>
         <div class="row" style="margin-top:16px"><button class="btn small" data-open="data">${icon("folder")} Pasta de dados</button><button class="btn small" data-open="logs">${icon("file")} Logs</button><button class="btn small" data-open="roadmap">${icon("book")} ROADMAP</button><button class="btn small" data-open="license">${icon("shield")} Licença GPL v3</button></div>
-        <p style="color:var(--muted);font-size:12.5px;margin:16px 0 0">Software livre sob a GNU GPL v3: você pode usar, estudar, modificar e compartilhar. Versões modificadas distribuídas devem continuar abertas sob a mesma licença.</p></div>`;
+        <p style="color:var(--muted);font-size:12.5px;margin:16px 0 0">Software livre sob a GNU GPL v3: você pode usar, estudar, modificar e compartilhar. Versões modificadas distribuídas devem continuar abertas sob a mesma licença.</p></div>
+        <div class="group"><h3>Atualizações</h3>
+        ${field("Situação", updateStatusText(), `<div class="row"><button class="btn small" id="up-check">${icon("refresh")} Procurar agora</button>${S.update && S.update.available ? `<button class="btn primary small" id="up-open">${icon("download")} Ver novidades</button>` : ""}</div>`)}
+        ${field("Verificar sozinho", "Ao abrir, consulta o GitHub (no máximo a cada 6 horas) e avisa quando há melhorias no programa. Nada é baixado sem você confirmar.", toggle("update_check", st.update_check !== false))}</div>`;
       break;
   }
   $("#set-body").innerHTML = `<div class="set-in">${html}</div>`;
@@ -1010,6 +1066,9 @@ function bindSettings() {
   const gotoApi = $("#goto-api"); if (gotoApi) gotoApi.onclick = () => { settingsSection = "api"; renderSettings(); };
   if (settingsSection === "api") bindManualApi();
   const cat = $("#cat-open"); if (cat) cat.onclick = () => call("openPath", "catalog");
+  const upCheck = $("#up-check");
+  if (upCheck) upCheck.onclick = () => { upCheck.disabled = true; upCheck.innerHTML = `<span class="spin"></span> Procurando…`; call("checkUpdate"); };
+  const upOpen = $("#up-open"); if (upOpen) upOpen.onclick = () => updateModal(S.update);
   if (settingsSection === "modelos") bindModels();
 }
 function bindModels() {

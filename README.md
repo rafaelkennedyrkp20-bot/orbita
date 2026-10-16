@@ -134,7 +134,20 @@ pequenas entram no GitHub sem mudar a versão; só atualizações grandes ganham
 
 ## Atualizar
 
-Quem clonou: `git pull` e abra de novo. Se `requirements.txt` mudou, o `Iniciar_Orbita.bat` instala a diferença sozinho. Conversas, modelos e chaves não são substituídos.
+**Pelo próprio programa:** ao abrir, o Órbita consulta este repositório (no máximo a cada 6 horas) e avisa quando há
+melhorias. Em **Ver novidades** aparecem as mudanças e exatamente o que acontece com os arquivos. **Atualizar agora**
+fecha o programa, atualiza e abre de novo sozinho:
+
+- cópia feita com `git clone`: atualiza com `git pull --ff-only`. Se houver alterações suas não salvas, ou commits que
+  não estão no GitHub, ele não mexe em nada e explica o motivo;
+- código baixado em ZIP: troca só os arquivos do programa. Antes, guarda uma cópia de tudo que substitui ou remove em
+  `data\updates\backup-…`. Arquivos que você criou nunca são apagados.
+
+Nunca são tocados: conversas, configurações, perfis, chaves (`.env`), memória, `models\` e `venv\`. Se o
+`requirements.txt` mudou, o launcher instala a diferença sozinho ao reabrir. A verificação pode ser desligada em
+Configurações › Sobre. Quem baixou a 0.1.0-alpha antes desse recurso existir precisa atualizar uma vez à mão.
+
+**À mão:** quem clonou faz `git pull` e abre de novo.
 
 Para publicar uma versão nova a partir desta pasta: commit na branch `main` e `git push`. O remoto `origin` já aponta para este repositório. Não entre `venv\`, `models\`, `data\` nem `.env` — o `.gitignore` deixa isso de fora. Nenhuma versão compilada é publicada: quem usa, roda o código-fonte.
 
