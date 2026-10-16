@@ -92,6 +92,7 @@ DEFAULT_MCP_CONFIG: dict[str, Any] = {
             "args": ["windows-mcp"],
             "enabled": False,
             "tools_mode": "auto",
+            "platforms": ["windows"],
         },
         "filesystem": {
             "description": "Acesso a pastas específicas via servidor MCP oficial",
@@ -103,11 +104,59 @@ DEFAULT_MCP_CONFIG: dict[str, Any] = {
 }
 
 
+# Programa que o servidor precisa → (nome, como instalar no Linux/macOS, como instalar no Windows)
+_NODE = ("Node.js", "sudo apt install nodejs npm (Fedora: sudo dnf install nodejs · Arch: sudo pacman -S nodejs npm "
+                    "· macOS: brew install node)", "baixe o instalador LTS em nodejs.org")
+_UV = ("uv", "curl -LsSf https://astral.sh/uv/install.sh | sh", "winget install astral-sh.uv")
+REQUIREMENTS = {"npx": _NODE, "node": _NODE, "npm": _NODE, "uvx": _UV, "uv": _UV}
+_PLATFORM_NAMES = {"windows": "Windows", "linux": "Linux", "macos": "macOS"}
+
+
+def current_platform() -> str:
+    import sys
+
+    return "windows" if os.name == "nt" else "macos" if sys.platform == "darwin" else "linux"
+
+
+def platform_problem(cfg: dict) -> str:
+    """Servidor que não roda neste sistema (campo `platforms`; o windows-mcp antigo, sem o campo, é só Windows)."""
+    platforms = cfg.get("platforms")
+    if platforms is None and any("windows-mcp" in str(part) for part in [cfg.get("command", ""), *(cfg.get("args") or [])]):
+        platforms = ["windows"]
+    if not platforms or current_platform() in platforms:
+        return ""
+    names = " ou ".join(_PLATFORM_NAMES.get(p, p) for p in platforms)
+    return f"Só funciona no {names}."
+
+
+def missing_program(cfg: dict) -> str:
+    """Explica o que instalar quando o comando do servidor não existe neste PC (em vez do Errno 2)."""
+    command = (cfg.get("command") or "").strip()
+    if cfg.get("url") or not command or shutil.which(command) or Path(command).is_file():
+        return ""
+    stem = Path(command).name.lower()
+    for suffix in (".cmd", ".bat", ".exe"):
+        stem = stem.removesuffix(suffix)
+    if stem in REQUIREMENTS:
+        program, unix, windows = REQUIREMENTS[stem]
+        how = windows if current_platform() == "windows" else unix
+        return f"Precisa do {program} (comando '{command}'), que não está instalado. Instale: {how}. Depois clique em Reconectar."
+    return f"O programa '{command}' não foi encontrado. Instale-o ou ajuste o caminho no mcp.json."
+
+
+def error_text(error: BaseException) -> str:
+    """Mensagem real de um erro, abrindo os ExceptionGroup aninhados do anyio ("unhandled errors in a TaskGroup")."""
+    inner = getattr(error, "exceptions", None)
+    if inner:
+        return "; ".join(dict.fromkeys(error_text(e) for e in inner))
+    return str(error) or type(error).__name__
+
+
 @dataclass
 class ServerState:
     name: str
     cfg: dict
-    status: str = "desligado"      # desligado | conectando | conectado | erro
+    status: str = "desligado"      # desligado | conectando | conectado | erro | falta | indisponivel
     error: str = ""
     tool_names: list[str] = field(default_factory=list)
     session: Any = None
@@ -265,16 +314,31 @@ class MCPHub:
                 if state is None:
                     state = self.servers[name] = ServerState(name, cfg)
                 state.cfg = cfg
-                if cfg.get("enabled", True) and state.status in ("desligado", "erro"):
-                    self._connect(state)
+                if state.status in ("desligado", "erro", "falta", "indisponivel"):
+                    self._start(state)
         self._notify()
+
+    def _start(self, state: ServerState) -> None:
+        """Conecta, a menos que o servidor não rode neste sistema ou falte o programa dele."""
+        blocked = platform_problem(state.cfg)
+        if blocked:
+            state.status, state.error = "indisponivel", blocked
+        elif not state.cfg.get("enabled", True):
+            state.status, state.error = "desligado", ""
+        else:
+            missing = missing_program(state.cfg)
+            if missing:
+                state.status, state.error = "falta", missing
+            else:
+                self._connect(state)
 
     def restart(self, name: str) -> None:
         with self._lock:
             state = self.servers.get(name)
             if state:
                 self._disconnect(state)
-                self._connect(state)
+                self._start(state)
+        self._notify()
 
     def shutdown(self) -> None:
         with self._lock:
@@ -351,9 +415,7 @@ class MCPHub:
                 self._notify()
                 await stop.wait()
         except Exception as error:
-            message = str(error) or type(error).__name__
-            if hasattr(error, "exceptions"):  # ExceptionGroup do anyio
-                message = "; ".join(str(e) or type(e).__name__ for e in error.exceptions)
+            message = error_text(error)
             logger.error("MCP '%s' falhou: %s", state.name, message)
             if current():
                 state.status, state.error = "erro", message[:500]
@@ -472,7 +534,7 @@ class MCPHub:
                 "status": s.status,
                 "error": s.error,
                 "tools": len(s.tool_names),
-                "enabled": s.cfg.get("enabled", True),
+                "enabled": s.cfg.get("enabled", True) and s.status != "indisponivel",
                 "description": s.cfg.get("description", ""),
                 "deferred": bool(s.tool_names) and all(
                     (t := self.registry.get(n)) is not None and t.deferred for n in s.tool_names),

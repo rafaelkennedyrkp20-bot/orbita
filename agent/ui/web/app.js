@@ -1258,15 +1258,16 @@ function profileEditor(p) {
 }
 
 // ── Página: Conexões (MCP + skills) ────────────────────────────────────────────
+const MCP_STATUS = { falta: "precisa instalar", indisponivel: "indisponível neste sistema" };
 function renderConnections() {
   const servers = S.mcp || [];
   $("#conn-body").innerHTML = `<h1>Ferramentas de criação</h1><p class="lead">Programas que a IA sabe usar para editar imagens, modelar em 3D, fazer jogos e mexer em vídeo. Nada vem instalado: baixe só o que quiser (versão fixa, do site oficial, com conferência de integridade). O agente também pode pedir para instalar — sempre com a sua permissão.</p>
     <div class="grid" id="tb-grid"></div>
     <h1 style="margin-top:34px">Conexões</h1><p class="lead">Servidores MCP ligam o agente a programas (REA, navegador, Windows, Photoshop…). Servidores grandes carregam ferramentas sob demanda para economizar tokens.</p>
     <div class="row" style="margin-bottom:18px"><button class="btn" id="mc-reload">${icon("refresh")} Reconectar</button><button class="btn" id="mc-import">${icon("download")} Importar do Claude/Cursor</button><button class="btn" id="mc-edit">${icon("code")} Editar mcp.json</button></div>
-    <div class="grid">${servers.map(s => `<div class="tile"><div class="top"><div class="em">${icon("plug")}</div><div style="flex:1"><h3>${esc(s.name)}</h3><span class="status ${s.status}"><i></i>${esc(s.status)}${s.status === "conectado" ? ` · ${s.tools} ferramentas${s.deferred ? " (sob demanda)" : ""}` : ""}</span></div>
-      <label class="toggle"><input type="checkbox" data-mcp="${esc(s.name)}" ${s.enabled ? "checked" : ""}><span></span></label></div>
-      <div class="desc">${esc(s.description || "")}${s.error ? `<div style="color:var(--err);margin-top:6px">${esc(s.error)}</div>` : ""}</div></div>`).join("")}</div>
+    <div class="grid">${servers.map(s => `<div class="tile ${s.status === "indisponivel" ? "off" : ""}"><div class="top"><div class="em">${icon("plug")}</div><div style="flex:1"><h3>${esc(s.name)}</h3><span class="status ${s.status}"><i></i>${esc(MCP_STATUS[s.status] || s.status)}${s.status === "conectado" ? ` · ${s.tools} ferramentas${s.deferred ? " (sob demanda)" : ""}` : ""}</span></div>
+      <label class="toggle"><input type="checkbox" data-mcp="${esc(s.name)}" ${s.enabled ? "checked" : ""} ${s.status === "indisponivel" ? "disabled" : ""}><span></span></label></div>
+      <div class="desc">${esc(s.description || "")}${s.error ? `<div class="mcp-err ${s.status}">${esc(s.error)}</div>` : ""}</div></div>`).join("")}</div>
     <h1 style="margin-top:34px">Skills</h1><p class="lead">Instruções especializadas no padrão <b>SKILL.md</b>, lidas de <code>skills/</code>, plugins e das pastas do Claude/Codex.</p>
     <div class="grid">${(S.skills || []).map(k => `<div class="tile"><div class="top"><div class="em">${icon("book")}</div><div><h3>${esc(k.name)}</h3><span class="tag">${esc(k.origin)}</span></div></div><div class="desc">${esc(k.description)}</div></div>`).join("") || `<div class="empty">Nenhuma skill encontrada.</div>`}</div>`;
   $$("[data-mcp]", $("#conn-body")).forEach(t => t.addEventListener("change", () => { call("mcpToggle", t.dataset.mcp, t.checked); toast("info", "MCP", `${t.dataset.mcp} ${t.checked ? "ligando…" : "desligado"}`); }));

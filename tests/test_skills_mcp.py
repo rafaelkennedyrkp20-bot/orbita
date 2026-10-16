@@ -107,3 +107,52 @@ def test_mcp_stdio_roundtrip(tmp_path):
         assert registry.get("mcp__teste__somar") is None
     finally:
         hub.shutdown()
+
+
+def _hub_with(tmp_path, servers):
+    config = tmp_path / "mcp.json"
+    config.write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
+    return MCPHub(ToolRegistry(), config_path=config)
+
+
+def test_missing_program_says_what_to_install_instead_of_errno(tmp_path, monkeypatch):
+    """Caso real (Linux sem Node.js): aparecia "[Errno 2] Arquivo ou diretório inexistente: 'npx'"."""
+    import agent.core.mcp_hub as hub_module
+
+    monkeypatch.setattr(hub_module.shutil, "which", lambda cmd: None)
+    hub = _hub_with(tmp_path, {"rea": {"command": "npx", "args": ["-y", "rea-agents"]},
+                               "py": {"command": "uvx", "args": ["algo"]},
+                               "meu": {"command": "programa-que-nao-existe"}})
+    hub.reload()                                       # sem start(): nada pode ter sido agendado
+    by_name = {s["name"]: s for s in hub.status()}
+    assert by_name["rea"]["status"] == "falta" and "Node.js" in by_name["rea"]["error"]
+    assert by_name["py"]["status"] == "falta" and "uv" in by_name["py"]["error"]
+    assert by_name["meu"]["status"] == "falta" and "programa-que-nao-existe" in by_name["meu"]["error"]
+    assert all(s.future is None for s in hub.servers.values())
+    assert not any(s["status"] == "erro" for s in hub.status())   # não acende o alerta vermelho
+
+
+def test_windows_only_server_is_unavailable_elsewhere(tmp_path, monkeypatch):
+    import agent.core.mcp_hub as hub_module
+
+    monkeypatch.setattr(hub_module, "current_platform", lambda: "linux")
+    hub = _hub_with(tmp_path, {"windows": {"command": "uvx", "args": ["windows-mcp"], "enabled": True},
+                               "novo": {"command": "x", "platforms": ["windows", "macos"]}})
+    hub.reload()
+    for item in hub.status():
+        assert item["status"] == "indisponivel" and "Windows" in item["error"], item
+    assert all(s.future is None for s in hub.servers.values())
+    monkeypatch.setattr(hub_module, "current_platform", lambda: "windows")
+    assert hub_module.platform_problem({"command": "uvx", "args": ["windows-mcp"]}) == ""
+
+
+def test_nested_exception_groups_show_the_real_error():
+    import agent.core.mcp_hub as hub_module
+
+    class Group(Exception):                            # mesmo formato do ExceptionGroup do anyio (3.10 não tem)
+        def __init__(self, message, exceptions):
+            super().__init__(message)
+            self.exceptions = exceptions
+
+    error = Group("unhandled errors in a TaskGroup", [Group("interno", [ConnectionError("servidor fechou a conexão")])])
+    assert hub_module.error_text(error) == "servidor fechou a conexão"

@@ -377,3 +377,8 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   Novo teste com servidor HTTP local sem chave (sonda sem `/v1`, adiciona, lista modelos). Testado também se o river
   aceita o formato Claude (`/v1/messages`): não — qualquer rota devolve 200 vazio (gRPC); Claude Code com o river só
   via proxy (ex.: free-claude-code, AGPL, programa separado). pytest 180 + 2 pulados.
+- **2026-10-16 — Claude Opus 5.5**: colega no Linux (clone novo) via rea/playwright com "[Errno 2] 'npx'" e windows
+  com "unhandled errors in a TaskGroup". `mcp_hub`: `missing_program` (confere `shutil.which` antes de conectar →
+  status `falta` com instrução de instalação), `platform_problem` (campo `platforms`; windows-mcp sem o campo = só
+  Windows → `indisponivel`, toggle travado), `error_text` abre ExceptionGroup aninhado. Status novos não acendem o
+  alerta vermelho. Testes: 3 novos (falhavam antes). Janela real simulando Linux sem Node conferida. pytest 183 + 2.

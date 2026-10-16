@@ -58,6 +58,10 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   a voz usa a detecção por volume e o filtro de silêncio do Whisper. Aceita Python 3.10 a 3.14.
 - Instalação no Python 3.14 falhava com "No matching distribution found for kokoro-onnx": o `kokoro-onnx` só
   existe até o 3.13. Agora ele é instalado só no 3.10–3.13; no 3.14 a fala usa a voz do sistema.
+- Conexões (MCP) no Linux mostravam erro vermelho sem explicação: "[Errno 2] ... 'npx'" (falta o Node.js) e
+  "unhandled errors in a TaskGroup". Agora o Órbita confere o programa antes de ligar e mostra "precisa instalar" com
+  o comando certo (Node.js para `npx`, uv para `uvx`); o servidor `windows` aparece como "indisponível neste sistema"
+  fora do Windows; e erros de conexão mostram a causa real em vez do "TaskGroup".
 - Atualização automática que não "pegava" (relato de usuário no Linux): o programa regravava o ícone `app.ico` ao
   abrir e o git passava a acusar "alteração local", então a atualização era recusada. O ícone não é mais regravado, o
   atualizador restaura sozinho os arquivos que o próprio programa gera e ignora mudança só de permissão (`chmod +x`).

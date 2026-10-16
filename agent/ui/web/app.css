@@ -466,6 +466,11 @@ pre.diff .f { color: var(--text); font-weight: 700; background: var(--panel2); b
 .status.conectado i { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 .status.conectando i { background: var(--warn); animation: blink 1s infinite; }
 .status.erro i { background: var(--err); }
+.status.falta i { background: var(--warn); }
+.mcp-err { color: var(--err); margin-top: 6px; user-select: text; }
+.mcp-err.falta { color: var(--warn); }
+.mcp-err.indisponivel { color: var(--dim); }
+.tile.off { opacity: .6; }
 
 /* Configurações */
 #page-settings { grid-template-columns: 240px 1fr; }
