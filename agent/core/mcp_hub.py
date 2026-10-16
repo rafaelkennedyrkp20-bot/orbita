@@ -25,7 +25,6 @@ chamam de forma síncrona e segura entre threads.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import json
@@ -38,12 +37,28 @@ import threading
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
+if TYPE_CHECKING:
+    import asyncio
 
 from agent.core.config import DATA_DIR, LOGS_DIR
 from agent.core.tools import Tool, ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
+
+
+def _asyncio():
+    import asyncio as _mod
+
+    globals()["asyncio"] = _mod
+    return _mod
+
+
+def __getattr__(name: str):
+    if name == "asyncio":
+        return _asyncio()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 MCP_CONFIG = DATA_DIR / "mcp.json"
 DEFERRED_THRESHOLD = 12
@@ -139,6 +154,7 @@ class MCPHub:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._ready = threading.Event()
+        self._stopped = False
         self._lock = threading.RLock()
 
     # ── Configuração ─────────────────────────────────────────
@@ -207,19 +223,29 @@ class MCPHub:
     # ── Ciclo de vida ────────────────────────────────────────
 
     def start(self) -> None:
+        self._stopped = False
+        self.reload()
         if self._thread is None:
             self._thread = threading.Thread(target=self._run_loop, name="mcp-hub", daemon=True)
             self._thread.start()
-            self._ready.wait(5)
-        self.reload()
 
     def _run_loop(self) -> None:
+        aio = _asyncio()
         if os.name == "nt":
-            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
+            aio.set_event_loop_policy(aio.WindowsProactorEventLoopPolicy())
+        loop = aio.new_event_loop()
+        aio.set_event_loop(loop)
+        with self._lock:
+            if self._stopped:
+                self._ready.set()
+                loop.close()
+                return
+            self._loop = loop
+            for state in self.servers.values():
+                if state.status == "conectando" and state.future is None:
+                    state.future = aio.run_coroutine_threadsafe(self._serve(state, state.generation), loop)
         self._ready.set()
-        self._loop.run_forever()
+        loop.run_forever()
 
     def reload(self) -> None:
         """Aplica o mcp.json: desconecta removidos/desligados e conecta os ligados."""
@@ -250,22 +276,26 @@ class MCPHub:
 
     def shutdown(self) -> None:
         with self._lock:
+            self._stopped = True
             for state in self.servers.values():
                 self._disconnect(state)
-        if self._loop:
-            self._loop.call_soon_threadsafe(self._loop.stop)
+            loop = self._loop
+        if loop:
+            loop.call_soon_threadsafe(loop.stop)
 
     def _connect(self, state: ServerState) -> None:
-        if self._loop is None:
-            return
         state.status, state.error = "conectando", ""
         state.generation += 1
-        state.future = asyncio.run_coroutine_threadsafe(self._serve(state, state.generation), self._loop)
+        if self._loop is None:
+            state.future = None
+            return
+        state.future = _asyncio().run_coroutine_threadsafe(self._serve(state, state.generation), self._loop)
 
     def _disconnect(self, state: ServerState) -> None:
         if state.stop is not None and self._loop is not None:
             self._loop.call_soon_threadsafe(state.stop.set)
         state.generation += 1
+        state.future = None
         self.registry.unregister_source(f"mcp:{state.name}")
         state.tool_names, state.session, state.status = [], None, "desligado"
 
@@ -278,9 +308,13 @@ class MCPHub:
 
     async def _serve(self, state: ServerState, generation: int) -> None:
         """Mantém a conexão aberta até `stop` (contextos anyio no mesmo task)."""
+        aio = _asyncio()
+        await aio.sleep(0.02)
+        if self._stopped or state.generation != generation:
+            return
         from mcp import ClientSession
 
-        stop = state.stop = asyncio.Event()
+        stop = state.stop = aio.Event()
         current = lambda: state.generation == generation  # noqa: E731 — conexão ainda é a vigente?
         cfg = state.cfg
         log_file = None
@@ -304,7 +338,7 @@ class MCPHub:
                                                    encoding_error_handler="replace")
                     read, write = await stack.enter_async_context(stdio_client(params, errlog=log_file))
                 session = await stack.enter_async_context(ClientSession(read, write))
-                await asyncio.wait_for(session.initialize(), CONNECT_TIMEOUT)
+                await aio.wait_for(session.initialize(), CONNECT_TIMEOUT)
                 tools = await self._list_tools(session)
                 if not current():
                     return
@@ -386,7 +420,7 @@ class MCPHub:
         state = self.servers.get(server)
         if state is None or state.session is None or self._loop is None:
             return ToolResult.error(f"Servidor MCP '{server}' não está conectado.")
-        future = asyncio.run_coroutine_threadsafe(state.session.call_tool(tool_name, args or {}), self._loop)
+        future = _asyncio().run_coroutine_threadsafe(state.session.call_tool(tool_name, args or {}), self._loop)
         waited = 0.0
         while True:
             try:

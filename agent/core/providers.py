@@ -27,13 +27,42 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
-import httpx
+if TYPE_CHECKING:
+    import httpx
 
 logger = logging.getLogger(__name__)
 
 TextCallback = Optional[Callable[[str], None]]
+
+_http_client_instance: Any = None
+_http_client_lock = threading.Lock()
+
+
+def _httpx():
+    import httpx as _mod
+
+    globals()["httpx"] = _mod
+    return _mod
+
+
+def __getattr__(name: str):
+    if name == "httpx":
+        return _httpx()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _shared_http_client() -> "httpx.Client":
+    """Reutiliza um único httpx.Client thread-safe (evita recriar contexto SSL/TLS a cada chamada)."""
+    global _http_client_instance
+    if _http_client_instance is None:
+        with _http_client_lock:
+            if _http_client_instance is None:
+                hx = _httpx()
+                timeout = hx.Timeout(connect=15, read=600, write=60, pool=10)
+                _http_client_instance = hx.Client(timeout=timeout)
+    return _http_client_instance
 
 
 class ProviderError(RuntimeError):
@@ -114,15 +143,19 @@ class Provider:
 _RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 
 
-def _stream_request(client: httpx.Client, url: str, payload: dict, headers: dict,
-                    attempts: int = 3) -> httpx.Response:
+def _stream_request(client: "httpx.Client", url: str, payload: dict, headers: dict,
+                    attempts: int = 3, timeout: Any = None) -> "httpx.Response":
     """Abre um POST em streaming com novas tentativas para falhas transitórias."""
+    hx = _httpx()
     delay = 1.5
     for attempt in range(attempts):
         try:
-            request = client.build_request("POST", url, json=payload, headers=headers)
+            kwargs: dict[str, Any] = {"json": payload, "headers": headers}
+            if timeout is not None:
+                kwargs["timeout"] = timeout
+            request = client.build_request("POST", url, **kwargs)
             response = client.send(request, stream=True)
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as error:
+        except (hx.ConnectError, hx.ReadTimeout, hx.RemoteProtocolError) as error:
             if attempt == attempts - 1:
                 raise ProviderError(f"Não foi possível conectar a {url}: {error}") from error
             time.sleep(delay)
@@ -217,43 +250,44 @@ class OllamaProvider(Provider):
 
         result = ChatResult()
         text_parts, reasoning_parts = [], []
-        timeout = httpx.Timeout(connect=10, read=600, write=60, pool=10)
-        with httpx.Client(timeout=timeout) as client:
-            response = _stream_request(client, f"{self.base_url}/api/chat", payload, {})
-            try:
-                for line in response.iter_lines():
-                    if cancel is not None and cancel.is_set():
-                        result.stop_reason = "cancelled"
-                        break
-                    if not line.strip():
-                        continue
-                    chunk = json.loads(line)
-                    if chunk.get("error"):
-                        raise ProviderError(chunk["error"])
-                    message = chunk.get("message") or {}
-                    if message.get("thinking"):
-                        reasoning_parts.append(message["thinking"])
-                        if on_reasoning:
-                            on_reasoning(message["thinking"])
-                    if message.get("content"):
-                        text_parts.append(message["content"])
-                        if on_text:
-                            on_text(message["content"])
-                    for call in message.get("tool_calls") or []:
-                        fn = call.get("function", {})
-                        result.tool_calls.append({
-                            "id": call.get("id") or new_call_id(),
-                            "name": fn.get("name", ""),
-                            "arguments": _parse_args(fn.get("arguments")),
-                        })
-                    if chunk.get("done"):
-                        result.stop_reason = chunk.get("done_reason", "stop")
-                        result.usage = {
-                            "input_tokens": chunk.get("prompt_eval_count", 0),
-                            "output_tokens": chunk.get("eval_count", 0),
-                        }
-            finally:
-                response.close()
+        hx = _httpx()
+        timeout = hx.Timeout(connect=10, read=600, write=60, pool=10)
+        client = _shared_http_client()
+        response = _stream_request(client, f"{self.base_url}/api/chat", payload, {}, timeout=timeout)
+        try:
+            for line in response.iter_lines():
+                if cancel is not None and cancel.is_set():
+                    result.stop_reason = "cancelled"
+                    break
+                if not line.strip():
+                    continue
+                chunk = json.loads(line)
+                if chunk.get("error"):
+                    raise ProviderError(chunk["error"])
+                message = chunk.get("message") or {}
+                if message.get("thinking"):
+                    reasoning_parts.append(message["thinking"])
+                    if on_reasoning:
+                        on_reasoning(message["thinking"])
+                if message.get("content"):
+                    text_parts.append(message["content"])
+                    if on_text:
+                        on_text(message["content"])
+                for call in message.get("tool_calls") or []:
+                    fn = call.get("function", {})
+                    result.tool_calls.append({
+                        "id": call.get("id") or new_call_id(),
+                        "name": fn.get("name", ""),
+                        "arguments": _parse_args(fn.get("arguments")),
+                    })
+                if chunk.get("done"):
+                    result.stop_reason = chunk.get("done_reason", "stop")
+                    result.usage = {
+                        "input_tokens": chunk.get("prompt_eval_count", 0),
+                        "output_tokens": chunk.get("eval_count", 0),
+                    }
+        finally:
+            response.close()
         result.text = "".join(text_parts)
         result.reasoning = "".join(reasoning_parts)
         return result
@@ -261,9 +295,11 @@ class OllamaProvider(Provider):
     def installed_models(self) -> list[str]:
         """Modelos realmente instalados; lista vazia se o Ollama não responder."""
         try:
-            response = httpx.get(f"{self.base_url}/api/tags", timeout=4)
-            response.raise_for_status()
-            return sorted(m["name"] for m in response.json().get("models", []))
+            import urllib.request
+
+            with urllib.request.urlopen(f"{self.base_url}/api/tags", timeout=4) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return sorted(m["name"] for m in data.get("models", []))
         except Exception as error:
             logger.debug("Ollama indisponível ao listar modelos: %s", error)
             return []
@@ -355,26 +391,27 @@ class OpenAICompatProvider(Provider):
         if "openai.com" in self.base_url or "deepseek" in self.base_url:
             payload["stream_options"] = {"include_usage": True}
 
-        timeout = httpx.Timeout(connect=15, read=600, write=60, pool=10)
-        with httpx.Client(timeout=timeout) as client:
-            try:
-                response = _stream_request(client, f"{self.base_url}/chat/completions", payload, self._headers())
-            except ToolsUnsupported:
+        hx = _httpx()
+        timeout = hx.Timeout(connect=15, read=600, write=60, pool=10)
+        client = _shared_http_client()
+        try:
+            response = _stream_request(client, f"{self.base_url}/chat/completions", payload, self._headers(), timeout=timeout)
+        except ToolsUnsupported:
+            raise
+        except ProviderError as error:
+            # Alguns modelos rejeitam parâmetros opcionais: tenta de novo sem eles.
+            message = str(error).lower()
+            dropped = [k for k in ("temperature", "max_tokens", "max_completion_tokens", "stream_options")
+                       if k in payload and k in message]
+            if not dropped:
                 raise
-            except ProviderError as error:
-                # Alguns modelos rejeitam parâmetros opcionais: tenta de novo sem eles.
-                message = str(error).lower()
-                dropped = [k for k in ("temperature", "max_tokens", "max_completion_tokens", "stream_options")
-                           if k in payload and k in message]
-                if not dropped:
-                    raise
-                for key in dropped:
-                    payload.pop(key, None)
-                response = _stream_request(client, f"{self.base_url}/chat/completions", payload, self._headers())
-            return self._consume(response, on_text, on_reasoning, cancel)
+            for key in dropped:
+                payload.pop(key, None)
+            response = _stream_request(client, f"{self.base_url}/chat/completions", payload, self._headers(), timeout=timeout)
+        return self._consume(response, on_text, on_reasoning, cancel)
 
     @staticmethod
-    def _consume(response: httpx.Response, on_text, on_reasoning, cancel) -> ChatResult:
+    def _consume(response: "httpx.Response", on_text, on_reasoning, cancel) -> ChatResult:
         result = ChatResult()
         text_parts, reasoning_parts = [], []
         calls: dict[int, dict] = {}
@@ -434,7 +471,7 @@ class OpenAICompatProvider(Provider):
         if self.cfg.get("api_key_env") and not self.api_key:
             return super().list_models()
         try:
-            response = httpx.get(f"{self.base_url}/models", headers=self._headers(), timeout=8)
+            response = _shared_http_client().get(f"{self.base_url}/models", headers=self._headers(), timeout=8)
             response.raise_for_status()
             ids = sorted({item["id"] for item in response.json().get("data", []) if item.get("id")})
             return ids or super().list_models()
@@ -650,10 +687,11 @@ def probe_compat_models(base_url: str, api_key: str = "") -> dict[str, Any]:
         headers["Authorization"] = f"Bearer {api_key.strip()}"
     endpoints = [f"{url}/models"] if url.endswith("/v1") else [f"{url}/v1/models", f"{url}/models"]
     last = "A API não respondeu. Confira o endereço e se ela está no ar."
+    hx = _httpx()
     for endpoint in endpoints:
         try:
-            response = httpx.get(endpoint, headers=headers, timeout=12, follow_redirects=True)
-        except httpx.HTTPError:
+            response = hx.get(endpoint, headers=headers, timeout=12, follow_redirects=True)
+        except hx.HTTPError:
             last = "Não consegui conectar nesse endereço. Confira o link e a internet."
             continue
         if response.status_code in (401, 403):

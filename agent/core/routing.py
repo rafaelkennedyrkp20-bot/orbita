@@ -69,26 +69,41 @@ DEFAULT_CATALOG: list[dict] = [
 ]
 
 
+_catalog_cache: dict[Path, tuple[int, int, list[dict]]] = {}
+
+
 def load_catalog(path: Optional[Path] = None) -> list[dict]:
-    """Lê o catálogo do usuário; cria o arquivo padrão na primeira vez."""
+    """Lê o catálogo do usuário (com cache por mtime/tamanho); cria o arquivo padrão na primeira vez."""
     path = path or CATALOG_FILE
-    if not path.exists():
+    try:
+        st = path.stat()
+    except OSError:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(DEFAULT_CATALOG, ensure_ascii=False, indent=1), encoding="utf-8")
+            st = path.stat()
         except OSError:
             return list(DEFAULT_CATALOG)
+    cached = _catalog_cache.get(path)
+    if cached is not None and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
+        return cached[2]
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else list(DEFAULT_CATALOG)
+        result = data if isinstance(data, list) else list(DEFAULT_CATALOG)
+        _catalog_cache[path] = (st.st_mtime_ns, st.st_size, result)
+        return result
     except (OSError, json.JSONDecodeError) as error:
         logger.warning("model_catalog.json inválido (%s); usando o padrão.", error)
         return list(DEFAULT_CATALOG)
 
 
 def entry_for(ref: str, catalog: list[dict]) -> dict:
+    ref_low = ref.lower()
     for entry in catalog:
-        if entry.get("ref") == ref or (entry.get("match") and fnmatch.fnmatchcase(ref.lower(), entry["match"].lower())):
+        if entry.get("ref") == ref:
+            return entry
+        match = entry.get("match")
+        if match and fnmatch.fnmatchcase(ref_low, match.lower()):
             return entry
     return {"geral": 1, "cost": 1}
 
@@ -97,9 +112,16 @@ def candidate_refs(settings, current: Optional[tuple[str, str]] = None, catalog:
                    local_models: Optional[list[str]] = None) -> list[str]:
     """Modelos utilizáveis agora: atual + locais instalados + provedores com acesso + refs fixos do catálogo."""
     refs: list[str] = [f"ollama:{model}" for model in local_models or []]
-    providers = settings.providers()
+    providers = settings._merged_providers() if hasattr(settings, "_merged_providers") else settings.providers()
+    creds: dict[str, bool] = {}
+
+    def _has_cred(prov: str) -> bool:
+        if prov not in creds:
+            creds[prov] = bool(settings.has_credentials(prov))
+        return creds[prov]
+
     for name, cfg in providers.items():
-        if name == "ollama" or not settings.has_credentials(name):
+        if name == "ollama" or not _has_cred(name):
             continue
         # Provedores locais sem chave (LM Studio...) só entram se o usuário listou modelos
         refs += [f"{name}:{model}" for model in cfg.get("models", [])]
@@ -107,8 +129,10 @@ def candidate_refs(settings, current: Optional[tuple[str, str]] = None, catalog:
         refs.insert(0, f"{current[0]}:{current[1]}")
     for entry in catalog or []:
         ref = entry.get("ref")
-        if ref and ref.partition(":")[0] in providers and settings.has_credentials(ref.partition(":")[0]):
-            refs.append(ref)
+        if ref:
+            prov = ref.partition(":")[0]
+            if prov in providers and _has_cred(prov):
+                refs.append(ref)
     return list(dict.fromkeys(refs))
 
 
@@ -156,11 +180,10 @@ def table_text(settings, current: Optional[tuple[str, str]] = None, local_models
                limit: int = 8) -> str:
     """Resumo compacto das capacidades dos modelos disponíveis (para o prompt do agente principal)."""
     catalog = load_catalog()
-    refs = [r for r in candidate_refs(settings, current, catalog, local_models)
-            if not entry_for(r, catalog).get("only")]
+    pairs = [(r, entry_for(r, catalog)) for r in candidate_refs(settings, current, catalog, local_models)]
+    visible = [(r, entry) for r, entry in pairs if not entry.get("only")]
     lines = []
-    for ref in refs[:limit]:
-        entry = entry_for(ref, catalog)
+    for ref, entry in visible[:limit]:
         strong = [SPECIALTY_LABELS[s] for s in SPECIALTIES if entry.get(s, 0) >= 3]
         good = [SPECIALTY_LABELS[s] for s in SPECIALTIES if entry.get(s, 0) == 2]
         cost = "local/grátis" if entry.get("cost", 1) == 0 else "$" * entry.get("cost", 1)

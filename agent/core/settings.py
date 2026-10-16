@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import threading
+import time
 import unicodedata
 from copy import deepcopy
 from pathlib import Path
@@ -186,13 +187,17 @@ def _provider_slug(label: str) -> str:
 class Settings:
     """Preferências persistidas em `data/settings.json` (thread-safe)."""
 
+    _grok_cred_cache: tuple[Any, float, bool] | None = None
+
     def __init__(self, path: Path = SETTINGS_FILE):
         self.path = path
         self._lock = threading.RLock()
         self._data = deepcopy(DEFAULT_SETTINGS)
+        self._providers_cache: tuple[Any, dict[str, dict[str, Any]]] | None = None
         self._load()
 
     def _load(self) -> None:
+        self._providers_cache = None
         if not self.path.exists():
             return
         try:
@@ -216,27 +221,48 @@ class Settings:
     def set(self, key: str, value: Any, save: bool = True) -> None:
         with self._lock:
             self._data[key] = value
+            if key == "providers":
+                self._providers_cache = None
         if save:
             self.save()
 
     # ── Provedores ───────────────────────────────────────────
 
+    def _merged_providers(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            user_providers = self._data.get("providers") or {}
+            ollama_env = os.environ.get("OLLAMA_BASE_URL", "")
+            cache_key = (id(user_providers), len(user_providers), ollama_env)
+            if self._providers_cache is not None and self._providers_cache[0] == cache_key:
+                return self._providers_cache[1]
+            merged: dict[str, dict[str, Any]] = {
+                k: {**v, "models": list(v.get("models", []))}
+                for k, v in DEFAULT_PROVIDERS.items()
+            }
+            for name, override in user_providers.items():
+                if isinstance(override, dict):
+                    base = merged.setdefault(name, {})
+                    base.update(override)
+                    if "models" in base:
+                        base["models"] = list(base["models"])
+            if ollama_env:
+                merged["ollama"]["base_url"] = ollama_env
+            self._providers_cache = (cache_key, merged)
+            return merged
+
     def providers(self) -> dict[str, dict[str, Any]]:
         """Catálogo final: padrões + sobrescritas/novos provedores do usuário."""
-        merged = deepcopy(DEFAULT_PROVIDERS)
-        for name, override in (self.get("providers") or {}).items():
-            if isinstance(override, dict):
-                merged.setdefault(name, {}).update(override)
-        # Permite apontar o Ollama para outra máquina via .env
-        if os.environ.get("OLLAMA_BASE_URL"):
-            merged["ollama"]["base_url"] = os.environ["OLLAMA_BASE_URL"]
-        return merged
+        return {
+            k: {**v, "models": list(v.get("models", []))}
+            for k, v in self._merged_providers().items()
+        }
 
     def provider(self, name: str) -> dict[str, Any]:
-        providers = self.providers()
+        providers = self._merged_providers()
         if name not in providers:
             raise KeyError(f"Provedor desconhecido: {name}")
-        return providers[name]
+        cfg = providers[name]
+        return {**cfg, "models": list(cfg.get("models", []))}
 
     def add_custom_provider(self, *, label: str, base_url: str, api_key: str = "",
                             models: list[str] | None = None) -> str:
@@ -283,7 +309,7 @@ class Settings:
         self.save()
 
     def _unique_provider_id(self, base: str) -> str:
-        existing = set(self.providers())
+        existing = set(self._merged_providers())
         candidate = base or "api"
         number = 2
         while candidate in existing:
@@ -297,11 +323,21 @@ class Settings:
         return (os.environ.get(env, "") if env else provider_cfg.get("api_key", "")) or ""
 
     def has_credentials(self, name: str) -> bool:
-        cfg = self.provider(name)
+        providers = self._merged_providers()
+        if name not in providers:
+            raise KeyError(f"Provedor desconhecido: {name}")
+        cfg = providers[name]
         if cfg.get("type") == "grok_cli":
             from agent.core import grok_cli
 
-            return grok_cli.executable() is not None and grok_cli.is_logged_in()
+            key = (grok_cli.executable, grok_cli.is_logged_in, os.environ.get("XAI_API_KEY", ""), os.environ.get("PATH", ""))
+            now = time.monotonic()
+            cached = Settings._grok_cred_cache
+            if cached is not None and cached[0] == key and (now - cached[1]) < 15.0:
+                return cached[2]
+            ok = grok_cli.executable() is not None and grok_cli.is_logged_in()
+            Settings._grok_cred_cache = (key, now, ok)
+            return ok
         return not cfg.get("api_key_env") or bool(self.api_key(cfg))
 
     @staticmethod

@@ -123,6 +123,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] 60 testes automatizados (`tests/`), incluindo servidor MCP real, agente externo, roteamento, compactação, contratos de entrega, `verify_project`, projetos e API manual
 - [x] Log diário só em JSONL (uma linha por interação, sem reescrever o arquivo); lê o JSON antigo do dia se existir
 - [x] Cancelamento em meio a chamada de ferramenta não grava `tool_calls` órfãos no histórico; `_TagFilter` faz `flush()` de `<` residual no fim do stream; links `file:` vindos de Markdown externo bloqueados (`agent/core/agent_loop.py`, `agent/ui/render.py`)
+- [x] Otimização de velocidade medida (`scripts/medir_velocidade.py`, `tests/test_performance.py`): import preguiçoso de `httpx`, `asyncio` e `image_gen`; cliente HTTP compartilhado; cache de catálogo, provedores, credenciais do Grok CLI, conversas (`os.scandir`) e `platform.uname` no Windows (inicialização 159,04 ms → 95,54 ms, TTFT 853,69 ms → 28,12 ms, custo por turno 116,42 ms → 5,97 ms)
 - [ ] ⭐ Mover memória e logs diários de `agent/memory/{daily_logs,long_term}` para `data/` (migrando arquivos existentes) e remover o `USER_PROFILE` morto (`agent/memory/memory_manager.py`, `agent/core/config.py`)
 - [ ] Sandbox opcional para o shell; lista de comandos proibidos
 - [ ] Empacotar como `.exe` (PyInstaller) com instalador
@@ -231,3 +232,11 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   pyflakes 0; pytest 88 na árvore atual (7 novos); ponta a ponta contra o GitHub real (instalação ZIP da 0.1.0-alpha →
   check 1,4 s → apply 0,7 s → idêntica ao main, \data/\ e \.env\ intactos; CLI separada esperando o processo);
   modo git na pasta de desenvolvimento corretamente sem atualização; janela real com captura (aviso, novidades, Sobre).
+- **2026-10-16 — Gemini 4 Argon**: otimização de desempenho com `cProfile`, `python -X importtime`, benchmark
+  (`scripts/medir_velocidade.py`) e 7 testes determinísticos (`tests/test_performance.py`). Mediana de 3 execuções
+  ANTES → DEPOIS: (a) inicialização do motor (`import` + `Brain`): `159,04 ms → 95,54 ms` (`-39,9%`; `import` de
+  `125,18 ms → 59,88 ms`, `-52,2%`); (b) tempo até 1º token do motor (TTFT): `853,69 ms → 28,12 ms` (`-96,7%`);
+  (c) custo por turno (`system_prompt` + `routing` + `conversations` + `memória`): `116,42 ms → 5,97 ms` (`-94,9%`;
+  `system_prompt` `53,03 ms → 2,69 ms`, `routing` `57,09 ms → 1,21 ms`, `conversations` `7,70 ms → 2,14 ms`).
+  Verificado: pyflakes 0 avisos; pytest 96 passando.
+

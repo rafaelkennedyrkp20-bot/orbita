@@ -37,9 +37,21 @@ class ConversationStore:
     def __init__(self, directory: Path = CONVERSATIONS_DIR):
         self.dir = directory
         self.dir.mkdir(parents=True, exist_ok=True)
+        self._meta_cache: dict[str, tuple[int, int, dict]] = {}
+        self._last_loaded: Optional[tuple[str, int, int, dict]] = None
 
     def _path(self, conversation_id: str) -> Optional[Path]:
         return self.dir / f"{conversation_id}.json" if _ID.match(conversation_id or "") else None
+
+    @staticmethod
+    def _extract_meta(data: dict, fallback_id: str) -> dict:
+        return {
+            "id": data.get("id", fallback_id),
+            "title": data.get("title", "Conversa"),
+            "updated": data.get("updated", ""),
+            "profile": data.get("profile", ""),
+            "model": data.get("model", ""),
+        }
 
     def save(self, data: dict) -> None:
         path = self._path(data["id"])
@@ -49,21 +61,40 @@ class ConversationStore:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, path)
+        try:
+            st = path.stat()
+            self._meta_cache[path.name] = (st.st_mtime_ns, st.st_size, self._extract_meta(data, path.stem))
+            self._last_loaded = (data["id"], st.st_mtime_ns, st.st_size, dict(data))
+        except OSError:
+            pass
 
     def load(self, conversation_id: str) -> Optional[dict]:
         path = self._path(conversation_id)
-        if path is None or not path.exists():
+        if path is None:
             return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            st = path.stat()
+        except OSError:
+            return None
+        if self._last_loaded and self._last_loaded[0] == conversation_id \
+                and self._last_loaded[1] == st.st_mtime_ns and self._last_loaded[2] == st.st_size:
+            return dict(self._last_loaded[3])
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
+        self._meta_cache[path.name] = (st.st_mtime_ns, st.st_size, self._extract_meta(data, path.stem))
+        self._last_loaded = (conversation_id, st.st_mtime_ns, st.st_size, dict(data))
+        return data
 
     def delete(self, conversation_id: str) -> bool:
         path = self._path(conversation_id)
         if path is None or not path.exists():
             return False
         path.unlink()
+        self._meta_cache.pop(path.name, None)
+        if self._last_loaded and self._last_loaded[0] == conversation_id:
+            self._last_loaded = None
         return True
 
     def rename(self, conversation_id: str, title: str) -> bool:
@@ -77,14 +108,34 @@ class ConversationStore:
 
     def list(self, limit: int = 200) -> list[dict]:
         items = []
-        for path in self.dir.glob("*.json"):
+        seen_names: set[str] = set()
+        try:
+            entries = list(os.scandir(self.dir))
+        except OSError:
+            return []
+        for entry in entries:
+            if not entry.name.endswith(".json") or not entry.is_file():
+                continue
+            seen_names.add(entry.name)
             try:
-                data = json.loads(path.read_text(encoding="utf-8"))
+                st = entry.stat()
+            except OSError:
+                continue
+            cached = self._meta_cache.get(entry.name)
+            if cached is not None and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
+                items.append(dict(cached[2]))
+                continue
+            try:
+                data = json.loads(Path(entry.path).read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            items.append({"id": data.get("id", path.stem), "title": data.get("title", "Conversa"),
-                          "updated": data.get("updated", ""), "profile": data.get("profile", ""),
-                          "model": data.get("model", "")})
+            stem = entry.name[:-5]
+            meta = self._extract_meta(data, stem)
+            self._meta_cache[entry.name] = (st.st_mtime_ns, st.st_size, meta)
+            items.append(dict(meta))
+        if len(self._meta_cache) > len(seen_names):
+            for stale in set(self._meta_cache) - seen_names:
+                self._meta_cache.pop(stale, None)
         items.sort(key=lambda item: item["updated"], reverse=True)
         return items[:limit]
 

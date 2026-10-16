@@ -156,6 +156,9 @@ DEFAULT_PROFILES: list[Profile] = [
 ]
 
 
+_DEFAULT_ORDER = {p.id: i for i, p in enumerate(DEFAULT_PROFILES)}
+
+
 class ProfileManager:
 
     def __init__(self, directory: Path = PROFILES_DIR):
@@ -163,6 +166,8 @@ class ProfileManager:
         self.dir.mkdir(parents=True, exist_ok=True)
         self._ensure_defaults()
         self.profiles: dict[str, Profile] = {}
+        self._ordered: list[Profile] = []
+        self._team: list[Profile] = []
         self.reload()
 
     def _ensure_defaults(self) -> None:
@@ -170,6 +175,10 @@ class ProfileManager:
             path = self.dir / f"{profile.id}.json"
             if not path.exists():
                 path.write_text(json.dumps(asdict(profile), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _rebuild_caches(self) -> None:
+        self._ordered = sorted(self.profiles.values(), key=lambda p: (_DEFAULT_ORDER.get(p.id, 99), p.name.lower()))
+        self._team = [p for p in self._ordered if p.in_team]
 
     def reload(self) -> None:
         loaded = {}
@@ -180,16 +189,16 @@ class ProfileManager:
             except (OSError, json.JSONDecodeError, TypeError) as error:
                 logger.warning("Perfil inválido %s: %s", path.name, error)
         self.profiles = loaded
+        self._rebuild_caches()
 
     def get(self, profile_id: str) -> Profile:
         return self.profiles.get(profile_id) or self.profiles.get("geral") or DEFAULT_PROFILES[0]
 
     def list(self) -> list[Profile]:
-        order = {p.id: i for i, p in enumerate(DEFAULT_PROFILES)}
-        return sorted(self.profiles.values(), key=lambda p: (order.get(p.id, 99), p.name.lower()))
+        return list(self._ordered)
 
     def team(self) -> list[Profile]:
-        return [p for p in self.list() if p.in_team]
+        return list(self._team)
 
     def save(self, profile: Profile) -> None:
         if not re.fullmatch(r"[a-z0-9_\-]+", profile.id):
@@ -197,6 +206,7 @@ class ProfileManager:
         (self.dir / f"{profile.id}.json").write_text(
             json.dumps(asdict(profile), ensure_ascii=False, indent=2), encoding="utf-8")
         self.profiles[profile.id] = profile
+        self._rebuild_caches()
 
     def delete(self, profile_id: str) -> bool:
         if profile_id == "geral":
@@ -204,7 +214,10 @@ class ProfileManager:
         path = self.dir / f"{profile_id}.json"
         if path.exists():
             path.unlink()
-        return self.profiles.pop(profile_id, None) is not None
+        removed = self.profiles.pop(profile_id, None) is not None
+        if removed:
+            self._rebuild_caches()
+        return removed
 
     @staticmethod
     def slugify(name: str) -> str:

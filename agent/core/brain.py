@@ -8,11 +8,27 @@ cuida da seleção de perfil/modelo, da criação de sessões e dos modos texto/
 from __future__ import annotations
 
 import logging
+import os
+import platform
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+if os.name == "nt" and getattr(platform, "_uname_cache", None) is None and hasattr(sys, "getwindowsversion"):
+    try:
+        _ver = sys.getwindowsversion()
+        platform._uname_cache = platform.uname_result(
+            "Windows",
+            os.environ.get("COMPUTERNAME", ""),
+            str(_ver.major),
+            f"{_ver.major}.{_ver.minor}.{_ver.build}",
+            os.environ.get("PROCESSOR_ARCHITECTURE", "AMD64"),
+        )
+    except Exception:
+        pass
 
 from agent.core.agent_loop import AgentSession, ApproveFn, EventFn
 from agent.core.config import LLM_MODEL
@@ -64,10 +80,9 @@ class Brain:
         self._local_models: Optional[tuple[float, list[str]]] = None
 
         from agent.actions.builtin_tools import register_builtin_tools
-        from agent.actions.image_gen import register_image_tool
 
         register_builtin_tools(self.registry, self)
-        register_image_tool(self.registry, self)
+        self._register_image_tool_lazy()
         if start_mcp:
             self.mcp.start()
         self.session: Optional[AgentSession] = None
@@ -76,6 +91,27 @@ class Brain:
         self.conversation_title = ""
         logger.info("Brain pronto: %d ferramentas, %d skills, %d perfis.",
                     len(self.registry.all()), len(self.skills.skills), len(self.profiles.profiles))
+
+    def _register_image_tool_lazy(self) -> None:
+        from agent.core.tools import tool
+
+        @tool(self.registry, "generate_image",
+              "Generate an image from a detailed visual prompt using the configured image model. "
+              "Supports style anchors, negative prompts and shot_id metadata for multi-shot consistency. "
+              "Returns the saved file path and shows it to the user.",
+              {"prompt": {"type": "string", "description": "Detailed scene/subject description"},
+               "size": {"type": "string", "description": "e.g. 1024x1024, 1536x1024, 1024x1536"},
+               "style": {"type": "string", "description": "Reusable style anchor (palette, lighting, lens, art direction) for consistency across shots"},
+               "negative_prompt": {"type": "string", "description": "Elements to avoid (e.g. 'blurry, watermark, distorted text')"},
+               "shot_id": {"type": "string", "description": "Optional storyboard/keyframe ID, e.g. 'shot_01'"},
+               "save_to": {"type": "string", "description": "Optional destination path (.png)"}},
+              ["prompt"], risk="write", group="imagem")
+        def generate_image(args, ctx):
+            from agent.actions.image_gen import register_image_tool
+
+            register_image_tool(self.registry, self)
+            real_tool = self.registry.get("generate_image")
+            return real_tool.func(args, ctx)
 
     # ── Serviços carregados sob demanda (abertura mais rápida) ──
 
@@ -110,7 +146,7 @@ class Brain:
     def current_model(self) -> tuple[str, str]:
         provider = self.settings.get("provider") or "ollama"
         model = self.settings.get("model") or (LLM_MODEL if provider == "ollama" else "")
-        if provider not in self.settings.providers():
+        if provider not in self.settings._merged_providers():
             provider, model = "ollama", LLM_MODEL
         return provider, model
 
@@ -138,7 +174,7 @@ class Brain:
         ref = (ref or "").strip()
         if not ref:
             return fallback
-        providers = self.settings.providers()
+        providers = self.settings._merged_providers()
         provider, _, model = ref.partition(":")
         if provider not in providers:
             # Só o nome do modelo: procura um provedor que o liste

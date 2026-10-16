@@ -40,6 +40,7 @@ class MemoryManager:
         self._load_today()
 
         # Carrega memória de longo prazo
+        self._facts_cache: Optional[list[str]] = None
         self._long_term = self._load_long_term()
         self._profile = self._load_profile()
 
@@ -103,14 +104,18 @@ class MemoryManager:
         if not self._session_log:
             return None
 
-        query_lower = query.lower()
-        words = set(query_lower.split())
+        words = {w for w in query.lower().split() if len(w) > 3}
+        if not words:
+            return None
 
         # Pontuação simples baseada em palavras em comum
         scored = []
         for entry in self._session_log[-50:]:  # Analisa as últimas 50 entradas
-            entry_text = (entry.get("user", "") + " " + entry.get("agent", "")).lower()
-            score = sum(1 for w in words if w in entry_text and len(w) > 3)
+            entry_text = entry.get("_lower")
+            if entry_text is None:
+                entry_text = (entry.get("user", "") + " " + entry.get("agent", "")).lower()
+                entry["_lower"] = entry_text
+            score = sum(1 for w in words if w in entry_text)
             if score > 0:
                 scored.append((score, entry))
 
@@ -140,6 +145,7 @@ class MemoryManager:
 
     def _load_long_term(self) -> dict:
         """Carrega memória de longo prazo do disco."""
+        self._facts_cache = None
         if self._long_term_file.exists():
             try:
                 with open(self._long_term_file, "r", encoding="utf-8") as f:
@@ -174,19 +180,29 @@ class MemoryManager:
         # Limita a 100 fatos
         if len(self._long_term["facts"]) > 100:
             self._long_term["facts"] = self._long_term["facts"][-100:]
+        self._facts_cache = None
         self.save_long_term()
         logger.info(f"Fato registrado: {fact[:60]}")
 
+    def _all_facts(self) -> list[str]:
+        raw = self._long_term.get("facts", [])
+        if self._facts_cache is None or len(self._facts_cache) != len(raw):
+            self._facts_cache = [item.get("fact", "") for item in raw if item.get("fact")]
+        return self._facts_cache
+
     def facts(self, limit: int = 40) -> list[str]:
         """Fatos mais recentes, para o prompt de sistema."""
-        return [item.get("fact", "") for item in self._long_term.get("facts", [])[-limit:] if item.get("fact")]
+        all_f = self._all_facts()
+        return all_f[-limit:] if limit else list(all_f)
 
     def search_facts(self, query: str, limit: int = 15) -> list[str]:
         words = {w for w in query.lower().split() if len(w) > 2}
+        if not words:
+            return []
         scored = []
-        for item in self._long_term.get("facts", []):
-            text = item.get("fact", "")
-            score = sum(1 for w in words if w in text.lower())
+        for text in self._all_facts():
+            low = text.lower()
+            score = sum(1 for w in words if w in low)
             if score:
                 scored.append((score, text))
         scored.sort(key=lambda pair: -pair[0])
