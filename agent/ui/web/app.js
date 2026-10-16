@@ -1,0 +1,896 @@
+/* Órbita — interface (JS puro, sem dependências externas). Fala com o Python via QWebChannel. */
+"use strict";
+
+// ── Ícones (traços 24x24, desenhados para este app) ───────────────────────────
+const ICONS = {
+  chat: "M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H9l-5 4z",
+  users: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.6a4 4 0 0 1 0 6.8M22 21v-1a6 6 0 0 0-4-5.6",
+  plug: "M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5",
+  settings: "M4 7h9M17 7h3M4 17h3M11 17h9M15 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM9 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
+  command: "M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z",
+  moon: "M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z",
+  sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
+  plus: "M12 5v14M5 12h14",
+  search: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3",
+  sidebar: "M3 5h18v14H3zM9 5v14",
+  panel: "M3 5h18v14H3zM15 5v14",
+  chevdown: "M6 9l6 6 6-6",
+  chevright: "M9 6l6 6-6 6",
+  cpu: "M7 7h10v10H7zM10 10h4v4h-4zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3",
+  clip: "M21 11.5l-8.6 8.6a5.2 5.2 0 0 1-7.4-7.4l8.6-8.6a3.5 3.5 0 0 1 5 5l-8.6 8.5a1.8 1.8 0 0 1-2.5-2.5l7.9-7.9",
+  mic: "M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3",
+  send: "M12 19V5M5 12l7-7 7 7",
+  stop: "M7 7h10v10H7z",
+  x: "M6 6l12 12M18 6L6 18",
+  check: "M5 12.5l4.5 4.5L19 7",
+  alert: "M12 8v5M12 16.5v.5M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
+  info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 8v.5",
+  trash: "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
+  edit: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
+  folder: "M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z",
+  file: "M6 3h8l4 4v14H6zM14 3v4h4",
+  term: "M4 5h16v14H4zM8 10l3 2-3 2M13 15h4",
+  globe: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18",
+  edit2: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
+  eye: "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+  image: "M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15.5 9.5h.01",
+  bolt: "M13 2L4 14h7l-1 8 9-12h-7z",
+  book: "M4 4.5h6a3 3 0 0 1 3 3V20a2 2 0 0 0-2-2H4zM20 4.5h-4a3 3 0 0 0-3 3V20a2 2 0 0 1 2-2h5z",
+  brain: "M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a3 3 0 0 0-3-1zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1",
+  shield: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",
+  key: "M8 15a4 4 0 1 0 0 .01M11 12l9-9M16 7l3 3M18 5l2 2",
+  coins: "M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3zM4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6",
+  wave: "M2 12h3l3-8 4 16 3-8h7",
+  download: "M12 4v12M6 10l6 6 6-6M4 20h16",
+  refresh: "M20 11a8 8 0 0 0-14.6-4.5L4 8M4 3v5h5M4 13a8 8 0 0 0 14.6 4.5L20 16M20 21v-5h-5",
+  sparkle: "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z",
+  code: "M8 8l-4 4 4 4M16 8l4 4-4 4M14 5l-4 14",
+  user: "M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zM4 21a8 8 0 0 1 16 0",
+  mouse: "M12 3a6 6 0 0 1 6 6v6a6 6 0 0 1-12 0V9a6 6 0 0 1 6-6zM12 7v3",
+  layers: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5",
+};
+function icon(name, cls = "i") {
+  return `<svg class="${cls}" viewBox="0 0 24 24"><path d="${ICONS[name] || ICONS.sparkle}"/></svg>`;
+}
+function hydrateIcons(root = document) {
+  root.querySelectorAll("svg[data-ic]").forEach(svg => {
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.innerHTML = `<path d="${ICONS[svg.dataset.ic] || ""}"/>`;
+  });
+}
+
+// ── Utilidades ─────────────────────────────────────────────────────────────────
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fileUrl = p => "file:///" + String(p).replace(/\\/g, "/").split("/").map(encodeURIComponent).join("/").replace(/^file:\/\/\/([A-Za-z])%3A/, "file:///$1:");
+const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n || 0);
+const now = () => new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+let api = null;
+let S = {};              // estado vindo do Python
+let busy = false, attachments = [], liveTimer = null, liveStart = 0;
+let turnEl = null, segEls = {}, stepEls = {}, stepsBox = null;
+let settingsSection = "geral";
+
+function call(method, ...args) {
+  return new Promise(resolve => {
+    if (!api) return resolve(null);
+    api[method](...args, raw => {
+      try { resolve(raw ? JSON.parse(raw) : null); } catch { resolve(raw); }
+    });
+  });
+}
+
+// ── Inicialização ──────────────────────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", () => {
+  hydrateIcons();
+  new QWebChannel(qt.webChannelTransport, async channel => {
+    api = channel.objects.api;
+    api.message.connect(raw => onEvent(JSON.parse(raw)));
+    S = await call("getState");
+    $("#pygments").textContent = S.pygments_css || "";
+    applyTheme(S.settings.theme || "dark");
+    renderAll();
+    if (!S.settings.onboarded) showOnboarding();
+  });
+  bindChrome();
+});
+
+function renderAll() {
+  renderTopbar(); renderConvs(); renderWelcome(); renderAgents(); renderQuick();
+  $("#avatar").textContent = (S.settings.user_name || "?").trim().charAt(0).toUpperCase() || "?";
+  $("#mcp-dot").classList.toggle("on", (S.mcp || []).some(s => s.status === "erro"));
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  $('[data-action="theme"] svg').dataset.ic = theme === "dark" ? "moon" : "sun";
+  hydrateIcons($("#rail"));
+}
+
+// ── Navegação e atalhos ────────────────────────────────────────────────────────
+function go(page) {
+  $$(".page").forEach(p => p.classList.toggle("active", p.id === "page-" + page));
+  $$(".rail-btn[data-go]").forEach(b => b.classList.toggle("active", b.dataset.go === page));
+  if (page === "team") renderTeamPage();
+  if (page === "connections") renderConnections();
+  if (page === "settings") renderSettings();
+  if (page === "chat") setTimeout(() => $("#input").focus(), 30);
+}
+
+function bindChrome() {
+  document.addEventListener("click", e => {
+    const goEl = e.target.closest("[data-go]");
+    if (goEl) return go(goEl.dataset.go);
+    const act = e.target.closest("[data-action]");
+    if (act) return action(act.dataset.action, act);
+    const copy = e.target.closest("[data-copy]");
+    if (copy) {
+      const code = copy.closest(".code").querySelector("code").innerText;
+      call("copyText", code); copy.textContent = "Copiado ✓"; setTimeout(() => copy.textContent = "Copiar", 1400);
+    }
+    const img = e.target.closest(".zoomable");
+    if (img) lightbox(img.src);
+    const link = e.target.closest("a[href]");
+    if (link && !link.closest("[data-go]")) { e.preventDefault(); call("openUrl", link.getAttribute("href")); }
+  });
+  const input = $("#input");
+  input.addEventListener("input", () => { autosize(); slashHint(); });
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  $("#send").addEventListener("click", () => busy ? call("stop") : send());
+  document.addEventListener("keydown", e => {
+    if (e.ctrlKey && e.key.toLowerCase() === "k") { e.preventDefault(); palette(); }
+    else if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); action("new"); }
+    else if (e.ctrlKey && e.key.toLowerCase() === "b") { e.preventDefault(); action("toggle-side"); }
+    else if (e.ctrlKey && e.key === ",") { e.preventDefault(); go("settings"); }
+    else if (e.key === "Escape") { if ($("#modal-root").innerHTML) closeModal(); else if (busy) call("stop"); }
+  });
+  $("#conv-search").addEventListener("input", renderConvs);
+  const title = $("#conv-title");
+  title.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); title.blur(); } });
+  title.addEventListener("blur", () => { if (S.conversation_id) call("renameConversation", S.conversation_id, title.textContent.trim()).then(refreshConvs); });
+  $("#chip-profile").addEventListener("click", profileMenu);
+  $("#chip-model").addEventListener("click", () => { settingsSection = "modelos"; go("settings"); });
+  $("#chip-perm").addEventListener("click", cyclePermission);
+  $$(".tab").forEach(t => t.addEventListener("click", () => selectTab(t.dataset.tab)));
+  const box = $("#composer-box");
+  box.addEventListener("dragover", e => { e.preventDefault(); box.classList.add("drag"); });
+  box.addEventListener("dragleave", () => box.classList.remove("drag"));
+  box.addEventListener("drop", async e => {
+    e.preventDefault(); box.classList.remove("drag");
+    const paths = [...e.dataTransfer.files].map(f => f.path || "").filter(Boolean);
+    if (!paths.length) {  // QtWebEngine não expõe o caminho: usa a URI
+      const uris = (e.dataTransfer.getData("text/uri-list") || "").split(/\r?\n/).filter(u => u.startsWith("file:"));
+      uris.forEach(u => paths.push(decodeURIComponent(u.replace(/^file:\/\/\/?/, ""))));
+    }
+    addAttachments(paths);
+  });
+}
+
+async function action(name, el) {
+  switch (name) {
+    case "new": await call("newConversation"); resetChat(); refreshConvs(); break;
+    case "toggle-side": $("#side").classList.toggle("hidden"); break;
+    case "toggle-convs": $("#page-chat").classList.toggle("no-convs"); break;
+    case "attach": addAttachments(await call("pickImages") || []); break;
+    case "voice": if (!busy) call("voice"); break;
+    case "theme": {
+      const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      applyTheme(t); call("setSetting", "theme", JSON.stringify(t)); break;
+    }
+    case "palette": palette(); break;
+  }
+}
+
+function selectTab(name) {
+  $$(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+  $$(".tabpane").forEach(p => p.classList.toggle("active", p.id === name));
+  $("#side").classList.remove("hidden");
+}
+
+function autosize() { const i = $("#input"); i.style.height = "auto"; i.style.height = Math.min(i.scrollHeight, 220) + "px"; }
+
+// ── Topo do chat ───────────────────────────────────────────────────────────────
+function renderTopbar() {
+  const p = S.profile || {};
+  $("#profile-ic").textContent = p.icon || "✨";
+  $("#profile-name").textContent = p.name || "Perfil";
+  $("#model-name").textContent = S.model_label || "";
+  const perm = S.settings.permission_mode;
+  $("#perm-name").textContent = { perguntar: "Perguntar", auto: "Auto", livre: "Livre" }[perm] || perm;
+  $("#chip-perm").className = "chip perm-" + perm;
+  $("#conv-title").textContent = S.conversation_title || "Nova conversa";
+  updateMeter(S.conversation_tokens || 0);
+}
+function updateMeter(tokens) {
+  const budget = S.settings.turn_token_budget || 0;
+  $("#meter-txt").textContent = fmt(tokens) + (budget ? " / " + fmt(budget) : "");
+  $("#meter-bar").style.width = budget ? Math.min(100, tokens / budget * 100) + "%" : "0";
+}
+async function cyclePermission() {
+  const order = ["perguntar", "auto", "livre"];
+  const next = order[(order.indexOf(S.settings.permission_mode) + 1) % 3];
+  S = await call("setSetting", "permission_mode", JSON.stringify(next));
+  renderTopbar();
+  toast("info", "Permissões", { perguntar: "Vai perguntar antes de qualquer alteração.", auto: "Pergunta só para executar comandos e controlar o PC.", livre: "Age com total liberdade, sem perguntar." }[next]);
+}
+function profileMenu() {
+  openModal(`<div class="modal palette"><input id="pf-q" placeholder="Trocar perfil…"><div class="opts">${
+    S.profiles.map(p => `<div class="opt" data-id="${esc(p.id)}"><span style="font-size:18px">${esc(p.icon)}</span><div><b>${esc(p.name)}</b><div style="font-size:12px">${esc(p.description)}</div></div>${p.id === S.profile.id ? icon("check") : ""}</div>`).join("")
+  }</div></div>`);
+  $$(".opt", $("#modal-root")).forEach(o => o.addEventListener("click", async () => {
+    S = await call("selectProfile", o.dataset.id); closeModal(); renderAll();
+    toast("success", "Perfil ativo", `${S.profile.icon} ${S.profile.name} · ${S.model_label}`);
+  }));
+  filterOpts("#pf-q");
+}
+
+// ── Conversas ──────────────────────────────────────────────────────────────────
+async function refreshConvs() { S.conversations = await call("listConversations"); renderConvs(); }
+function renderConvs() {
+  const q = ($("#conv-search").value || "").toLowerCase();
+  const items = (S.conversations || []).filter(c => !q || c.title.toLowerCase().includes(q));
+  const groups = {};
+  const localDay = ms => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const today = localDay(Date.now()), yest = localDay(Date.now() - 864e5), week = localDay(Date.now() - 7 * 864e5);
+  items.forEach(c => {
+    const d = (c.updated || "").slice(0, 10);
+    const g = d === today ? "Hoje" : d === yest ? "Ontem" : d >= week ? "Últimos 7 dias" : "Mais antigas";
+    (groups[g] = groups[g] || []).push(c);
+  });
+  const html = Object.entries(groups).map(([g, list]) => `<div class="conv-group">${g}</div>` + list.map(c =>
+    `<div class="conv ${c.id === S.conversation_id ? "active" : ""}" data-id="${esc(c.id)}">${icon("chat")}<span class="t">${esc(c.title)}</span><button class="x" data-del="${esc(c.id)}" title="Apagar">${icon("trash")}</button></div>`).join("")).join("");
+  $("#conv-list").innerHTML = html || `<div class="empty">Nenhuma conversa ainda.<br>Elas aparecem aqui automaticamente.</div>`;
+  $$(".conv", $("#conv-list")).forEach(el => el.addEventListener("click", async e => {
+    const del = e.target.closest("[data-del]");
+    if (del) {
+      e.stopPropagation();
+      if (await confirmBox("Apagar conversa?", "Ela será removida deste computador.")) {
+        await call("deleteConversation", del.dataset.del);
+        if (del.dataset.del === S.conversation_id) { await call("newConversation"); resetChat(); }
+        refreshConvs();
+      }
+      return;
+    }
+    if (busy) return toast("warn", "Aguarde", "O agente ainda está trabalhando nesta conversa.");
+    openConversation(el.dataset.id);
+  }));
+}
+async function openConversation(id) {
+  const data = await call("openConversation", id);
+  if (!data) return toast("error", "Conversa", "Não foi possível abrir.");
+  resetChat(false);
+  S.conversation_id = data.id; S.conversation_title = data.title;
+  renderTopbar(); renderConvs();
+  data.blocks.forEach(b => {
+    if (b.kind === "user") addUser(b.text, b.images);
+    else if (b.kind === "assistant") { ensureTurn(data.model_label); segment("h" + Math.random(), b.html, false); }
+    else if (b.kind === "tool") { ensureTurn(data.model_label); toolStep({ ...b, id: "h" + Math.random() }); }
+  });
+  closeTurn();
+  scrollEnd(true);
+}
+
+// ── Chat ───────────────────────────────────────────────────────────────────────
+function resetChat(welcome = true) {
+  $("#messages").innerHTML = ""; turnEl = null; segEls = {}; stepEls = {}; stepsBox = null;
+  S.conversation_id = null; S.conversation_title = ""; S.conversation_tokens = 0;
+  $("#feed").innerHTML = `<div class="empty">As ações do agente aparecem aqui em tempo real.</div>`;
+  renderTopbar(); renderConvs();
+  if (welcome) renderWelcome();
+}
+function renderWelcome() {
+  if ($("#messages").children.length && !$(".welcome")) return;
+  const name = (S.settings.user_name || "").split(" ")[0];
+  const cards = [
+    ["code", "Analisar um projeto", "Leia o projeto na minha pasta de trabalho e me diga a estrutura, problemas e próximos passos."],
+    ["globe", "Pesquisar a fundo", "Pesquise na web e compare as melhores opções para "],
+    ["users", "Trabalho em equipe", "Divida esta tarefa entre a equipe, em paralelo, e depois revise tudo: "],
+    ["folder", "Organizar arquivos", "Organize os arquivos da pasta Downloads por tipo e me mostre o resultado."],
+    ["mouse", "Controlar o PC", "Tire um screenshot e me diga o que está aberto na tela."],
+    ["layers", "Engenharia reversa", "Analise com o REA o executável "],
+  ];
+  $("#messages").innerHTML = `<div class="welcome"><img class="orb" src="logo.svg" alt="">
+    <h1>${name ? `Olá, <span>${esc(name)}</span>` : `<span>Órbita</span>`}</h1>
+    <p>${esc(S.profile?.icon || "")} ${esc(S.profile?.name || "")} · ${esc(S.model_label || "")} — o que vamos fazer hoje?</p>
+    <div class="cards">${cards.map(([ic, t, p]) => `<div class="card" data-prompt="${esc(p)}"><div class="ci">${icon(ic)}</div><b>${t}</b><span>${esc(p.length > 70 ? p.slice(0, 70) + "…" : p)}</span></div>`).join("")}</div></div>`;
+  $$(".card", $("#messages")).forEach(c => c.addEventListener("click", () => {
+    const i = $("#input"); i.value = c.dataset.prompt; i.focus(); autosize();
+    i.setSelectionRange(i.value.length, i.value.length);
+  }));
+}
+function renderQuick() {
+  const box = $("#quick");
+  const items = S.quick_prompts || [];
+  box.innerHTML = items.map(q => `<button data-q="${esc(q.text)}">${esc(q.label)}</button>`).join("");
+  $$("button", box).forEach(b => b.addEventListener("click", () => { $("#input").value = b.dataset.q; autosize(); $("#input").focus(); }));
+}
+function slashHint() {
+  const v = $("#input").value;
+  if (v === "/") palette("");
+}
+function send() {
+  const text = $("#input").value.trim();
+  if ((!text && !attachments.length) || busy) return;
+  if ($(".welcome")) $("#messages").innerHTML = "";
+  addUser(text || "Analise a imagem anexada.", attachments);
+  call("send", JSON.stringify({ text: text || "Analise a imagem anexada.", images: attachments }));
+  $("#input").value = ""; autosize(); attachments = []; renderAttachments();
+}
+function addUser(text, images = []) {
+  closeTurn();
+  const el = document.createElement("div");
+  el.className = "msg user";
+  el.innerHTML = `<div class="bubble">${esc(text)}${(images || []).map(p => `<img class="zoomable" src="${fileUrl(p)}">`).join("")}</div>`;
+  $("#messages").appendChild(el);
+  scrollEnd(true);
+}
+function ensureTurn(model) {
+  if (turnEl) return turnEl;
+  const el = document.createElement("div");
+  el.className = "msg bot";
+  el.innerHTML = `<div class="bot-avatar"><img src="logo.svg" alt=""></div><div class="bot-body">
+    <div class="bot-meta"><b>${esc(S.profile?.name || "Agente")}</b><span class="model">${esc(model || S.model_label || "")}</span></div><div class="flow"></div></div>`;
+  $("#messages").appendChild(el);
+  turnEl = el; stepsBox = null;
+  return el;
+}
+function closeTurn() {
+  if (stepsBox) finishSteps(stepsBox);
+  $$(".cursor", turnEl || document).forEach(c => c.classList.remove("cursor"));
+  turnEl = null; stepsBox = null;
+}
+function flow() { return ensureTurn().querySelector(".flow"); }
+function segment(id, html, streaming) {
+  let el = segEls[id];
+  if (!el) {
+    if (stepsBox) { finishSteps(stepsBox); stepsBox = null; }
+    el = document.createElement("div"); el.className = "prose"; segEls[id] = el; flow().appendChild(el);
+  }
+  el.innerHTML = html;
+  el.classList.toggle("cursor", !!streaming);
+  scrollEnd();
+}
+function thought(text) {
+  let el = flow().querySelector(".thought:last-child");
+  if (!el) { el = document.createElement("div"); el.className = "thought"; flow().appendChild(el); }
+  el.textContent = text.slice(-600);
+  scrollEnd();
+}
+const TOOL_INFO = {
+  read_file: ["file", "Lendo arquivo"], write_file: ["edit2", "Escrevendo arquivo"], edit_file: ["edit", "Editando arquivo"],
+  list_dir: ["folder", "Listando pasta"], glob_files: ["search", "Procurando arquivos"], grep: ["search", "Buscando no conteúdo"],
+  run_shell: ["term", "Executando comando"], web_search: ["globe", "Pesquisando na web"], fetch_url: ["globe", "Lendo página"],
+  open_app: ["bolt", "Abrindo programa"], screenshot: ["eye", "Olhando a tela"], mouse_click: ["mouse", "Clicando"],
+  mouse_scroll: ["mouse", "Rolando"], type_text: ["term", "Digitando"], press_keys: ["term", "Pressionando teclas"],
+  clipboard: ["clip", "Área de transferência"], system_info: ["cpu", "Status do sistema"], list_processes: ["cpu", "Listando processos"],
+  close_app: ["x", "Fechando programa"], set_volume: ["wave", "Ajustando volume"], remember: ["brain", "Memorizando"],
+  recall: ["brain", "Lembrando"], use_skill: ["book", "Carregando skill"], delegate_task: ["users", "Delegando à equipe"],
+  find_tools: ["plug", "Buscando ferramentas"], generate_image: ["image", "Gerando imagem"], show_file: ["eye", "Mostrando arquivo"],
+};
+function toolInfo(name) {
+  if (name.startsWith("mcp__")) { const [, srv, tool] = name.split("__"); return ["plug", `${srv} › ${(tool || "").replace(/_/g, " ")}`]; }
+  return TOOL_INFO[name] || ["sparkle", name];
+}
+function toolStep(d) {
+  let el = stepEls[d.id];
+  if (!el) {
+    if (!stepsBox) {
+      stepsBox = document.createElement("details");
+      stepsBox.className = "steps"; stepsBox.open = true;
+      stepsBox.innerHTML = `<summary>${icon("chevright", "i chev")}<span class="sum">Trabalhando…</span></summary><div class="list"></div>`;
+      flow().appendChild(stepsBox);
+    }
+    const [ic, label] = toolInfo(d.name);
+    el = document.createElement("div"); el.className = "step";
+    el.innerHTML = `<span class="ic">${icon(ic)}</span><div class="lbl">${d.agent && d.agent !== "principal" ? `<span class="who">${esc(d.agent)}</span>` : ""}<b>${esc(label)}</b><span class="arg">${esc(d.summary || "")}</span></div><span class="st"><span class="spin"></span></span>`;
+    stepsBox.querySelector(".list").appendChild(el);
+    stepEls[d.id] = el;
+    updateStepsSummary(stepsBox);
+  }
+  if (d.status && d.status !== "running") {
+    const st = el.querySelector(".st");
+    st.className = "st " + d.status;
+    st.innerHTML = icon(d.status === "ok" ? "check" : "alert");
+    if (d.result || (d.images || []).length) {
+      const det = document.createElement("details");
+      det.innerHTML = `<summary>ver resultado</summary><pre>${esc(d.result || "")}</pre>${(d.images || []).map(p => `<img class="zoomable" src="${fileUrl(p)}">`).join("")}`;
+      if ((d.images || []).length) det.open = true;
+      el.appendChild(det);
+    }
+    updateStepsSummary(el.closest(".steps"));
+  }
+  scrollEnd();
+}
+function updateStepsSummary(box) {
+  if (!box) return;
+  const all = $$(".step", box).length, done = $$(".st.ok, .st.error", box).length, errs = $$(".st.error", box).length;
+  box.querySelector(".sum").textContent = done < all ? `Trabalhando… ${done}/${all} ações` : `${all} ${all === 1 ? "ação" : "ações"}${errs ? ` · ${errs} com erro` : ""}`;
+}
+function finishSteps(box) { updateStepsSummary(box); if (!$$(".st.error", box).length && $$(".step", box).length > 2) box.open = false; }
+function subCard(d, done) {
+  const id = "sub-" + d.agent;
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement("div"); el.className = "sub-card"; el.id = id; flow().appendChild(el);
+  }
+  el.innerHTML = `${done ? icon("check") : `<span class="spin"></span>`}<span class="nm">${esc(d.agent)}</span><span class="mdl">${esc(d.model || "")}</span><span class="tsk">${esc(done ? `concluído · ${fmt(d.tokens)} tokens` : d.task || "")}</span>`;
+  scrollEnd();
+}
+function note(text, cls = "") {
+  const el = document.createElement("div"); el.className = "note " + cls; el.textContent = text;
+  $("#messages").appendChild(el); scrollEnd();
+}
+function scrollEnd(force) {
+  const m = $("#messages");
+  if (force || m.scrollHeight - m.scrollTop - m.clientHeight < 160) m.scrollTop = m.scrollHeight;
+}
+
+// ── Anexos ─────────────────────────────────────────────────────────────────────
+function addAttachments(paths) {
+  const imgs = paths.filter(p => /\.(png|jpe?g|gif|webp|bmp)$/i.test(p));
+  const others = paths.filter(p => !imgs.includes(p));
+  attachments.push(...imgs);
+  if (others.length) { const i = $("#input"); i.value += (i.value ? " " : "") + others.join(" "); autosize(); }
+  renderAttachments();
+}
+function renderAttachments() {
+  $("#attachments").innerHTML = attachments.map((p, i) => `<div class="att"><img src="${fileUrl(p)}"><span>${esc(p.split(/[\\/]/).pop())}</span><button data-rm="${i}">${icon("x")}</button></div>`).join("");
+  $$("[data-rm]", $("#attachments")).forEach(b => b.addEventListener("click", () => { attachments.splice(+b.dataset.rm, 1); renderAttachments(); }));
+}
+
+// ── Ao vivo / equipe ───────────────────────────────────────────────────────────
+function feed(kind, html) {
+  const box = $("#feed");
+  if ($(".empty", box)) box.innerHTML = "";
+  const el = document.createElement("div"); el.className = "feed-item " + kind;
+  el.innerHTML = `<i class="b"></i><div><div class="tm">${now()}</div><div class="tx">${html}</div></div>`;
+  box.prepend(el);
+  while (box.children.length > 300) box.lastChild.remove();
+}
+function renderAgents(live = {}) {
+  const team = S.team || [];
+  $("#agents").innerHTML = team.map(m => `<div class="agent-row"><span class="em">${esc(m.icon)}</span><div class="grow"><b>${esc(m.name)}</b><div class="sm">${esc(m.model_label)}</div></div>${live[m.name] ? `<span class="spin"></span>` : ""}</div>`).join("")
+    + `<button class="btn small" data-go="team">${icon("edit")} Configurar equipe</button>`;
+}
+function setLive(on, text) {
+  const el = $("#live");
+  if (on) {
+    if (!el.classList.contains("on")) { liveStart = Date.now(); clearInterval(liveTimer); liveTimer = setInterval(() => { $("#live-clock").textContent = Math.round((Date.now() - liveStart) / 1000) + "s"; }, 500); }
+    el.classList.add("on");
+    if (text) $("#live-text").textContent = text;
+  } else { el.classList.remove("on"); clearInterval(liveTimer); }
+}
+
+// ── Eventos do Python ──────────────────────────────────────────────────────────
+function onEvent(e) {
+  switch (e.type) {
+    case "busy":
+      busy = e.busy;
+      $("#send").classList.toggle("stop", busy);
+      $("#send").innerHTML = icon(busy ? "stop" : "send");
+      $("#send").title = busy ? "Parar (Esc)" : "Enviar";
+      setLive(busy, busy ? "Pensando…" : "");
+      if (!busy) { closeTurn(); $("#mic").classList.remove("rec"); }
+      break;
+    case "turn_start": closeTurn(); ensureTurn(e.model); break;
+    case "seg": segment(e.id, e.html, e.streaming); break;
+    case "reasoning": thought(e.text); setLive(true, "Raciocinando…"); break;
+    case "tool":
+      toolStep(e);
+      if (e.status === "running") { setLive(true, `${toolInfo(e.name)[1]}${e.summary ? " · " + e.summary : ""}`); feed("", `<b>${esc(e.agent || "principal")}</b> → ${esc(toolInfo(e.name)[1])} <span>${esc(e.summary || "")}</span>`); }
+      else feed(e.status, `${e.status === "ok" ? "✓" : "✗"} ${esc(toolInfo(e.name)[1])}`);
+      if ((e.images || []).length) preview({ path: e.images[0], kind: "image" });
+      break;
+    case "sub_start": subCard(e, false); feed("sub", `👥 <b>${esc(e.agent)}</b> começou com <b>${esc(e.model)}</b>`); renderAgents({ [e.agent.replace(/ #\d+$/, "")]: true }); break;
+    case "sub_end": subCard(e, true); feed("ok", `✓ <b>${esc(e.agent)}</b> terminou (${fmt(e.tokens)} tokens)`); renderAgents(); break;
+    case "status": setLive(true, e.text); break;
+    case "usage": S.conversation_tokens = e.total; updateMeter(e.total); break;
+    case "turn_end": closeTurn(); refreshConvs().then(() => { S.conversation_id = e.conversation_id || S.conversation_id; S.conversation_title = e.title || S.conversation_title; renderTopbar(); renderConvs(); }); break;
+    case "error": note("⚠ " + e.message, "err"); toast("error", "Erro", e.message); break;
+    case "compacted": note(`🗜 Histórico compactado: ${e.messages} mensagens antigas viraram um resumo`); break;
+    case "approval": approval(e); break;
+    case "preview": preview(e); break;
+    case "toast": toast(e.kind, e.title, e.text); break;
+    case "voice_text": if ($(".welcome")) $("#messages").innerHTML = ""; addUser(e.text); break;
+    case "listening": $("#mic").classList.add("rec"); setLive(true, "Ouvindo…"); break;
+    case "mcp": S.mcp = e.servers; $("#mcp-dot").classList.toggle("on", e.servers.some(s => s.status === "erro")); if ($("#page-connections").classList.contains("active")) renderConnections(); break;
+    case "state": S = { ...S, ...e.state }; renderAll(); break;
+    case "models": onModels(e); break;
+    case "pull": onPull(e); break;
+  }
+}
+
+// ── Pré-visualização ───────────────────────────────────────────────────────────
+function preview(e) {
+  const box = $("#preview");
+  box.innerHTML = `<div class="path">${esc(e.path)}</div>` + (e.kind === "image"
+    ? `<img class="zoomable" src="${fileUrl(e.path)}">`
+    : `<div class="prose">${e.html || ""}</div>`) + `<div class="row" style="margin-top:10px"><button class="btn small" id="pv-open">${icon("eye")} Abrir</button><button class="btn small" id="pv-folder">${icon("folder")} Mostrar na pasta</button></div>`;
+  $("#pv-open").onclick = () => call("openPath", e.path);
+  $("#pv-folder").onclick = () => call("revealPath", e.path);
+  selectTab("preview");
+}
+function lightbox(src) { openModal(`<div class="lightbox"><img src="${src}"></div>`, true); }
+
+// ── Notificações ───────────────────────────────────────────────────────────────
+function toast(kind = "info", title = "", text = "", ms = 4200) {
+  const el = document.createElement("div");
+  el.className = "toast " + kind;
+  const ic = { success: "check", error: "alert", warn: "alert", info: "info" }[kind] || "sparkle";
+  el.innerHTML = `<div class="ti">${icon(ic)}</div><div><b>${esc(title)}</b><span>${esc(text)}</span></div><button class="close">${icon("x")}</button><i class="life" style="animation-duration:${ms}ms"></i>`;
+  const kill = () => { el.classList.add("out"); setTimeout(() => el.remove(), 260); };
+  el.querySelector(".close").onclick = kill;
+  $("#toasts").appendChild(el);
+  setTimeout(kill, ms);
+  while ($("#toasts").children.length > 4) $("#toasts").firstChild.remove();
+}
+
+// ── Modais ─────────────────────────────────────────────────────────────────────
+function openModal(html, clickClose = true) {
+  const root = $("#modal-root");
+  root.innerHTML = `<div class="backdrop">${html}</div>`;
+  hydrateIcons(root);
+  if (clickClose) root.querySelector(".backdrop").addEventListener("mousedown", e => { if (e.target.classList.contains("backdrop")) closeModal(); });
+  const first = root.querySelector("input, textarea, button.primary");
+  if (first) setTimeout(() => first.focus(), 30);
+}
+function closeModal() { $("#modal-root").innerHTML = ""; }
+function confirmBox(title, text, ok = "Confirmar") {
+  return new Promise(resolve => {
+    openModal(`<div class="modal"><h2>${esc(title)}</h2><p class="sub">${esc(text)}</p><div class="actions"><button class="btn" id="cf-no">Cancelar</button><button class="btn primary" id="cf-ok">${esc(ok)}</button></div></div>`);
+    $("#cf-no").onclick = () => { closeModal(); resolve(false); };
+    $("#cf-ok").onclick = () => { closeModal(); resolve(true); };
+  });
+}
+function approval(e) {
+  const r = e.request;
+  let body;
+  if (r.type === "budget") {
+    body = `<h2>Limite de tokens</h2><p class="sub">${esc(r.message)}</p>
+      <div class="actions"><button class="btn" data-a="no">Parar aqui</button><button class="btn" data-a="always">Continuar sem perguntar</button><button class="btn primary" data-a="yes">Continuar</button></div>`;
+  } else {
+    const [ic, label] = toolInfo(r.tool);
+    const args = r.args || {};
+    const main = args.command || args.path || args.name || args.text || args.url || "";
+    body = `<div class="row" style="margin-bottom:10px"><span class="risk ${r.risk}">${icon("shield")} ${r.risk === "exec" ? "Executar / controlar o PC" : "Alterar arquivos"}</span><span class="tag">${esc(r.agent)}</span></div>
+      <h2>${icon(ic)} ${esc(label)}</h2><p class="sub">O agente quer usar <b>${esc(r.tool)}</b>.</p>
+      ${main ? `<pre>${esc(String(main)).slice(0, 2000)}</pre>` : ""}
+      <details><summary class="sub" style="cursor:pointer">Todos os parâmetros</summary><pre>${esc(JSON.stringify(args, null, 2)).slice(0, 6000)}</pre></details>
+      <div class="actions"><button class="btn danger" data-a="no">Negar</button><button class="btn" data-a="always">Permitir sempre nesta conversa</button><button class="btn primary" data-a="yes">Permitir</button></div>`;
+  }
+  openModal(`<div class="modal">${body}</div>`, false);
+  $$("[data-a]", $("#modal-root")).forEach(b => b.addEventListener("click", () => { call("answerApproval", e.id, b.dataset.a); closeModal(); }));
+}
+
+// ── Paleta de comandos ─────────────────────────────────────────────────────────
+function palette(initial = "") {
+  const cmds = [
+    ["plus", "Nova conversa", () => action("new"), "Ctrl+N"],
+    ["settings", "Abrir configurações", () => go("settings"), "Ctrl+,"],
+    ["cpu", "Trocar modelo", () => { settingsSection = "modelos"; go("settings"); }],
+    ["users", "Equipe e perfis", () => go("team")],
+    ["plug", "Conexões MCP e skills", () => go("connections")],
+    ["panel", "Mostrar/ocultar painel ao vivo", () => action("toggle-side"), "Ctrl+B"],
+    ["shield", "Alternar permissões", () => cyclePermission()],
+    ["moon", "Alternar tema claro/escuro", () => action("theme")],
+    ["key", "Chaves de API", () => { settingsSection = "chaves"; go("settings"); }],
+    ["bolt", "Conta Grok (xAI)", () => { settingsSection = "grok"; go("settings"); }],
+    ...(S.profiles || []).map(p => [null, `Perfil: ${p.icon} ${p.name}`, async () => { S = await call("selectProfile", p.id); renderAll(); toast("success", "Perfil ativo", p.name); }]),
+    ...(S.quick_prompts || []).map(q => ["sparkle", `Prompt: ${q.label}`, () => { $("#input").value = q.text; autosize(); $("#input").focus(); }]),
+  ];
+  openModal(`<div class="modal palette"><input id="pl-q" placeholder="Digite um comando…" value="${esc(initial)}"><div class="opts">${
+    cmds.map((c, i) => `<div class="opt" data-i="${i}">${c[0] ? icon(c[0]) : ""}<span>${esc(c[1])}</span>${c[3] ? `<kbd>${c[3]}</kbd>` : ""}</div>`).join("")}</div></div>`);
+  $$(".opt", $("#modal-root")).forEach(o => o.addEventListener("click", () => { closeModal(); if ($("#input").value === "/") $("#input").value = ""; cmds[+o.dataset.i][2](); }));
+  filterOpts("#pl-q");
+}
+function filterOpts(sel) {
+  const input = $(sel);
+  let idx = 0;
+  const visible = () => $$(".opt", $("#modal-root")).filter(o => o.style.display !== "none");
+  const mark = () => { visible().forEach((o, i) => o.classList.toggle("sel", i === idx)); };
+  input.addEventListener("input", () => {
+    const q = input.value.toLowerCase();
+    $$(".opt", $("#modal-root")).forEach(o => o.style.display = o.textContent.toLowerCase().includes(q) ? "" : "none");
+    idx = 0; mark();
+  });
+  input.addEventListener("keydown", e => {
+    const v = visible();
+    if (e.key === "ArrowDown") { idx = Math.min(idx + 1, v.length - 1); mark(); e.preventDefault(); }
+    if (e.key === "ArrowUp") { idx = Math.max(idx - 1, 0); mark(); e.preventDefault(); }
+    if (e.key === "Enter" && v[idx]) v[idx].click();
+  });
+  mark();
+}
+
+// ── Página: Equipe e perfis ────────────────────────────────────────────────────
+function renderTeamPage() {
+  const tile = p => `<div class="tile"><div class="top"><div class="em">${esc(p.icon)}</div><div style="flex:1"><h3>${esc(p.name)}</h3>
+    ${p.in_team ? `<span class="tag grad">equipe</span>` : ""}${p.id === S.profile.id ? `<span class="tag grad">ativo</span>` : ""}${p.auto_startup ? `<span class="tag">prompt inicial</span>` : ""}</div></div>
+    <div class="desc">${esc(p.description || "Sem descrição")}</div>
+    <div>${(p.skills_tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
+    <div class="foot"><span class="mono">${icon("cpu")} ${esc(p.model_label)}</span>
+      <button class="btn small" data-edit="${esc(p.id)}">${icon("edit")} Editar</button>
+      ${p.id !== S.profile.id ? `<button class="btn small" data-use="${esc(p.id)}">Usar</button>` : ""}</div></div>`;
+  const team = S.profiles.filter(p => p.in_team), others = S.profiles.filter(p => !p.in_team);
+  $("#team-body").innerHTML = `<h1>Equipe e perfis</h1><p class="lead">Cada perfil tem prompt de injeção, prompt inicial, modelo e ferramentas próprios. Os membros da <b>equipe</b> recebem tarefas do agente principal — em paralelo e cada um no modelo que você escolher (ou o melhor disponível, automaticamente).</p>
+    <div class="row" style="margin-bottom:18px"><button class="btn primary" data-edit="">${icon("plus")} Novo perfil</button></div>
+    <h3 style="color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.08em">Equipe</h3><div class="grid">${team.map(tile).join("")}</div>
+    <h3 style="color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin-top:26px">Perfis principais</h3><div class="grid">${others.map(tile).join("")}</div>`;
+  $$("[data-edit]", $("#team-body")).forEach(b => b.addEventListener("click", () => profileEditor(S.profiles.find(p => p.id === b.dataset.edit))));
+  $$("[data-use]", $("#team-body")).forEach(b => b.addEventListener("click", async () => { S = await call("selectProfile", b.dataset.use); renderAll(); renderTeamPage(); toast("success", "Perfil ativo", S.profile.name); }));
+}
+function providerOptions(selected, allowEmpty) {
+  return (allowEmpty ? `<option value="">(usar o modelo padrão)</option>` : "") + S.providers.map(p => `<option value="${esc(p.id)}" ${p.id === selected ? "selected" : ""}>${esc(p.label)}${p.has_credentials ? "" : " — sem acesso"}</option>`).join("");
+}
+function profileEditor(p) {
+  const isNew = !p;
+  p = p || { id: "", name: "", icon: "🤖", description: "", system_prompt: "", startup_prompt: "", auto_startup: false, provider: "", model: "", temperature: null, effort: "", workspace: "", tool_groups: S.all_groups, mcp_servers: [], max_steps: null, in_team: false, skills_tags: [], bound: false };
+  const groupLabels = { arquivos: "Arquivos", shell: "Terminal", web: "Internet", pc: "Controle do PC", memoria: "Memória", skills: "Skills", agentes: "Equipe", mcp: "MCP", imagem: "Imagens" };
+  openModal(`<div class="modal wide"><h2>${isNew ? "Novo perfil" : "Editar perfil"}</h2><p class="sub">O prompt de sistema entra em toda conversa; o prompt inicial é enviado sozinho ao abrir uma conversa.</p>
+    <div class="row"><input class="inp" id="pe-icon" style="width:64px;text-align:center;font-size:18px" value="${esc(p.icon)}"><input class="inp" id="pe-name" style="flex:1" placeholder="Nome" value="${esc(p.name)}"></div>
+    <div style="margin-top:10px"><input class="inp" id="pe-desc" placeholder="Descrição de uma linha (o agente principal lê isto para delegar)" value="${esc(p.description)}"></div>
+    <div style="margin-top:12px"><b>Prompt de sistema (injeção)</b><textarea class="inp" id="pe-sys" placeholder="Ex.: Você é especialista em React + TypeScript…">${esc(p.system_prompt)}</textarea></div>
+    <div style="margin-top:12px"><b>Prompt inicial</b><textarea class="inp" id="pe-start" style="min-height:70px" placeholder="Ex.: Leia o README do projeto e me diga o estado atual.">${esc(p.startup_prompt)}</textarea>
+      <label class="row" style="margin-top:6px"><span class="toggle"><input type="checkbox" id="pe-auto" ${p.auto_startup ? "checked" : ""}><span></span></span> Enviar automaticamente ao abrir uma conversa</label></div>
+    <div class="row" style="margin-top:14px"><div style="flex:1"><b>Provedor</b><select class="inp" id="pe-prov">${providerOptions(p.provider, true)}</select></div>
+      <div style="flex:1"><b>Modelo</b><input class="inp" id="pe-model" list="pe-models" value="${esc(p.model)}" placeholder="nome do modelo"><datalist id="pe-models"></datalist></div></div>
+    <label class="row" style="margin-top:8px"><span class="toggle"><input type="checkbox" id="pe-bind" ${p.bound ? "checked" : ""}><span></span></span> Ativar este perfil quando eu escolher este modelo</label>
+    <div class="row" style="margin-top:12px"><div style="flex:2"><b>Pasta de trabalho</b><div class="row"><input class="inp" id="pe-ws" style="flex:1" value="${esc(p.workspace)}" placeholder="vazio = sua pasta de usuário"><button class="btn small" id="pe-pick">${icon("folder")}</button></div></div>
+      <div style="flex:1"><b>Temperatura</b><input class="inp" id="pe-temp" type="number" step="0.1" min="0" max="2" value="${p.temperature ?? ""}" placeholder="padrão"></div>
+      <div style="flex:1"><b>Máx. passos</b><input class="inp" id="pe-steps" type="number" min="1" max="200" value="${p.max_steps ?? ""}" placeholder="padrão"></div></div>
+    <div style="margin-top:12px"><b>Ferramentas liberadas</b><div class="row" style="margin-top:6px">${S.all_groups.map(g => `<label class="row" style="gap:6px;margin-right:10px"><input type="checkbox" class="pe-g" value="${g}" ${p.tool_groups.includes(g) ? "checked" : ""}> ${groupLabels[g] || g}</label>`).join("")}</div></div>
+    <div class="row" style="margin-top:12px"><div style="flex:1"><b>Servidores MCP</b><input class="inp" id="pe-mcp" value="${esc(p.mcp_servers.join(", "))}" placeholder="vazio = todos"></div>
+      <div style="flex:1"><b>Especialidades</b><input class="inp" id="pe-tags" value="${esc(p.skills_tags.join(", "))}" placeholder="código, testes…"></div></div>
+    <label class="row" style="margin-top:10px"><span class="toggle"><input type="checkbox" id="pe-team" ${p.in_team ? "checked" : ""}><span></span></span> Faz parte da equipe (pode receber tarefas delegadas)</label>
+    <div class="actions">${!isNew && p.id !== "geral" ? `<button class="btn danger" id="pe-del">${icon("trash")} Apagar</button>` : ""}<span style="flex:1"></span><button class="btn" id="pe-cancel">Cancelar</button><button class="btn primary" id="pe-save">Salvar perfil</button></div></div>`, false);
+  const fillModels = () => { const prov = S.providers.find(x => x.id === $("#pe-prov").value); $("#pe-models").innerHTML = (prov?.models || []).map(m => `<option value="${esc(m)}">`).join(""); };
+  $("#pe-prov").onchange = fillModels; fillModels();
+  $("#pe-pick").onclick = async () => { const f = await call("pickFolder", $("#pe-ws").value); if (f) $("#pe-ws").value = f; };
+  $("#pe-cancel").onclick = closeModal;
+  if ($("#pe-del")) $("#pe-del").onclick = async () => { if (await confirmBox("Apagar perfil?", p.name)) { S = await call("deleteProfile", p.id); renderAll(); renderTeamPage(); } };
+  $("#pe-save").onclick = async () => {
+    const data = { id: p.id, name: $("#pe-name").value.trim(), icon: $("#pe-icon").value.trim() || "🤖", description: $("#pe-desc").value.trim(),
+      system_prompt: $("#pe-sys").value.trim(), startup_prompt: $("#pe-start").value.trim(), auto_startup: $("#pe-auto").checked,
+      provider: $("#pe-prov").value, model: $("#pe-prov").value ? $("#pe-model").value.trim() : "",
+      temperature: $("#pe-temp").value === "" ? null : +$("#pe-temp").value, effort: p.effort || "", max_tokens: p.max_tokens ?? null,
+      workspace: $("#pe-ws").value.trim(), tool_groups: $$(".pe-g").filter(c => c.checked).map(c => c.value),
+      mcp_servers: $("#pe-mcp").value.split(",").map(s => s.trim()).filter(Boolean), max_steps: $("#pe-steps").value ? +$("#pe-steps").value : null,
+      in_team: $("#pe-team").checked, skills_tags: $("#pe-tags").value.split(",").map(s => s.trim()).filter(Boolean), bind: $("#pe-bind").checked };
+    if (!data.name) return toast("warn", "Perfil", "Dê um nome ao perfil.");
+    const res = await call("saveProfile", JSON.stringify(data));
+    if (res && res.error) return toast("error", "Perfil", res.error);
+    S = res; closeModal(); renderAll(); renderTeamPage(); toast("success", "Perfil salvo", data.name);
+  };
+}
+
+// ── Página: Conexões (MCP + skills) ────────────────────────────────────────────
+function renderConnections() {
+  const servers = S.mcp || [];
+  $("#conn-body").innerHTML = `<h1>Conexões</h1><p class="lead">Servidores MCP ligam o agente a programas (REA, navegador, Windows, Photoshop…). Servidores grandes carregam ferramentas sob demanda para economizar tokens.</p>
+    <div class="row" style="margin-bottom:18px"><button class="btn" id="mc-reload">${icon("refresh")} Reconectar</button><button class="btn" id="mc-import">${icon("download")} Importar do Claude/Cursor</button><button class="btn" id="mc-edit">${icon("code")} Editar mcp.json</button></div>
+    <div class="grid">${servers.map(s => `<div class="tile"><div class="top"><div class="em">${icon("plug")}</div><div style="flex:1"><h3>${esc(s.name)}</h3><span class="status ${s.status}"><i></i>${esc(s.status)}${s.status === "conectado" ? ` · ${s.tools} ferramentas${s.deferred ? " (sob demanda)" : ""}` : ""}</span></div>
+      <label class="toggle"><input type="checkbox" data-mcp="${esc(s.name)}" ${s.enabled ? "checked" : ""}><span></span></label></div>
+      <div class="desc">${esc(s.description || "")}${s.error ? `<div style="color:var(--err);margin-top:6px">${esc(s.error)}</div>` : ""}</div></div>`).join("")}</div>
+    <h1 style="margin-top:34px">Skills</h1><p class="lead">Instruções especializadas no padrão <b>SKILL.md</b>, lidas de <code>skills/</code>, plugins e das pastas do Claude/Codex.</p>
+    <div class="grid">${(S.skills || []).map(k => `<div class="tile"><div class="top"><div class="em">${icon("book")}</div><div><h3>${esc(k.name)}</h3><span class="tag">${esc(k.origin)}</span></div></div><div class="desc">${esc(k.description)}</div></div>`).join("") || `<div class="empty">Nenhuma skill encontrada.</div>`}</div>`;
+  $$("[data-mcp]", $("#conn-body")).forEach(t => t.addEventListener("change", () => { call("mcpToggle", t.dataset.mcp, t.checked); toast("info", "MCP", `${t.dataset.mcp} ${t.checked ? "ligando…" : "desligado"}`); }));
+  $("#mc-reload").onclick = () => { call("mcpReload"); toast("info", "MCP", "Reconectando servidores…"); };
+  $("#mc-import").onclick = async () => { const r = await call("mcpImport"); toast(r.length ? "success" : "info", "Importação MCP", r.length ? `Importados (desligados): ${r.join(", ")}` : "Nenhum servidor novo encontrado."); };
+  $("#mc-edit").onclick = () => call("openPath", "mcp");
+}
+
+// ── Página: Configurações ──────────────────────────────────────────────────────
+const SECTIONS = [
+  ["geral", "user", "Geral"], ["modelos", "cpu", "Modelos"], ["chaves", "key", "Chaves de API"], ["grok", "bolt", "Conta Grok"],
+  ["economia", "coins", "Economia de tokens"], ["permissoes", "shield", "Permissões"], ["voz", "wave", "Voz"], ["sobre", "info", "Sobre"],
+];
+function renderSettings() {
+  $("#set-nav").innerHTML = `<h2>Configurações</h2>` + SECTIONS.map(([id, ic, label]) => `<div class="set-link ${id === settingsSection ? "active" : ""}" data-sec="${id}">${icon(ic)}${label}</div>`).join("");
+  $$(".set-link").forEach(l => l.addEventListener("click", () => { settingsSection = l.dataset.sec; renderSettings(); }));
+  const st = S.settings;
+  const field = (label, help, control) => `<div class="field"><div class="l"><b>${label}</b><span>${help}</span></div><div>${control}</div></div>`;
+  const toggle = (key, on) => `<label class="toggle"><input type="checkbox" data-set="${key}" ${on ? "checked" : ""}><span></span></label>`;
+  const seg = (key, options, value) => `<div class="seg" data-seg="${key}">${options.map(([v, l]) => `<button data-v="${v}" class="${v === value ? "on" : ""}">${l}</button>`).join("")}</div>`;
+  let html = "";
+  switch (settingsSection) {
+    case "geral":
+      html = `<h1>Geral</h1><p class="lead">Quem você é e como o agente começa a trabalhar.</p><div class="group">
+        ${field("Seu nome", "O agente usa para se dirigir a você.", `<input class="inp" data-text="user_name" value="${esc(st.user_name || "")}">`)}
+        ${field("Pasta de trabalho padrão", "Onde arquivos e comandos atuam quando o perfil não define outra.", `<div class="row"><input class="inp" style="flex:1" data-text="default_workspace" value="${esc(st.default_workspace || "")}"><button class="btn small" id="ws-pick">${icon("folder")}</button></div>`)}
+        ${field("Tema", "Aparência da janela.", seg("theme", [["dark", "Escuro"], ["light", "Claro"]], st.theme || "dark"))}
+        ${field("Notificações do Windows", "Avisa no canto da tela quando uma tarefa termina e a janela não está em foco.", toggle("native_notifications", st.native_notifications !== false))}
+        ${field("Mostrar raciocínio", "Exibe o pensamento de modelos que raciocinam (DeepSeek-R1, Qwen3…).", toggle("show_reasoning", st.show_reasoning))}
+        ${field("Assistente de primeira execução", "Refaça a configuração inicial guiada.", `<button class="btn small" id="re-onb">${icon("sparkle")} Abrir assistente</button>`)}
+      </div>`; break;
+    case "modelos":
+      html = `<h1>Modelos</h1><p class="lead">Escolha a IA principal, gerencie os modelos locais e como a equipe escolhe modelos.</p>
+        <div class="group"><h3>Modelo principal</h3>
+        ${field("Provedor", "De onde vem a IA principal.", `<select class="inp" id="m-prov">${providerOptions(S.provider, false)}</select>`)}
+        ${field("Modelo", "Digite ou escolha da lista.", `<div class="row"><input class="inp" style="flex:1" id="m-model" list="m-models" value="${esc(S.model)}"><datalist id="m-models"></datalist><button class="btn small" id="m-refresh" title="Buscar modelos do provedor">${icon("refresh")}</button></div>`)}
+        <div class="row" style="padding:10px 0"><button class="btn primary" id="m-apply">${icon("check")} Usar este modelo</button><span class="status" id="m-hint"></span></div></div>
+        <div class="group"><h3>Modelos locais (Ollama)</h3><div id="local-models"><div class="empty">Carregando…</div></div>
+        <div class="row" style="padding:12px 0"><input class="inp" style="flex:1" id="pull-name" placeholder="baixar modelo, ex.: qwen3:14b, llama3.2-vision, gemma3:12b"><button class="btn" id="pull-btn">${icon("download")} Baixar</button></div>
+        <div id="pull-progress"></div>
+        ${field("Contexto do Ollama", "Tokens de memória de trabalho (mais = mais VRAM).", `<input class="inp" type="number" step="2048" data-num="ollama_num_ctx" value="${st.ollama_num_ctx}">`)}
+        ${field("Manter carregado", "Tempo que o modelo fica na VRAM entre mensagens (ex.: 10m, 1h, 0).", `<input class="inp" data-text="ollama_keep_alive" value="${esc(st.ollama_keep_alive)}">`)}</div>
+        <div class="group"><h3>Equipe e modelos especiais</h3>
+        ${field("Roteamento automático", "Cada agente da equipe usa o melhor modelo disponível para a especialidade dele.", toggle("auto_routing", st.auto_routing !== false))}
+        ${field("Modelo econômico", "Usado para resumos e quando o roteador não achar nada (provedor:modelo).", `<input class="inp" data-text="cheap_model" value="${esc(st.cheap_model || "")}" placeholder="ex.: deepseek:deepseek-chat">`)}
+        ${field("Modelo de imagem", "Para gerar imagens; vazio = automático.", `<input class="inp" data-text="image_model" value="${esc(st.image_model || "")}" placeholder="ex.: openai:gpt-image-1">`)}
+        ${field("Catálogo de capacidades", "Notas por especialidade e custo de cada modelo.", `<button class="btn small" id="cat-open">${icon("code")} Editar catálogo</button>`)}</div>
+        <div class="group"><h3>Adicionar provedor compatível com OpenAI</h3>
+        <div class="row" style="padding:10px 0"><input class="inp" id="np-id" style="width:120px" placeholder="id"><input class="inp" id="np-url" style="flex:1" placeholder="https://api.exemplo.com/v1"><input class="inp" id="np-env" style="width:190px" placeholder="VAR_DA_CHAVE"><input class="inp" id="np-models" style="width:200px" placeholder="modelos, separados por vírgula"><button class="btn" id="np-add">${icon("plus")}</button></div></div>`;
+      break;
+    case "chaves":
+      html = `<h1>Chaves de API</h1><p class="lead">Ficam somente no arquivo <code>.env</code> deste computador. Deixe em branco para manter a atual.</p><div class="group">
+        ${S.providers.filter(p => p.api_key_env).map(p => field(esc(p.label), p.has_credentials ? `<span style="color:var(--ok)">● configurada</span> · ${esc(p.api_key_env)}` : esc(p.api_key_env),
+          `<div class="row"><input class="inp" type="password" style="flex:1" data-key="${esc(p.api_key_env)}" placeholder="${p.has_credentials ? "••••••••  (manter)" : "cole a chave"}"><button class="btn small" data-savekey="${esc(p.api_key_env)}">Salvar</button></div>`)).join("")}</div>`;
+      break;
+    case "grok": {
+      const g = S.grok || {};
+      html = `<h1>Conta Grok (xAI)</h1><p class="lead">Use o agente <b>Grok Build</b> com a sua conta — o mesmo do Grok Build Desktop. O login abre o navegador; a sessão fica com o CLI oficial e se renova sozinha.</p>
+        <div class="group">${field("Situação", "", `<span class="status ${g.logged_in ? "conectado" : g.installed ? "conectando" : "erro"}"><i></i>${g.logged_in ? "Conectado" : g.installed ? "Instalado, sem login" : "CLI não instalado"}</span><div class="sub" style="font-size:12px;color:var(--dim);margin-top:4px">${esc(g.version || "")}</div>`)}
+        <div class="row" style="padding:14px 0"><button class="btn primary" data-grok="login">${icon("user")} Entrar (navegador)</button><button class="btn" data-grok="device">Entrar com código</button><button class="btn" data-grok="logout">Sair</button>${g.installed ? "" : `<button class="btn" data-grok="install">${icon("download")} Instalar CLI</button>`}<button class="btn small" data-grok="status">${icon("refresh")}</button></div></div>`;
+      break;
+    }
+    case "economia": {
+      const usage = S.usage || {};
+      const max = Math.max(1, ...Object.values(usage).map(u => u.input + u.output));
+      html = `<h1>Economia de tokens</h1><p class="lead">Produtividade sem gastar tudo de uma vez: o agente pausa e pergunta antes de passar dos limites.</p>
+        <div class="group">${field("Modo", "Máximo: contexto enxuto e modelos baratos. Livre: mais contexto e os melhores modelos.", seg("economy_mode", [["maximo", "Máxima"], ["equilibrado", "Equilibrado"], ["livre", "Livre"]], st.economy_mode))}
+        ${field("Orçamento por tarefa", "Tokens antes de pausar e perguntar (0 = sem limite).", `<input class="inp" type="number" step="50000" data-num="turn_token_budget" value="${st.turn_token_budget}">`)}
+        ${field("Orçamento diário (nuvem)", "Modelos locais não contam (0 = sem limite).", `<input class="inp" type="number" step="100000" data-num="daily_token_budget" value="${st.daily_token_budget}">`)}</div>
+        <div class="group"><h3>Uso de hoje</h3>${Object.entries(usage).map(([k, u]) => `<div class="usage-row"><span class="mono" style="font-family:var(--mono);font-size:12px">${esc(k)}</span><div class="bar"><i style="width:${(u.input + u.output) / max * 100}%"></i></div><span>${fmt(u.input + u.output)}</span></div>`).join("") || `<div class="empty">Nada usado hoje ainda.</div>`}</div>`;
+      break;
+    }
+    case "permissoes":
+      html = `<h1>Permissões</h1><p class="lead">Quanto o agente pode fazer sozinho.</p><div class="group">
+        ${field("Modo", "Perguntar: confirma qualquer alteração. Automático: só comandos e controle do PC. Livre: nunca pergunta.", seg("permission_mode", [["perguntar", "Perguntar"], ["auto", "Automático"], ["livre", "Livre"]], st.permission_mode))}</div>`;
+      break;
+    case "voz":
+      html = `<h1>Voz</h1><p class="lead">Fale com o agente pelo botão do microfone; a transcrição roda localmente.</p><div class="group">
+        ${field("Ler respostas em voz alta", "Voz neural local (Kokoro). Código não é lido.", toggle("voice_replies", st.voice_replies))}</div>`;
+      break;
+    case "sobre":
+      html = `<h1>Sobre</h1><div class="group" style="padding:20px"><div class="row"><img src="logo.svg" style="width:64px"><div><h2 style="margin:0">Órbita</h2><span style="color:var(--muted)">Seu agente pessoal de IA — suas regras, seu computador.</span></div></div>
+        <div class="row" style="margin-top:16px"><button class="btn small" data-open="data">${icon("folder")} Pasta de dados</button><button class="btn small" data-open="logs">${icon("file")} Logs</button><button class="btn small" data-open="roadmap">${icon("book")} ROADMAP</button><button class="btn small" data-open="license">${icon("shield")} Licença GPL v3</button></div>
+        <p style="color:var(--muted);font-size:12.5px;margin:16px 0 0">Software livre sob a GNU GPL v3: você pode usar, estudar, modificar e compartilhar. Versões modificadas distribuídas devem continuar abertas sob a mesma licença.</p></div>`;
+      break;
+  }
+  $("#set-body").innerHTML = `<div class="set-in">${html}</div>`;
+  bindSettings();
+}
+async function setSetting(key, value, silent) {
+  S = await call("setSetting", key, JSON.stringify(value));
+  renderTopbar(); renderAgents();
+  if (!silent) toast("success", "Salvo", "Configuração atualizada.", 1800);
+}
+function bindSettings() {
+  const body = $("#set-body");
+  $$("[data-set]", body).forEach(t => t.addEventListener("change", () => setSetting(t.dataset.set, t.checked)));
+  $$("[data-text]", body).forEach(t => t.addEventListener("change", () => setSetting(t.dataset.text, t.value.trim())));
+  $$("[data-num]", body).forEach(t => t.addEventListener("change", () => setSetting(t.dataset.num, +t.value || 0)));
+  $$("[data-seg]", body).forEach(g => $$("button", g).forEach(b => b.addEventListener("click", async () => {
+    $$("button", g).forEach(x => x.classList.toggle("on", x === b));
+    if (g.dataset.seg === "theme") applyTheme(b.dataset.v);
+    await setSetting(g.dataset.seg, b.dataset.v);
+  })));
+  $$("[data-savekey]", body).forEach(b => b.addEventListener("click", async () => {
+    const env = b.dataset.savekey, input = $(`[data-key="${env}"]`, body);
+    if (!input.value.trim()) return;
+    S = await call("saveApiKey", env, input.value.trim()); input.value = "";
+    toast("success", "Chave salva", env); renderSettings();
+  }));
+  $$("[data-grok]", body).forEach(b => b.addEventListener("click", async () => {
+    const r = await call("grok", b.dataset.grok);
+    if (r && r.message) toast("info", "Grok", r.message);
+    if (r && r.status) { S.grok = r.status; renderSettings(); }
+  }));
+  $$("[data-open]", body).forEach(b => b.addEventListener("click", () => call("openPath", b.dataset.open)));
+  const ws = $("#ws-pick"); if (ws) ws.onclick = async () => { const f = await call("pickFolder", S.settings.default_workspace || ""); if (f) setSetting("default_workspace", f).then(renderSettings); };
+  const onb = $("#re-onb"); if (onb) onb.onclick = showOnboarding;
+  const cat = $("#cat-open"); if (cat) cat.onclick = () => call("openPath", "catalog");
+  if (settingsSection === "modelos") bindModels();
+}
+function bindModels() {
+  const prov = $("#m-prov");
+  const fill = list => { $("#m-models").innerHTML = (list || []).map(m => `<option value="${esc(m)}">`).join(""); };
+  fill((S.providers.find(p => p.id === prov.value) || {}).models);
+  prov.onchange = () => { fill((S.providers.find(p => p.id === prov.value) || {}).models); $("#m-model").value = ((S.providers.find(p => p.id === prov.value) || {}).models || [""])[0]; call("refreshModels", prov.value); $("#m-hint").textContent = "buscando modelos…"; };
+  $("#m-refresh").onclick = () => { call("refreshModels", prov.value); $("#m-hint").textContent = "buscando modelos…"; };
+  $("#m-apply").onclick = async () => {
+    const res = await call("selectModel", prov.value, $("#m-model").value.trim());
+    S = res.state; renderAll();
+    toast("success", "Modelo ativo", S.model_label + (res.bound_profile ? ` · perfil ${res.bound_profile}` : ""));
+    const p = S.providers.find(x => x.id === prov.value);
+    if (p && !p.has_credentials) toast("warn", "Falta acesso", p.type === "grok_cli" ? "Entre na conta Grok em Configurações › Conta Grok." : `Configure ${p.api_key_env} em Chaves de API.`, 6000);
+  };
+  $("#pull-btn").onclick = () => { const n = $("#pull-name").value.trim(); if (n) { call("pullModel", n); toast("info", "Ollama", `Baixando ${n}…`); } };
+  $("#np-add").onclick = async () => {
+    const data = { id: $("#np-id").value.trim(), url: $("#np-url").value.trim(), env: $("#np-env").value.trim(), models: $("#np-models").value };
+    if (!data.id || !data.url) return toast("warn", "Provedor", "Informe id e URL.");
+    S = await call("addProvider", JSON.stringify(data)); renderSettings(); toast("success", "Provedor adicionado", data.id);
+  };
+  call("localModels").then(list => {
+    $("#local-models").innerHTML = (list && list.length) ? list.map(m => `<div class="model-row"><span class="nm">${esc(m.name)}</span><span class="sz">${esc(m.size)} · ${esc(m.params || "")}</span><button class="btn small" data-use-local="${esc(m.name)}">${S.provider === "ollama" && S.model === m.name ? "Em uso ✓" : "Usar"}</button></div>`).join("")
+      : `<div class="empty">Ollama não está rodando ou não há modelos instalados.</div>`;
+    $$("[data-use-local]").forEach(b => b.addEventListener("click", async () => { const r = await call("selectModel", "ollama", b.dataset.useLocal); S = r.state; renderAll(); renderSettings(); toast("success", "Modelo local ativo", b.dataset.useLocal); }));
+  });
+}
+function onModels(e) {
+  const p = S.providers.find(x => x.id === e.provider); if (p && e.models.length) p.models = e.models;
+  if ($("#m-prov") && $("#m-prov").value === e.provider) { $("#m-models").innerHTML = e.models.map(m => `<option value="${esc(m)}">`).join(""); $("#m-hint").textContent = `${e.models.length} modelos disponíveis`; }
+}
+function onPull(e) {
+  const box = $("#pull-progress"); if (!box) { if (e.done) toast(e.error ? "error" : "success", "Ollama", e.error || `${e.model} pronto!`); return; }
+  const pct = e.total ? Math.round(e.completed / e.total * 100) : 0;
+  box.innerHTML = `<div style="font-size:12px;color:var(--muted)">${esc(e.model)} · ${esc(e.status || "")} ${pct ? pct + "%" : ""}</div><div class="progress"><i style="width:${pct}%"></i></div>`;
+  if (e.done) { toast(e.error ? "error" : "success", "Ollama", e.error || `${e.model} pronto para usar!`); setTimeout(() => settingsSection === "modelos" && renderSettings(), 600); }
+}
+
+// ── Primeira execução ──────────────────────────────────────────────────────────
+function showOnboarding() {
+  const data = { user_name: S.settings.user_name || "", mode: S.provider === "ollama" ? "local" : "cloud", provider: S.provider, model: S.model, workspace: S.settings.default_workspace || "", permission_mode: S.settings.permission_mode || "auto", voice_replies: !!S.settings.voice_replies, key: "" };
+  let step = 0;
+  const steps = [
+    () => `<h2>Bem-vindo! Como posso te chamar?</h2><p class="sub">Vamos deixar o agente pronto para os seus primeiros trabalhos em menos de um minuto.</p>
+      <input class="inp" id="ob-name" placeholder="Seu nome" value="${esc(data.user_name)}">`,
+    () => `<h2>Qual IA vai trabalhar com você?</h2><p class="sub">Dá para trocar a qualquer momento em Configurações › Modelos.</p>
+      <div class="choice ${data.mode === "local" ? "on" : ""}" data-mode="local"><div class="ci">${icon("cpu")}</div><div><b>Local (Ollama) — grátis e privado</b><span>Roda na sua placa de vídeo. ${(S.local_models || []).length} modelo(s) instalado(s).</span></div></div>
+      <div class="choice ${data.mode === "cloud" ? "on" : ""}" data-mode="cloud"><div class="ci">${icon("globe")}</div><div><b>Nuvem — DeepSeek, GPT, Claude, Gemini…</b><span>Mais inteligente para tarefas longas; usa uma chave de API.</span></div></div>
+      <div class="choice ${data.mode === "grok" ? "on" : ""}" data-mode="grok"><div class="ci">${icon("bolt")}</div><div><b>Grok Build com a sua conta xAI</b><span>${S.grok?.logged_in ? "Conta já conectada neste PC ✓" : "Login pelo navegador."}</span></div></div>
+      <div id="ob-detail" style="margin-top:10px"></div>`,
+    () => `<h2>Onde vamos trabalhar?</h2><p class="sub">A pasta onde o agente lê, cria e edita arquivos por padrão.</p>
+      <div class="row"><input class="inp" id="ob-ws" style="flex:1" value="${esc(data.workspace)}" placeholder="ex.: E:\\Projetos"><button class="btn" id="ob-pick">${icon("folder")} Escolher</button></div>
+      <h2 style="margin-top:22px">Quanta liberdade?</h2>
+      ${[["perguntar", "shield", "Perguntar", "Confirma qualquer alteração antes de fazer."], ["auto", "sparkle", "Automático (recomendado)", "Edita arquivos sozinho; pergunta antes de executar comandos ou controlar o PC."], ["livre", "bolt", "Livre", "Age sem pedir confirmação."]]
+        .map(([v, ic, t, s]) => `<div class="choice ${data.permission_mode === v ? "on" : ""}" data-perm="${v}"><div class="ci">${icon(ic)}</div><div><b>${t}</b><span>${s}</span></div></div>`).join("")}`,
+    () => `<h2>Tudo pronto${data.user_name ? ", " + esc(data.user_name.split(" ")[0]) : ""}! 🚀</h2><p class="sub">Dicas rápidas:</p>
+      <div class="choice"><div class="ci">${icon("command")}</div><div><b>Ctrl+K</b><span>Paleta de comandos: trocar perfil, modelo, permissões…</span></div></div>
+      <div class="choice"><div class="ci">${icon("users")}</div><div><b>Equipe</b><span>Peça "divida entre a equipe" para agentes trabalharem em paralelo.</span></div></div>
+      <div class="choice"><div class="ci">${icon("wave")}</div><div><b>Voz</b><span>Clique no microfone para falar. <label class="row" style="display:inline-flex;margin-left:6px"><span class="toggle"><input type="checkbox" id="ob-voice" ${data.voice_replies ? "checked" : ""}><span></span></span> ler respostas em voz alta</label></span></div></div>`,
+  ];
+  const render = () => {
+    openModal(`<div class="modal onb"><div class="hero"><img src="logo.svg"><div class="steps-dots">${steps.map((_, i) => `<i class="${i <= step ? "on" : ""}"></i>`).join("")}</div></div>
+      <div class="body">${steps[step]()}<div class="actions">${step ? `<button class="btn" id="ob-back">Voltar</button>` : ""}<button class="btn primary" id="ob-next">${step === steps.length - 1 ? "Começar" : "Continuar"}</button></div></div></div>`, false);
+    if ($("#ob-name")) $("#ob-name").oninput = e => data.user_name = e.target.value;
+    $$("[data-mode]").forEach(c => c.onclick = () => { data.mode = c.dataset.mode; $$("[data-mode]").forEach(x => x.classList.toggle("on", x === c)); detail(); });
+    $$("[data-perm]").forEach(c => c.onclick = () => { data.permission_mode = c.dataset.perm; $$("[data-perm]").forEach(x => x.classList.toggle("on", x === c)); });
+    if ($("#ob-ws")) { $("#ob-ws").oninput = e => data.workspace = e.target.value; $("#ob-pick").onclick = async () => { const f = await call("pickFolder", data.workspace); if (f) { data.workspace = f; $("#ob-ws").value = f; } }; }
+    if ($("#ob-voice")) $("#ob-voice").onchange = e => data.voice_replies = e.target.checked;
+    if ($("#ob-detail")) detail();
+    if ($("#ob-back")) $("#ob-back").onclick = () => { step--; render(); };
+    $("#ob-next").onclick = async () => {
+      if (step < steps.length - 1) { step++; return render(); }
+      S = await call("completeOnboarding", JSON.stringify(data)); closeModal(); renderAll();
+      toast("success", "Configuração concluída", `${S.profile.icon} ${S.profile.name} · ${S.model_label}`);
+    };
+  };
+  const detail = () => {
+    const box = $("#ob-detail"); if (!box) return;
+    if (data.mode === "local") {
+      const list = S.local_models || [];
+      if (!list.includes(data.model)) data.model = list[0] || data.model;
+      data.provider = "ollama";
+      box.innerHTML = list.length ? `<select class="inp" id="ob-local">${list.map(m => `<option ${m === data.model ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>` : `<div class="empty" style="padding:10px">Nenhum modelo local encontrado — dá para baixar em Configurações › Modelos.</div>`;
+      if ($("#ob-local")) $("#ob-local").onchange = e => data.model = e.target.value;
+    } else if (data.mode === "cloud") {
+      const clouds = S.providers.filter(p => p.api_key_env);
+      if (!clouds.find(p => p.id === data.provider)) { data.provider = "deepseek"; data.model = "deepseek-chat"; }
+      box.innerHTML = `<div class="row"><select class="inp" id="ob-prov" style="flex:1">${clouds.map(p => `<option value="${p.id}" ${p.id === data.provider ? "selected" : ""}>${esc(p.label)}${p.has_credentials ? " ✓" : ""}</option>`).join("")}</select><input class="inp" id="ob-model" style="flex:1" value="${esc(data.model)}"></div>
+        <input class="inp" id="ob-key" type="password" style="margin-top:8px" placeholder="Chave de API (fica só no .env deste PC)">`;
+      $("#ob-prov").onchange = e => { data.provider = e.target.value; data.model = (S.providers.find(p => p.id === data.provider).models || [""])[0]; $("#ob-model").value = data.model; };
+      $("#ob-model").oninput = e => data.model = e.target.value;
+      $("#ob-key").oninput = e => data.key = e.target.value;
+    } else {
+      data.provider = "grok"; data.model = "grok-4.7";
+      box.innerHTML = S.grok?.logged_in ? `<div class="sub" style="color:var(--ok)">✓ Conta conectada.</div>` : `<button class="btn" id="ob-grok">${icon("user")} Entrar na conta xAI</button>`;
+      if ($("#ob-grok")) $("#ob-grok").onclick = () => call("grok", S.grok?.installed ? "login" : "install");
+    }
+  };
+  render();
+}

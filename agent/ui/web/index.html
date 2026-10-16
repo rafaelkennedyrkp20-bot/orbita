@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self' qrc:; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:; font-src 'self'; connect-src 'none';">
+  <title>Órbita</title>
+  <link rel="stylesheet" href="app.css">
+  <style id="pygments"></style>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+<div id="app">
+  <nav id="rail">
+    <img class="logo" src="logo.svg" alt="" data-go="chat">
+    <button class="rail-btn active" data-go="chat"><svg class="i" data-ic="chat"></svg><span class="tip">Conversas</span></button>
+    <button class="rail-btn" data-go="team"><svg class="i" data-ic="users"></svg><span class="tip">Equipe e perfis</span></button>
+    <button class="rail-btn" data-go="connections"><svg class="i" data-ic="plug"></svg><span class="tip">Conexões e skills</span><i class="dot" id="mcp-dot"></i></button>
+    <div class="spacer"></div>
+    <button class="rail-btn" data-action="palette"><svg class="i" data-ic="command"></svg><span class="tip">Comandos (Ctrl+K)</span></button>
+    <button class="rail-btn" data-action="theme"><svg class="i" data-ic="moon"></svg><span class="tip">Tema claro/escuro</span></button>
+    <button class="rail-btn" data-go="settings"><svg class="i" data-ic="settings"></svg><span class="tip">Configurações</span></button>
+    <div class="avatar" id="avatar" title="Você" data-go="settings">?</div>
+  </nav>
+
+  <!-- CHAT -->
+  <section class="page active" id="page-chat">
+    <aside id="convs">
+      <div class="head">
+        <h2>Conversas</h2>
+        <button class="icon-btn" data-action="new" title="Nova conversa (Ctrl+N)"><svg class="i" data-ic="plus"></svg></button>
+      </div>
+      <label class="search"><svg class="i" data-ic="search"></svg><input id="conv-search" placeholder="Buscar conversas"></label>
+      <div id="conv-list"></div>
+    </aside>
+
+    <main id="chat-main">
+      <header id="topbar">
+        <button class="icon-btn" data-action="toggle-convs" title="Mostrar/ocultar conversas"><svg class="i" data-ic="sidebar"></svg></button>
+        <div id="conv-title" contenteditable="true" spellcheck="false">Nova conversa</div>
+        <button class="chip" id="chip-profile" title="Trocar perfil"><span id="profile-ic">✨</span><span id="profile-name">Perfil</span><svg class="i" data-ic="chevdown"></svg></button>
+        <button class="chip" id="chip-model" title="Modelo — altere em Configurações › Modelos"><svg class="i" data-ic="cpu"></svg><span id="model-name">modelo</span></button>
+        <button class="chip" id="chip-perm" title="Permissões (clique para alternar)"><span class="led"></span><span id="perm-name">auto</span></button>
+        <div class="meter" title="Tokens desta conversa / orçamento por tarefa"><div class="bar"><i id="meter-bar"></i></div><span id="meter-txt">0</span></div>
+        <button class="icon-btn" data-action="toggle-side" title="Painel ao vivo (Ctrl+B)"><svg class="i" data-ic="panel"></svg></button>
+      </header>
+      <div id="messages"></div>
+      <div id="live"><div class="dots"><i></i><i></i><i></i></div><span class="t" id="live-text">Pensando…</span><span class="clock" id="live-clock">0s</span></div>
+      <div class="suggest" id="quick"></div>
+      <footer id="composer">
+        <div class="composer" id="composer-box">
+          <div class="attach-row" id="attachments"></div>
+          <textarea id="input" rows="1" placeholder="Peça qualquer coisa… (Enter envia, Shift+Enter quebra linha, / comandos)"></textarea>
+          <div class="c-row">
+            <button class="icon-btn" data-action="attach" title="Anexar imagens"><svg class="i" data-ic="clip"></svg></button>
+            <button class="icon-btn" id="mic" data-action="voice" title="Falar"><svg class="i" data-ic="mic"></svg></button>
+            <div class="spacer"></div>
+            <span class="hint" id="hint">Esc para parar · Ctrl+K comandos</span>
+            <button id="send" title="Enviar"><svg class="i" data-ic="send"></svg></button>
+          </div>
+        </div>
+      </footer>
+    </main>
+
+    <aside id="side">
+      <div class="tabs">
+        <button class="tab active" data-tab="feed">Ao vivo</button>
+        <button class="tab" data-tab="preview">Visualizar</button>
+        <button class="tab" data-tab="agents">Equipe</button>
+      </div>
+      <div class="tabpane active" id="feed"><div class="empty">As ações do agente aparecem aqui em tempo real.</div></div>
+      <div class="tabpane" id="preview"><div class="empty">Imagens, screenshots e arquivos mostrados pelo agente aparecem aqui.</div></div>
+      <div class="tabpane" id="agents"></div>
+    </aside>
+  </section>
+
+  <section class="page mgmt" id="page-team"><div class="mgmt-in" id="team-body"></div></section>
+  <section class="page mgmt" id="page-connections"><div class="mgmt-in" id="conn-body"></div></section>
+  <section class="page" id="page-settings">
+    <nav id="set-nav"></nav>
+    <div id="set-body"></div>
+  </section>
+</div>
+<div id="toasts"></div>
+<div id="modal-root"></div>
+<script src="app.js"></script>
+</body>
+</html>

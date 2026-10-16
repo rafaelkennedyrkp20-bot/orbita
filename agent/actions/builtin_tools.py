@@ -1,0 +1,525 @@
+"""
+builtin_tools.py — Ferramentas nativas que qualquer modelo pode usar.
+
+Grupos (perfis liberam grupos inteiros):
+    arquivos  ler, escrever, editar, listar, procurar e pré-visualizar arquivos
+    shell     executar comandos no PowerShell
+    web       pesquisar na internet e ler páginas
+    pc        abrir apps, screenshot, mouse, teclado, clipboard, processos, volume
+    memoria   lembrar/recordar fatos de longo prazo
+    skills    carregar instruções de skills (SKILL.md)
+    agentes   delegar subtarefas para subagentes
+    mcp       encontrar ferramentas de servidores MCP sob demanda
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import os
+import re
+import shutil
+import subprocess
+import time
+from datetime import datetime
+from pathlib import Path
+
+from agent.core.config import DATA_DIR
+from agent.core.tools import ToolContext, ToolRegistry, ToolResult, tool
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "__pycache__", ".mypy_cache", ".pytest_cache",
+             "dist", "build", ".idea", ".vs", "models"}
+TEXT_PREVIEW_LIMIT = 2000
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+ARTIFACTS_DIR = DATA_DIR / "artifacts"
+
+
+def register_builtin_tools(registry: ToolRegistry, services) -> None:
+    """`services` é o Brain: dá acesso a memória, skills, MCP e sistema."""
+    _register_files(registry)
+    _register_shell(registry)
+    _register_web(registry)
+    _register_pc(registry, services)
+    _register_memory(registry, services)
+    _register_skills(registry, services)
+    _register_agents(registry)
+    _register_mcp_search(registry, services)
+
+
+# ─────────────────────────────────────────────────────────────
+# Arquivos
+# ─────────────────────────────────────────────────────────────
+
+def _read_text(path: Path) -> tuple[str, str]:
+    """Lê texto em UTF-8; se não for, cai para cp1252 (arquivos 'ANSI' comuns no Windows)."""
+    data = path.read_bytes()
+    try:
+        return data.decode("utf-8-sig" if data.startswith(b"\xef\xbb\xbf") else "utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        return data.decode("cp1252", errors="replace"), "cp1252"
+
+
+def _is_binary(path: Path) -> bool:
+    with open(path, "rb") as handle:
+        return b"\0" in handle.read(4096)
+
+
+def _register_files(r: ToolRegistry) -> None:
+
+    @tool(r, "read_file",
+          "Read a text file (returns numbered lines) or an image (returned visually to vision models). "
+          "Use offset/limit to page through big files.",
+          {"path": {"type": "string", "description": "Absolute path or relative to the workspace"},
+           "offset": {"type": "integer", "description": "First line (1-based). Default 1"},
+           "limit": {"type": "integer", "description": "Max lines. Default 400"}},
+          ["path"], group="arquivos")
+    def read_file(args, ctx: ToolContext):
+        path = ctx.resolve(args["path"])
+        if not path.exists():
+            return ToolResult.error(f"Arquivo não encontrado: {path}")
+        if path.is_dir():
+            return ToolResult.error(f"{path} é uma pasta. Use list_dir.")
+        if path.suffix.lower() in IMAGE_EXTENSIONS:
+            ctx.emit("preview", {"path": str(path)})
+            return ToolResult(text=f"Imagem: {path} ({path.stat().st_size} bytes)", images=[str(path)])
+        if _is_binary(path):
+            return ToolResult.error(f"{path} parece binário ({path.stat().st_size} bytes).")
+        lines = _read_text(path)[0].splitlines()
+        offset = max(1, int(args.get("offset") or 1))
+        limit = max(1, min(int(args.get("limit") or 400), 2000))
+        chunk = lines[offset - 1: offset - 1 + limit]
+        body = "\n".join(f"{n:>5}\t{line[:500]}" for n, line in enumerate(chunk, start=offset))
+        more = len(lines) - (offset - 1 + len(chunk))
+        footer = f"\n[... mais {more} linhas; use offset={offset + len(chunk)}]" if more > 0 else ""
+        return f"{path} ({len(lines)} linhas)\n{body}{footer}"
+
+    @tool(r, "write_file",
+          "Create or overwrite a file with the given content (creates parent folders).",
+          {"path": {"type": "string"}, "content": {"type": "string"}},
+          ["path", "content"], risk="write", group="arquivos")
+    def write_file(args, ctx: ToolContext):
+        path = ctx.resolve(args["path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existed = path.exists()
+        path.write_text(args["content"], encoding="utf-8", newline="")
+        ctx.emit("file_changed", {"path": str(path)})
+        return f"{'Sobrescrito' if existed else 'Criado'}: {path} ({len(args['content'])} caracteres)"
+
+    @tool(r, "edit_file",
+          "Replace an exact text snippet in a file. old_string must match exactly (including indentation) "
+          "and be unique unless replace_all is true. Prefer this over rewriting whole files.",
+          {"path": {"type": "string"}, "old_string": {"type": "string"}, "new_string": {"type": "string"},
+           "replace_all": {"type": "boolean"}},
+          ["path", "old_string", "new_string"], risk="write", group="arquivos")
+    def edit_file(args, ctx: ToolContext):
+        path = ctx.resolve(args["path"])
+        if not path.is_file():
+            return ToolResult.error(f"Arquivo não encontrado: {path}")
+        text, encoding = _read_text(path)
+        old, new = args["old_string"], args["new_string"]
+        count = text.count(old)
+        if count == 0:
+            return ToolResult.error("old_string não encontrado. Leia o arquivo de novo e copie o trecho exato.")
+        if count > 1 and not args.get("replace_all"):
+            return ToolResult.error(f"old_string aparece {count} vezes. Inclua mais contexto ou use replace_all.")
+        path.write_text(text.replace(old, new) if args.get("replace_all") else text.replace(old, new, 1),
+                        encoding=encoding, newline="")  # preserva codificação e quebras de linha
+        ctx.emit("file_changed", {"path": str(path)})
+        return f"Editado: {path} ({count if args.get('replace_all') else 1} substituição(ões))"
+
+    @tool(r, "list_dir", "List a folder (folders first, with sizes).",
+          {"path": {"type": "string", "description": "Default: workspace"}}, group="arquivos")
+    def list_dir(args, ctx: ToolContext):
+        path = ctx.resolve(args.get("path") or ".")
+        if not path.is_dir():
+            return ToolResult.error(f"Pasta não encontrada: {path}")
+        items = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        lines = [f"{path}"]
+        for item in items[:500]:
+            try:
+                lines.append(f"  [D] {item.name}/" if item.is_dir() else f"  [F] {item.name}  ({_size(item.stat().st_size)})")
+            except OSError:
+                continue
+        if len(items) > 500:
+            lines.append(f"  ... e mais {len(items) - 500} itens")
+        return "\n".join(lines)
+
+    @tool(r, "glob_files",
+          "Find files by glob pattern, e.g. '**/*.py' (skips venv, node_modules, .git). Returns path, size "
+          "and modified date for each match, plus totals. sort: 'name' (default), 'size' or 'modified'.",
+          {"pattern": {"type": "string"}, "path": {"type": "string"},
+           "sort": {"type": "string", "enum": ["name", "size", "modified"]}}, ["pattern"], group="arquivos")
+    def glob_files(args, ctx: ToolContext):
+        base = ctx.resolve(args.get("path") or ".")
+        found = []
+        for match in base.glob(args["pattern"]):
+            if SKIP_DIRS.intersection(match.relative_to(base).parts) or not match.is_file():
+                continue
+            stat = match.stat()
+            found.append((str(match), stat.st_size, stat.st_mtime))
+            if len(found) >= 2000:
+                break
+        if not found:
+            return "Nenhum arquivo encontrado."
+        order = args.get("sort") or "name"
+        if order == "size":
+            found.sort(key=lambda item: -item[1])
+        elif order == "modified":
+            found.sort(key=lambda item: -item[2])
+        lines = [f"{path}  ({_size(size)}, {datetime.fromtimestamp(mtime):%Y-%m-%d %H:%M})"
+                 for path, size, mtime in found[:300]]
+        total = sum(item[1] for item in found)
+        more = f"\n... e mais {len(found) - 300}" if len(found) > 300 else ""
+        return "\n".join(lines) + more + f"\n\nTotal: {len(found)} arquivos, {_size(total)}"
+
+    @tool(r, "grep", "Search file contents with a regular expression. Returns file:line: text.",
+          {"pattern": {"type": "string", "description": "Python regex"},
+           "path": {"type": "string", "description": "Folder or file. Default: workspace"},
+           "glob": {"type": "string", "description": "File filter, e.g. '*.py'"},
+           "ignore_case": {"type": "boolean"}},
+          ["pattern"], group="arquivos")
+    def grep(args, ctx: ToolContext):
+        flags = re.IGNORECASE if args.get("ignore_case") else 0
+        try:
+            regex = re.compile(args["pattern"], flags)
+        except re.error as error:
+            return ToolResult.error(f"Regex inválida: {error}")
+        base = ctx.resolve(args.get("path") or ".")
+        files = [base] if base.is_file() else _walk_files(base, args.get("glob"))
+        hits, scanned = [], 0
+        for file in files:
+            scanned += 1
+            if scanned > 8000 or len(hits) >= 250:
+                break
+            try:
+                if file.stat().st_size > 2_000_000 or _is_binary(file):
+                    continue
+                with open(file, encoding="utf-8", errors="replace") as handle:
+                    for number, line in enumerate(handle, 1):
+                        if regex.search(line):
+                            hits.append(f"{file}:{number}: {line.rstrip()[:300]}")
+                            if len(hits) >= 250:
+                                break
+            except OSError:
+                continue
+        return "\n".join(hits) if hits else "Nenhuma ocorrência."
+
+    @tool(r, "show_file",
+          "Show a file to the user in the side preview panel (images, code, text). "
+          "Use it to present results you created (images, charts, documents).",
+          {"path": {"type": "string"}}, ["path"], group="arquivos")
+    def show_file(args, ctx: ToolContext):
+        path = ctx.resolve(args["path"])
+        if not path.exists():
+            return ToolResult.error(f"Arquivo não encontrado: {path}")
+        ctx.emit("preview", {"path": str(path)})
+        return f"Exibindo {path} no painel lateral."
+
+
+def _walk_files(base: Path, pattern: str | None):
+    for root, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for name in files:
+            if pattern and not fnmatch.fnmatch(name, pattern):
+                continue
+            yield Path(root) / name
+
+
+def _size(size: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            return f"{size:.0f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+# ─────────────────────────────────────────────────────────────
+# Shell
+# ─────────────────────────────────────────────────────────────
+
+def _powershell() -> list[str]:
+    exe = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
+    return [exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"]
+
+
+def _register_shell(r: ToolRegistry) -> None:
+
+    @tool(r, "run_shell",
+          "Run a command in PowerShell (NOT cmd: use Get-ChildItem, Select-String, etc.; chain with ';') on "
+          "this Windows PC and return output and exit code. Use for git, python, pip, npm, builds, tests and "
+          "system tasks. Non-interactive only.",
+          {"command": {"type": "string"},
+           "cwd": {"type": "string", "description": "Working directory. Default: workspace"},
+           "timeout": {"type": "integer", "description": "Seconds (default 120, max 900)"}},
+          ["command"], risk="exec", group="shell")
+    def run_shell(args, ctx: ToolContext):
+        cwd = ctx.resolve(args.get("cwd") or ".")
+        if not cwd.is_dir():
+            return ToolResult.error(f"Pasta de trabalho inexistente: {cwd}")
+        timeout = max(5, min(int(args.get("timeout") or 120), 900))
+        command = args["command"].strip()
+        if command[:1] in ("'", '"'):
+            command = "& " + command  # PowerShell exige o operador & para executar um caminho entre aspas
+        script = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ProgressPreference='SilentlyContinue'; "
+                  "if ($PSStyle) { $PSStyle.OutputRendering='PlainText' }; " + command)
+        proc = subprocess.Popen(
+            _powershell() + [script], cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        deadline = time.monotonic() + timeout
+        output = b""
+        while True:
+            try:
+                output, _ = proc.communicate(timeout=0.5)
+                break
+            except subprocess.TimeoutExpired:
+                if (ctx.cancel and ctx.cancel.is_set()) or time.monotonic() > deadline:
+                    proc.kill()
+                    output, _ = proc.communicate()
+                    reason = "cancelado" if ctx.cancel and ctx.cancel.is_set() else f"tempo esgotado ({timeout}s)"
+                    return ToolResult.error(f"Comando {reason}.\n{output.decode('utf-8', 'replace')[-8000:]}")
+        text = ANSI_RE.sub("", output.decode("utf-8", errors="replace")).strip()
+        return ToolResult(text=f"[exit {proc.returncode}]\n{text or '(sem saída)'}", is_error=proc.returncode != 0)
+
+
+# ─────────────────────────────────────────────────────────────
+# Web
+# ─────────────────────────────────────────────────────────────
+
+def _register_web(r: ToolRegistry) -> None:
+
+    @tool(r, "web_search",
+          "Search the public web. With read_pages=true (default) it also reads the top pages and returns "
+          "their text, so you can cite sources. Use news=true for recent news.",
+          {"query": {"type": "string"}, "read_pages": {"type": "boolean"}, "news": {"type": "boolean"}},
+          ["query"], group="web")
+    def web_search_tool(args, ctx: ToolContext):
+        from agent.actions.web_search import web_research, web_search, web_search_news
+
+        if args.get("news"):
+            return web_search_news(args["query"], max_results=8)
+        if args.get("read_pages", True):
+            return web_research(args["query"])
+        return web_search(args["query"])
+
+    @tool(r, "fetch_url", "Download a public web page and return its main text.",
+          {"url": {"type": "string"}, "max_chars": {"type": "integer"}}, ["url"], group="web")
+    def fetch_url(args, ctx: ToolContext):
+        from agent.actions.web_search import fetch_page
+
+        return fetch_page(args["url"], max_chars=min(int(args.get("max_chars") or 12000), 40000))
+
+
+# ─────────────────────────────────────────────────────────────
+# Controle do PC
+# ─────────────────────────────────────────────────────────────
+
+def _register_pc(r: ToolRegistry, services) -> None:
+
+    @tool(r, "open_app", "Open an application, file, folder or URL (e.g. 'photoshop', 'chrome', 'C:/x.pdf', 'https://...').",
+          {"name": {"type": "string"}}, ["name"], risk="exec", group="pc")
+    def open_app(args, ctx):
+        from agent.actions.open_apps import open_application
+
+        return open_application(args["name"])
+
+    @tool(r, "screenshot",
+          "Capture the screen and SEE it (image returned to vision models). Coordinates in the image map "
+          "to screen pixels using the scale reported in the result.",
+          {"region": {"type": "array", "items": {"type": "integer"}, "description": "[x, y, width, height] optional"}},
+          group="pc")
+    def screenshot(args, ctx):
+        region = tuple(args["region"]) if args.get("region") and len(args["region"]) == 4 else None
+        path = services.system.take_screenshot(region=region)
+        if not os.path.isfile(path):
+            return ToolResult.error(path)
+        preview, scale = _downscale(path)
+        ctx.emit("preview", {"path": path})
+        note = f" A imagem enviada foi reduzida: multiplique as coordenadas por {scale:.3f}." if scale != 1 else ""
+        width, height = services.system.get_screen_size()
+        return ToolResult(text=f"Screenshot salvo em {path}. Tela: {width}x{height}.{note}", images=[preview])
+
+    @tool(r, "mouse_click", "Click at screen coordinates.",
+          {"x": {"type": "integer"}, "y": {"type": "integer"},
+           "button": {"type": "string", "enum": ["left", "right", "middle"]},
+           "clicks": {"type": "integer", "description": "2 = double click"}},
+          ["x", "y"], risk="exec", group="pc")
+    def mouse_click(args, ctx):
+        return services.system.click(int(args["x"]), int(args["y"]), args.get("button", "left"), int(args.get("clicks") or 1))
+
+    @tool(r, "mouse_scroll", "Scroll the mouse wheel (positive = up).",
+          {"amount": {"type": "integer"}, "x": {"type": "integer"}, "y": {"type": "integer"}},
+          ["amount"], risk="exec", group="pc")
+    def mouse_scroll(args, ctx):
+        return services.system.scroll(int(args["amount"]), args.get("x"), args.get("y"))
+
+    @tool(r, "type_text", "Type text into the focused window (supports accents and multiple lines).",
+          {"text": {"type": "string"}}, ["text"], risk="exec", group="pc")
+    def type_text(args, ctx):
+        return services.system.type_text(args["text"])
+
+    @tool(r, "press_keys", "Press a key or shortcut, e.g. 'enter', 'ctrl+s', 'alt+tab', 'win+r'.",
+          {"keys": {"type": "string"}}, ["keys"], risk="exec", group="pc")
+    def press_keys(args, ctx):
+        return services.system.press_key(args["keys"].lower().replace(" ", ""))
+
+    @tool(r, "clipboard", "Read the clipboard (no text) or write text to it.",
+          {"text": {"type": "string", "description": "If given, copies this text"}}, group="pc")
+    def clipboard(args, ctx):
+        if args.get("text") is not None:
+            return services.system.copy_to_clipboard(args["text"])
+        return services.system.get_clipboard() or "(clipboard vazio)"
+
+    @tool(r, "system_info", "CPU, RAM, disk, battery and GPU status.", group="pc")
+    def system_info(args, ctx):
+        from agent.actions.gpu_monitor import get_nvidia_metrics
+
+        info = services.system.get_system_info()
+        gpu = get_nvidia_metrics()
+        if gpu:
+            info += (f"\n  GPU: {gpu['name']} | VRAM {gpu['memory_used_mb']}/{gpu['memory_total_mb']} MB"
+                     f" | uso {gpu['utilization_percent']}% | {gpu['temperature_c']}°C")
+        return info
+
+    @tool(r, "list_processes", "List running processes (top 25 by memory).", group="pc")
+    def list_processes(args, ctx):
+        from agent.actions.open_apps import list_running_apps
+
+        return list_running_apps()
+
+    @tool(r, "close_app", "Terminate processes whose name contains the given text (e.g. 'notepad').",
+          {"name": {"type": "string"}}, ["name"], risk="exec", group="pc")
+    def close_app(args, ctx):
+        from agent.actions.open_apps import close_application
+
+        return close_application(args["name"])
+
+    @tool(r, "set_volume", "Set the system volume (0-100).",
+          {"level": {"type": "integer"}}, ["level"], risk="exec", group="pc")
+    def set_volume(args, ctx):
+        return services.system.set_volume(int(args["level"]))
+
+
+def _downscale(path: str, max_width: int = 1568) -> tuple[str, float]:
+    """Reduz screenshots grandes para economizar tokens de visão."""
+    try:
+        from PIL import Image
+
+        with Image.open(path) as image:
+            if image.width <= max_width:
+                return path, 1.0
+            scale = image.width / max_width
+            resized = image.resize((max_width, round(image.height / scale)))
+            target = Path(path).with_name(Path(path).stem + "_ia.png")
+            resized.save(target)
+            return str(target), scale
+    except Exception:
+        return path, 1.0
+
+
+# ─────────────────────────────────────────────────────────────
+# Memória, skills, subagentes e MCP
+# ─────────────────────────────────────────────────────────────
+
+def _register_memory(r: ToolRegistry, services) -> None:
+
+    @tool(r, "remember",
+          "Save a durable fact about the user, their preferences or projects to long-term memory "
+          "(it will be in your context in future conversations).",
+          {"fact": {"type": "string"}}, ["fact"], risk="write", group="memoria")
+    def remember(args, ctx):
+        services.memory.remember_fact(args["fact"].strip())
+        return "Memorizado."
+
+    @tool(r, "recall", "Search long-term memory facts and past conversations.",
+          {"query": {"type": "string"}}, ["query"], group="memoria")
+    def recall(args, ctx):
+        facts = services.memory.search_facts(args["query"])
+        history = services.memory.get_relevant_context(args["query"], max_entries=6)
+        parts = []
+        if facts:
+            parts.append("Fatos:\n" + "\n".join(f"- {f}" for f in facts))
+        if history:
+            parts.append(history)
+        return "\n\n".join(parts) or "Nada encontrado na memória."
+
+
+def _register_skills(r: ToolRegistry, services) -> None:
+
+    @tool(r, "use_skill",
+          "Load the full instructions of a skill listed in 'Skills disponíveis'. Do this BEFORE doing a task "
+          "that matches a skill description, then follow the instructions.",
+          {"name": {"type": "string"}, "file": {"type": "string", "description": "Optional extra file inside the skill folder"}},
+          ["name"], group="skills")
+    def use_skill(args, ctx):
+        key = (args["name"].lower(), args.get("file") or "")
+        loaded = getattr(ctx.session, "loaded_skills", None)
+        if loaded is not None and key in loaded:
+            return f"A skill '{args['name']}' já foi carregada nesta conversa; siga as instruções que estão acima."
+        result = services.skills.load(args["name"], args.get("file"))
+        if loaded is not None and not result.startswith("Skill '"):
+            loaded.add(key)
+        return result
+
+
+def _register_agents(r: ToolRegistry) -> None:
+
+    @tool(r, "delegate_task",
+          "Delegate work to sub-agents that run with their own fresh context and report back. Give each "
+          "task complete, self-contained instructions. Several tasks run in parallel. Optional per task: "
+          "profile (e.g. 'pesquisador', 'programador'), model ('provider:model') or specialty — without "
+          "model, the best available model for the specialty is chosen automatically.",
+          {"tasks": {"type": "array", "items": {"type": "object", "properties": {
+              "task": {"type": "string"}, "profile": {"type": "string"}, "model": {"type": "string"},
+              "specialty": {"type": "string", "enum": ["codigo", "revisao", "pesquisa", "raciocinio",
+                                                       "visao", "imagem", "geral"]}},
+              "required": ["task"]}}},
+          ["tasks"], group="agentes")
+    def delegate_task(args, ctx: ToolContext):
+        if ctx.session is None:
+            return ToolResult.error("Sem sessão ativa para delegar.")
+        tasks = [t for t in args["tasks"] if isinstance(t, dict) and t.get("task")]
+        if not tasks:
+            return ToolResult.error("Informe ao menos uma tarefa.")
+        return ctx.session.delegate(tasks)
+
+
+def _register_mcp_search(r: ToolRegistry, services) -> None:
+
+    @tool(r, "find_tools",
+          "Load tools from connected MCP servers that are not loaded yet (e.g. REA reverse engineering, "
+          "Playwright browser). Search by keywords (English works best) or activate exact tool names. "
+          "Loaded tools become callable on your next step. With no match it lists every tool name.",
+          {"query": {"type": "string", "description": "Keywords, e.g. 'decompile function', 'list imports'"},
+           "names": {"type": "array", "items": {"type": "string"}, "description": "Exact tool names to load"},
+           "server": {"type": "string", "description": "Optional MCP server name"}},
+          group="mcp")
+    def find_tools(args, ctx: ToolContext):
+        registry = services.registry
+        servers = {args["server"]} if args.get("server") else (ctx.session.mcp_servers() if ctx.session else None)
+        found = []
+        for name in args.get("names") or []:
+            tool_obj = registry.get(name) or next((t for t in registry.all() if t.name.endswith(f"__{name}")), None)
+            if tool_obj is not None and tool_obj.source.startswith("mcp:"):
+                found.append(tool_obj)
+        if args.get("query"):
+            found += [t for t in registry.search(args["query"], limit=8, mcp_servers=servers) if t not in found]
+        if not found:
+            catalog = [t.name for t in registry.all() if t.deferred and t.source.startswith("mcp:")
+                       and (servers is None or t.source[4:] in servers)]
+            if not catalog:
+                return "Nenhuma ferramenta MCP adiada disponível."
+            return ("Nada encontrado para essa busca. Ferramentas disponíveis (carregue com names=[...]):\n"
+                    + ", ".join(sorted(catalog)))
+        if ctx.session is not None:
+            ctx.session.activate_tools(t.name for t in found)
+        return "Carregadas (já podem ser chamadas):\n" + "\n".join(
+            f"- {t.name}: {t.description[:220]}" for t in found)
+
+
+def save_artifact_bytes(data: bytes, suffix: str) -> str:
+    """Grava conteúdo binário vindo de ferramentas (ex.: imagens MCP) em data/artifacts."""
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    path = ARTIFACTS_DIR / f"{datetime.now():%Y%m%d_%H%M%S_%f}{suffix}"
+    path.write_bytes(data)
+    return str(path)

@@ -1,0 +1,24 @@
+# Nunca publicar: ambiente, modelos (GBs), chaves e dados pessoais
+venv/
+models/
+.env
+data/
+agent/memory/daily_logs/
+agent/memory/long_term/
+
+# Gerados
+__pycache__/
+*.pyc
+.pytest_cache/
+*.tmp
+
+# Binários e pesos. O repositório público é só código-fonte.
+*.exe
+*.dll
+*.pyd
+*.so
+*.dylib
+*.onnx
+*.bin
+*.gguf
+*.safetensors

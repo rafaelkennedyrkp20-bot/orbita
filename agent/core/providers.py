@@ -1,0 +1,634 @@
+"""
+providers.py — Camada única para conversar com qualquer IA.
+
+Formato interno de mensagem (independente de provedor):
+    {"role": "system"|"user"|"assistant"|"tool",
+     "content": str,
+     "images": [caminho, ...],                       # user/tool (visão)
+     "tool_calls": [{"id", "name", "arguments": dict}],  # assistant
+     "tool_call_id": str, "name": str,               # tool
+     "_native": {...}}                               # assistant: blocos originais do provedor
+
+Provedores:
+    OllamaProvider        → API nativa do Ollama (/api/chat), local
+    OpenAICompatProvider  → OpenAI, DeepSeek, Gemini, OpenRouter, Groq, xAI, Mistral,
+                            LM Studio, vLLM... qualquer endpoint /chat/completions
+    AnthropicProvider     → Claude, pelo SDK oficial `anthropic` (carregado sob demanda)
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import mimetypes
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+TextCallback = Optional[Callable[[str], None]]
+
+
+class ProviderError(RuntimeError):
+    """Erro de comunicação com o provedor (mensagem já amigável)."""
+
+
+class ToolsUnsupported(ProviderError):
+    """O modelo não aceita ferramentas nativas — o loop usa o modo por prompt."""
+
+
+@dataclass
+class ChatResult:
+    text: str = ""
+    tool_calls: list[dict] = field(default_factory=list)
+    reasoning: str = ""
+    stop_reason: str = ""
+    native: Optional[dict] = None
+    usage: dict = field(default_factory=dict)
+
+
+def new_call_id() -> str:
+    return "call_" + uuid.uuid4().hex[:20]
+
+
+def _image_b64(path: str) -> tuple[str, str]:
+    data = Path(path).read_bytes()
+    mime = mimetypes.guess_type(path)[0] or "image/png"
+    return mime, base64.b64encode(data).decode("ascii")
+
+
+def _parse_args(raw: Any) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else {"value": value}
+    except (TypeError, json.JSONDecodeError):
+        return {"__invalid_json__": str(raw)}
+
+
+class Provider:
+    """Interface comum. `chat` faz streaming e devolve o resultado consolidado."""
+
+    supports_native_tools = True
+
+    def __init__(self, name: str, cfg: dict, settings=None):
+        self.name = name
+        self.cfg = cfg
+        self.settings = settings
+
+    @property
+    def api_key(self) -> str:
+        from agent.core.settings import Settings
+
+        return Settings.api_key(self.cfg)
+
+    def supports_vision(self, model: str) -> bool:
+        if "vision" in self.cfg:
+            return bool(self.cfg["vision"])
+        return True
+
+    def chat(self, model: str, messages: list[dict], tools: list[dict] | None = None, *,
+             temperature: float | None = None, max_tokens: int | None = None,
+             on_text: TextCallback = None, on_reasoning: TextCallback = None,
+             cancel: threading.Event | None = None, **extra) -> ChatResult:
+        raise NotImplementedError
+
+    def list_models(self) -> list[str]:
+        return list(self.cfg.get("models", []))
+
+
+# ─────────────────────────────────────────────────────────────
+# HTTP helpers
+# ─────────────────────────────────────────────────────────────
+
+_RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
+
+
+def _stream_request(client: httpx.Client, url: str, payload: dict, headers: dict,
+                    attempts: int = 3) -> httpx.Response:
+    """Abre um POST em streaming com novas tentativas para falhas transitórias."""
+    delay = 1.5
+    for attempt in range(attempts):
+        try:
+            request = client.build_request("POST", url, json=payload, headers=headers)
+            response = client.send(request, stream=True)
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as error:
+            if attempt == attempts - 1:
+                raise ProviderError(f"Não foi possível conectar a {url}: {error}") from error
+            time.sleep(delay)
+            delay *= 2
+            continue
+        if response.status_code < 400:
+            return response
+        body = response.read().decode("utf-8", errors="replace")
+        response.close()
+        if response.status_code in _RETRY_STATUS and attempt < attempts - 1:
+            wait = float(response.headers.get("retry-after", delay) or delay)
+            time.sleep(min(wait, 20))
+            delay *= 2
+            continue
+        raise _http_error(response.status_code, body)
+    raise ProviderError("Falha desconhecida de rede.")
+
+
+def _http_error(status: int, body: str) -> ProviderError:
+    try:
+        detail = json.loads(body)
+        detail = detail.get("error", detail)
+        if isinstance(detail, dict):
+            detail = detail.get("message") or json.dumps(detail, ensure_ascii=False)
+    except json.JSONDecodeError:
+        detail = body[:500]
+    text = f"HTTP {status}: {detail}"
+    lowered = str(detail).lower()
+    if status == 400 and ("does not support tools" in lowered or "tool" in lowered and "not supported" in lowered
+                          or "function calling" in lowered and "not" in lowered):
+        return ToolsUnsupported(text)
+    if status in (401, 403):
+        return ProviderError(f"{text}\nVerifique a chave de API em Configurações.")
+    return ProviderError(text)
+
+
+# ─────────────────────────────────────────────────────────────
+# Ollama (local)
+# ─────────────────────────────────────────────────────────────
+
+class OllamaProvider(Provider):
+
+    VISION_HINTS = ("llava", "vision", "-vl", "vl:", "gemma3", "minicpm-v", "moondream", "qwen2.5vl", "llama4")
+
+    @property
+    def base_url(self) -> str:
+        return self.cfg.get("base_url", "http://127.0.0.1:11434").rstrip("/")
+
+    def supports_vision(self, model: str) -> bool:
+        if "vision" in self.cfg:
+            return bool(self.cfg["vision"])
+        return any(hint in model.lower() for hint in self.VISION_HINTS)
+
+    def _convert(self, model: str, messages: list[dict]) -> list[dict]:
+        vision = self.supports_vision(model)
+        out = []
+        for msg in messages:
+            role = msg["role"]
+            item: dict[str, Any] = {"role": role, "content": msg.get("content") or ""}
+            if role == "assistant" and msg.get("tool_calls"):
+                item["tool_calls"] = [
+                    {"function": {"name": c["name"], "arguments": c.get("arguments", {})}}
+                    for c in msg["tool_calls"]
+                ]
+            if role == "tool":
+                item["tool_name"] = msg.get("name", "")
+            if msg.get("images"):
+                if vision:
+                    item["images"] = [_image_b64(p)[1] for p in msg["images"] if Path(p).is_file()]
+                else:
+                    item["content"] += "\n[imagem anexada não enviada: este modelo não tem visão]"
+            out.append(item)
+        return out
+
+    def chat(self, model, messages, tools=None, *, temperature=None, max_tokens=None,
+             on_text=None, on_reasoning=None, cancel=None, **extra) -> ChatResult:
+        settings = self.settings
+        options: dict[str, Any] = {"num_ctx": int(settings.get("ollama_num_ctx", 16384)) if settings else 16384}
+        if temperature is not None:
+            options["temperature"] = temperature
+        if max_tokens:
+            options["num_predict"] = max_tokens
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": self._convert(model, messages),
+            "stream": True,
+            "options": options,
+            "keep_alive": settings.get("ollama_keep_alive", "10m") if settings else "10m",
+        }
+        if tools:
+            payload["tools"] = [{"type": "function", "function": t} for t in tools]
+
+        result = ChatResult()
+        text_parts, reasoning_parts = [], []
+        timeout = httpx.Timeout(connect=10, read=600, write=60, pool=10)
+        with httpx.Client(timeout=timeout) as client:
+            response = _stream_request(client, f"{self.base_url}/api/chat", payload, {})
+            try:
+                for line in response.iter_lines():
+                    if cancel is not None and cancel.is_set():
+                        result.stop_reason = "cancelled"
+                        break
+                    if not line.strip():
+                        continue
+                    chunk = json.loads(line)
+                    if chunk.get("error"):
+                        raise ProviderError(chunk["error"])
+                    message = chunk.get("message") or {}
+                    if message.get("thinking"):
+                        reasoning_parts.append(message["thinking"])
+                        if on_reasoning:
+                            on_reasoning(message["thinking"])
+                    if message.get("content"):
+                        text_parts.append(message["content"])
+                        if on_text:
+                            on_text(message["content"])
+                    for call in message.get("tool_calls") or []:
+                        fn = call.get("function", {})
+                        result.tool_calls.append({
+                            "id": call.get("id") or new_call_id(),
+                            "name": fn.get("name", ""),
+                            "arguments": _parse_args(fn.get("arguments")),
+                        })
+                    if chunk.get("done"):
+                        result.stop_reason = chunk.get("done_reason", "stop")
+                        result.usage = {
+                            "input_tokens": chunk.get("prompt_eval_count", 0),
+                            "output_tokens": chunk.get("eval_count", 0),
+                        }
+            finally:
+                response.close()
+        result.text = "".join(text_parts)
+        result.reasoning = "".join(reasoning_parts)
+        return result
+
+    def installed_models(self) -> list[str]:
+        """Modelos realmente instalados; lista vazia se o Ollama não responder."""
+        try:
+            response = httpx.get(f"{self.base_url}/api/tags", timeout=4)
+            response.raise_for_status()
+            return sorted(m["name"] for m in response.json().get("models", []))
+        except Exception as error:
+            logger.debug("Ollama indisponível ao listar modelos: %s", error)
+            return []
+
+    def list_models(self) -> list[str]:
+        return self.installed_models() or super().list_models()
+
+
+# ─────────────────────────────────────────────────────────────
+# OpenAI-compatível (OpenAI, DeepSeek, Gemini, OpenRouter, Groq, xAI, LM Studio...)
+# ─────────────────────────────────────────────────────────────
+
+class OpenAICompatProvider(Provider):
+
+    @property
+    def base_url(self) -> str:
+        return self.cfg.get("base_url", "https://api.openai.com/v1").rstrip("/")
+
+    def supports_vision(self, model: str) -> bool:
+        if "vision" in self.cfg:
+            return bool(self.cfg["vision"])
+        lowered = model.lower()
+        if "deepseek" in lowered and "vl" not in lowered:
+            return False
+        return True
+
+    def _headers(self) -> dict:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        if "openrouter" in self.base_url:
+            headers["HTTP-Referer"] = "https://github.com/rafaelkennedyrkp20-bot/orbita"
+            headers["X-Title"] = "Orbita"
+        return headers
+
+    def _convert(self, model: str, messages: list[dict]) -> list[dict]:
+        vision = self.supports_vision(model)
+        out: list[dict] = []
+        pending_images: list[str] = []
+
+        def flush_images():
+            if pending_images and vision:
+                parts = [{"type": "text", "text": "Imagens retornadas pelas ferramentas acima:"}]
+                for path in pending_images:
+                    if Path(path).is_file():
+                        mime, data = _image_b64(path)
+                        parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}})
+                out.append({"role": "user", "content": parts})
+            pending_images.clear()
+
+        for msg in messages:
+            role = msg["role"]
+            if role != "tool":
+                flush_images()
+            if role == "assistant":
+                item: dict[str, Any] = {"role": "assistant", "content": msg.get("content") or None}
+                if msg.get("tool_calls"):
+                    item["tool_calls"] = [{
+                        "id": c["id"], "type": "function",
+                        "function": {"name": c["name"], "arguments": json.dumps(c.get("arguments", {}), ensure_ascii=False)},
+                    } for c in msg["tool_calls"]]
+                out.append(item)
+            elif role == "tool":
+                out.append({"role": "tool", "tool_call_id": msg.get("tool_call_id", ""), "content": msg.get("content") or ""})
+                pending_images.extend(msg.get("images") or [])
+            elif role == "user" and msg.get("images") and vision:
+                parts = [{"type": "text", "text": msg.get("content") or ""}]
+                for path in msg["images"]:
+                    if Path(path).is_file():
+                        mime, data = _image_b64(path)
+                        parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}})
+                out.append({"role": "user", "content": parts})
+            else:
+                out.append({"role": role, "content": msg.get("content") or ""})
+        flush_images()
+        return out
+
+    def chat(self, model, messages, tools=None, *, temperature=None, max_tokens=None,
+             on_text=None, on_reasoning=None, cancel=None, **extra) -> ChatResult:
+        payload: dict[str, Any] = {"model": model, "messages": self._convert(model, messages), "stream": True}
+        if tools:
+            payload["tools"] = [{"type": "function", "function": t} for t in tools]
+        if temperature is not None and not self.cfg.get("omit_temperature"):
+            payload["temperature"] = temperature
+        if max_tokens:
+            payload[self.cfg.get("max_tokens_param", "max_tokens")] = max_tokens
+        if "openai.com" in self.base_url or "deepseek" in self.base_url:
+            payload["stream_options"] = {"include_usage": True}
+
+        timeout = httpx.Timeout(connect=15, read=600, write=60, pool=10)
+        with httpx.Client(timeout=timeout) as client:
+            try:
+                response = _stream_request(client, f"{self.base_url}/chat/completions", payload, self._headers())
+            except ToolsUnsupported:
+                raise
+            except ProviderError as error:
+                # Alguns modelos rejeitam parâmetros opcionais: tenta de novo sem eles.
+                message = str(error).lower()
+                dropped = [k for k in ("temperature", "max_tokens", "max_completion_tokens", "stream_options")
+                           if k in payload and k in message]
+                if not dropped:
+                    raise
+                for key in dropped:
+                    payload.pop(key, None)
+                response = _stream_request(client, f"{self.base_url}/chat/completions", payload, self._headers())
+            return self._consume(response, on_text, on_reasoning, cancel)
+
+    @staticmethod
+    def _consume(response: httpx.Response, on_text, on_reasoning, cancel) -> ChatResult:
+        result = ChatResult()
+        text_parts, reasoning_parts = [], []
+        calls: dict[int, dict] = {}
+        try:
+            for line in response.iter_lines():
+                if cancel is not None and cancel.is_set():
+                    result.stop_reason = "cancelled"
+                    break
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                if chunk.get("error"):
+                    raise ProviderError(str(chunk["error"]))
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                    result.usage = {"input_tokens": usage.get("prompt_tokens", 0),
+                                    "output_tokens": usage.get("completion_tokens", 0)}
+                for choice in chunk.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                    if reasoning:
+                        reasoning_parts.append(reasoning)
+                        if on_reasoning:
+                            on_reasoning(reasoning)
+                    if delta.get("content"):
+                        text_parts.append(delta["content"])
+                        if on_text:
+                            on_text(delta["content"])
+                    for tc in delta.get("tool_calls") or []:
+                        slot = calls.setdefault(tc.get("index", len(calls)), {"id": "", "name": "", "arguments": ""})
+                        if tc.get("id"):
+                            slot["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            slot["name"] += fn["name"]
+                        if fn.get("arguments"):
+                            slot["arguments"] += fn["arguments"]
+                    if choice.get("finish_reason"):
+                        result.stop_reason = choice["finish_reason"]
+        finally:
+            response.close()
+        result.text = "".join(text_parts)
+        result.reasoning = "".join(reasoning_parts)
+        result.tool_calls = [
+            {"id": slot["id"] or new_call_id(), "name": slot["name"], "arguments": _parse_args(slot["arguments"])}
+            for _, slot in sorted(calls.items()) if slot["name"]
+        ]
+        return result
+
+    def list_models(self) -> list[str]:
+        if self.cfg.get("api_key_env") and not self.api_key:
+            return super().list_models()
+        try:
+            response = httpx.get(f"{self.base_url}/models", headers=self._headers(), timeout=8)
+            response.raise_for_status()
+            ids = sorted({item["id"] for item in response.json().get("data", []) if item.get("id")})
+            return ids or super().list_models()
+        except Exception as error:
+            logger.debug("Não foi possível listar modelos de %s: %s", self.name, error)
+            return super().list_models()
+
+
+# ─────────────────────────────────────────────────────────────
+# Anthropic (Claude) — SDK oficial
+# ─────────────────────────────────────────────────────────────
+
+class AnthropicProvider(Provider):
+
+    # Modelos que aceitam o fallback automático do servidor em caso de recusa.
+    FALLBACK_MODELS = ("claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5")
+
+    def __init__(self, name, cfg, settings=None):
+        super().__init__(name, cfg, settings)
+        self._client = None
+
+    def _sdk(self):
+        try:
+            import anthropic
+        except ImportError as error:
+            raise ProviderError("Instale o SDK: pip install anthropic") from error
+        if self._client is None:
+            kwargs: dict[str, Any] = {"max_retries": 2}
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+            if self.cfg.get("base_url"):
+                kwargs["base_url"] = self.cfg["base_url"]
+            self._client = anthropic.Anthropic(**kwargs)
+        return anthropic, self._client
+
+    @staticmethod
+    def _image_block(path: str) -> dict:
+        mime, data = _image_b64(path)
+        return {"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}
+
+    def _convert(self, model: str, messages: list[dict]) -> tuple[str, list[dict]]:
+        system_parts: list[str] = []
+        out: list[dict] = []
+
+        def push(role: str, blocks: list[dict]):
+            # A API exige alternância user/assistant: junta blocos consecutivos do mesmo papel.
+            if out and out[-1]["role"] == role:
+                out[-1]["content"].extend(blocks)
+            else:
+                out.append({"role": role, "content": blocks})
+
+        for msg in messages:
+            role = msg["role"]
+            if role == "system":
+                system_parts.append(msg.get("content") or "")
+            elif role == "user":
+                blocks = [self._image_block(p) for p in msg.get("images") or [] if Path(p).is_file()]
+                blocks.append({"type": "text", "text": msg.get("content") or "(vazio)"})
+                push("user", blocks)
+            elif role == "assistant":
+                native = msg.get("_native") or {}
+                if native.get("provider") == "anthropic" and native.get("content"):
+                    # Devolve os blocos originais (inclusive "thinking") sem alterar.
+                    push("assistant", list(native["content"]))
+                    continue
+                blocks = []
+                if msg.get("content"):
+                    blocks.append({"type": "text", "text": msg["content"]})
+                for call in msg.get("tool_calls") or []:
+                    blocks.append({"type": "tool_use", "id": call["id"], "name": call["name"],
+                                   "input": call.get("arguments", {})})
+                push("assistant", blocks or [{"type": "text", "text": "(sem texto)"}])
+            elif role == "tool":
+                content: list[dict] = [{"type": "text", "text": msg.get("content") or "(sem saída)"}]
+                content += [self._image_block(p) for p in msg.get("images") or [] if Path(p).is_file()]
+                block = {"type": "tool_result", "tool_use_id": msg.get("tool_call_id", ""), "content": content}
+                if msg.get("is_error"):
+                    block["is_error"] = True
+                push("user", [block])
+        return "\n\n".join(system_parts), out
+
+    def chat(self, model, messages, tools=None, *, temperature=None, max_tokens=None,
+             on_text=None, on_reasoning=None, cancel=None, effort: str | None = None, **extra) -> ChatResult:
+        anthropic, client = self._sdk()
+        system, converted = self._convert(model, messages)
+        params: dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens or 64000,
+            "messages": converted,
+            "cache_control": {"type": "ephemeral"},
+        }
+        if system:
+            params["system"] = system
+        if tools:
+            params["tools"] = [{
+                "name": t["name"], "description": t.get("description", ""),
+                "input_schema": t.get("parameters") or {"type": "object", "properties": {}},
+                "eager_input_streaming": True,
+            } for t in tools]
+        if effort:
+            params["output_config"] = {"effort": effort}
+
+        use_fallback = model in self.FALLBACK_MODELS
+        try:
+            return self._stream(client, params, use_fallback, on_text, on_reasoning, cancel)
+        except anthropic.BadRequestError as error:
+            if use_fallback and "fallback" in str(error).lower():
+                return self._stream(client, params, False, on_text, on_reasoning, cancel)
+            raise ProviderError(f"Claude recusou a requisição: {error}") from error
+        except anthropic.AuthenticationError as error:
+            raise ProviderError("Chave da Anthropic inválida. Configure ANTHROPIC_API_KEY.") from error
+        except anthropic.APIStatusError as error:
+            raise ProviderError(f"Erro da API Anthropic ({error.status_code}): {error}") from error
+        except anthropic.APIConnectionError as error:
+            raise ProviderError(f"Sem conexão com a API Anthropic: {error}") from error
+
+    def _stream(self, client, params, use_fallback, on_text, on_reasoning, cancel) -> ChatResult:
+        if use_fallback:
+            manager = client.beta.messages.stream(
+                betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params)
+        else:
+            manager = client.messages.stream(**params)
+        result = ChatResult()
+        with manager as stream:
+            for event in stream:
+                if cancel is not None and cancel.is_set():
+                    result.stop_reason = "cancelled"
+                    break
+                if event.type == "content_block_delta":
+                    delta = event.delta
+                    if delta.type == "text_delta" and on_text:
+                        on_text(delta.text)
+                    elif delta.type == "thinking_delta" and on_reasoning and delta.thinking:
+                        on_reasoning(delta.thinking)
+            if result.stop_reason == "cancelled":
+                return result
+            final = stream.get_final_message()
+
+        blocks = [block.model_dump(exclude_none=True) for block in final.content]
+        result.native = {"provider": "anthropic", "model": params["model"], "content": blocks}
+        result.stop_reason = final.stop_reason or ""
+        result.usage = {"input_tokens": final.usage.input_tokens, "output_tokens": final.usage.output_tokens}
+        texts = []
+        for block in final.content:
+            if block.type == "text":
+                texts.append(block.text)
+            elif block.type == "thinking":
+                result.reasoning += getattr(block, "thinking", "") or ""
+            elif block.type == "tool_use":
+                result.tool_calls.append({"id": block.id, "name": block.name,
+                                          "arguments": block.input if isinstance(block.input, dict) else {}})
+        result.text = "".join(texts)
+        if result.stop_reason == "refusal":
+            details = getattr(final, "stop_details", None)
+            category = getattr(details, "category", None) if details else None
+            result.text += f"\n\n[O modelo recusou a solicitação{f' ({category})' if category else ''}.]"
+            result.tool_calls = []
+        elif result.stop_reason == "max_tokens" and result.tool_calls:
+            # Entrada de ferramenta truncada: não executar.
+            result.tool_calls = []
+            result.text += "\n\n[Resposta cortada pelo limite de tokens antes de concluir a chamada de ferramenta.]"
+        return result
+
+    def list_models(self) -> list[str]:
+        if not self.api_key:
+            return super().list_models()
+        try:
+            _, client = self._sdk()
+            ids = [model.id for model in client.models.list(limit=100)]
+            return ids or super().list_models()
+        except Exception as error:
+            logger.debug("Não foi possível listar modelos Claude: %s", error)
+            return super().list_models()
+
+
+PROVIDER_TYPES = {
+    "ollama": OllamaProvider,
+    "openai": OpenAICompatProvider,
+    "anthropic": AnthropicProvider,
+}
+
+_cache: dict[tuple, Provider] = {}
+_cache_lock = threading.Lock()
+
+
+def get_provider(name: str, settings) -> Provider:
+    """Instancia (com cache) o provedor configurado em `settings`."""
+    cfg = settings.provider(name)
+    key = (name, json.dumps(cfg, sort_keys=True), settings.api_key(cfg))
+    with _cache_lock:
+        if key not in _cache:
+            if cfg.get("type") == "grok_cli":
+                from agent.core.grok_cli import GrokBuildProvider  # import tardio: evita ciclo
+                PROVIDER_TYPES["grok_cli"] = GrokBuildProvider
+            kind = PROVIDER_TYPES.get(cfg.get("type", "openai"))
+            if kind is None:
+                raise ProviderError(f"Tipo de provedor inválido: {cfg.get('type')}")
+            _cache[key] = kind(name, cfg, settings)
+        return _cache[key]

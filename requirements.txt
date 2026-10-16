@@ -1,0 +1,38 @@
+# AgentePessoal — Dependências Python
+# Instale com: pip install -r requirements.txt  (o Iniciar_Orbita.bat faz isso sozinho)
+
+# ─── IA: provedores e protocolo ─────────────────
+httpx>=0.27                    # Ollama e APIs compatíveis com OpenAI (DeepSeek, GPT, Gemini, OpenRouter...)
+anthropic>=1.15,<2             # SDK oficial do Claude (carregado só se usar o provedor Anthropic)
+mcp>=2.3,<3                    # Model Context Protocol: conecta servidores como o REA, Playwright, Windows...
+pyyaml>=6.0                    # Frontmatter das skills (SKILL.md)
+
+# ─── Interface ──────────────────────────────────
+PyQt6>=6.7.0                   # Janela principal
+PyQt6-WebEngine>=6.7.0         # Motor da interface (Chromium embutido, sem internet)
+markdown>=3.6                  # Respostas em Markdown
+pygments>=2.18                 # Destaque de sintaxe nos blocos de código
+
+# ─── Voz ────────────────────────────────────────
+faster-whisper>=1.0.3          # Transcrição offline (Whisper otimizado)
+sounddevice>=0.4.7             # Microfone e reprodução
+soundfile>=0.12.1              # Arquivos de áudio
+numpy>=1.26.0
+silero-vad>=6.2.0              # Detecção de fala (CPU/ONNX)
+kokoro-onnx>=0.5.0             # Voz neural local (pf_dora)
+pyttsx3>=2.90                  # Voz do Windows (fallback)
+keyboard>=0.13.5               # Atalho do modo voz no terminal
+
+# ─── Web ────────────────────────────────────────
+ddgs>=9.0.0                    # Busca pública sem chave
+beautifulsoup4>=4.12.0         # Extrai texto das páginas
+requests>=2.32.3
+
+# ─── Controle do sistema ────────────────────────
+pyautogui>=0.9.54              # Mouse, teclado, screenshot
+psutil>=6.0.0                  # CPU, RAM, processos
+pyperclip>=1.9.0               # Área de transferência
+
+# ─── Utilitários ────────────────────────────────
+python-dotenv>=1.0.1           # Chaves e opções do .env
+pytest>=8.0                    # Testes (python -m pytest tests)
