@@ -29,6 +29,7 @@ Você ──► GUI (agent/gui.py) / terminal / voz
 | `agent/core/settings.py` | Preferências (`data/settings.json`), catálogo de provedores, chaves no `.env`, vínculo modelo→perfil |
 | `agent/core/providers.py` | Adaptadores de IA com formato interno único de mensagens; streaming; detecção de modelo sem ferramentas |
 | `agent/core/grok_cli.py` | Grok Build (xAI) com a conta do usuário: login/estado do CLI oficial e provedor "agente externo" (`grok -p --resume`) |
+| `agent/core/grok_bridge.py` | Ponte MCP "orbita" para o Grok Build: com ele como principal, chama a equipe (`delegate_task`), skills, ferramentas de criação e `check_web_page` do Órbita, com as permissões de sempre |
 | `agent/core/agent_loop.py` | `AgentSession`: loop, permissões, contexto, freio de tokens, ferramentas por prompt, delegação |
 | `agent/core/tools.py` | `Tool`, `ToolRegistry`, `ToolResult`, decorador `tool()`; busca de ferramentas adiadas |
 | `agent/core/profiles.py` | Perfis/equipe (`data/profiles/*.json`): prompt de sistema, prompt inicial, modelo, ferramentas |

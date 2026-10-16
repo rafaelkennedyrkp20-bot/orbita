@@ -382,3 +382,13 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   status `falta` com instrução de instalação), `platform_problem` (campo `platforms`; windows-mcp sem o campo = só
   Windows → `indisponivel`, toggle travado), `error_text` abre ExceptionGroup aninhado. Status novos não acendem o
   alerta vermelho. Testes: 3 novos (falhavam antes). Janela real simulando Linux sem Node conferida. pytest 183 + 2.
+- **2026-10-16 — Claude Opus 5.5**: usuário: "o grok não tá usando os agentes, tá buscando outras coisas no PC".
+  Causa: Grok principal = agente externo (`_run_external`), só com as ferramentas do CLI; equipe/skills/toolbox do
+  Órbita não existiam para ele. `grok --help`: sem MCP por execução, só via config → `grok_bridge.py`: servidor TCP
+  local (token, chave por processo via env `ORBITA_GROK_BRIDGE_KEY`, para ajudantes em paralelo não se misturarem) +
+  servidor MCP stdio (`python -m agent.core.grok_bridge`) registrado com `grok mcp add orbita` (user scope, uma vez
+  por execução). Regras do 1º turno com a equipe; lembrete curto nos seguintes. Segundo bug achado no teste real:
+  river com lista de modelos vazia (efeito da limpeza da chave colada) não entrava na tabela da equipe → o Grok passou
+  ~100 s vasculhando o PC atrás do nome do DeepSeek; `Settings.remember_models`. Verificado com o Grok real: chamou
+  `toolbox_list` pela ponte (7 s) e delegou para `river:deepseek-ai/DeepSeek-V4.1-Flash`, que criou e conferiu o
+  arquivo (32 s no total; antes ~120 s). pytest 190 + 2 pulados.

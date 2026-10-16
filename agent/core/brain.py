@@ -164,6 +164,8 @@ class Brain:
         """Troca o modelo; se houver perfil vinculado a ele, ativa o perfil. Retorna o perfil aplicado."""
         self.settings.set("provider", provider, save=False)
         self.settings.set("model", model)
+        if provider != "ollama":   # modelo usado fica na lista do provedor (a equipe passa a enxergá-lo)
+            self.settings.remember_models(provider, [model])
         bound = self.settings.profile_for_model(provider, model)
         if bound and bound in self.profiles.profiles:
             self.settings.set("active_profile", bound)

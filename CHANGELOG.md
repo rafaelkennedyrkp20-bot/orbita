@@ -19,6 +19,10 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## [Não lançado]
 
 ### Melhorias
+- **Grok Build agora usa a equipe do Órbita**: com o Grok como modelo principal, ele recebe as ferramentas do
+  Órbita por um servidor MCP local ("orbita", registrado uma vez no Grok): equipe de agentes com outros modelos
+  (DeepSeek, GLM…), skills, Blender/Godot/ImageMagick e teste de página. Antes ele não via nada disso e saía
+  procurando "DeepSeek" e "Blender" pelo PC. As chamadas aparecem no painel ao vivo e pedem permissão como as demais.
 - **Troca rápida de modelo no topo**: clicar no nome do modelo abre a lista de modelos da API (busca no provedor
   na primeira vez), com pesquisa, setas + Enter e troca de provedor, sem passar por Configurações.
 - **Ferramentas de criação** (página Conexões): ImageMagick, OpenSCAD, Blender, Godot e FFmpeg, que a IA sabe usar
@@ -62,6 +66,8 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   "unhandled errors in a TaskGroup". Agora o Órbita confere o programa antes de ligar e mostra "precisa instalar" com
   o comando certo (Node.js para `npx`, uv para `uvx`); o servidor `windows` aparece como "indisponível neste sistema"
   fora do Windows; e erros de conexão mostram a causa real em vez do "TaskGroup".
+- Modelos de APIs próprias (ex.: river) não apareciam para a equipe quando a lista salva estava vazia: o modelo
+  escolhido passa a ficar na lista do provedor, e a lista buscada na API preenche uma lista vazia.
 - Atualização automática que não "pegava" (relato de usuário no Linux): o programa regravava o ícone `app.ico` ao
   abrir e o git passava a acusar "alteração local", então a atualização era recusada. O ícone não é mais regravado, o
   atualizador restaura sozinho os arquivos que o próprio programa gera e ignora mudança só de permissão (`chmod +x`).

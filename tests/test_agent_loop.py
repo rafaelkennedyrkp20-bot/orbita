@@ -269,6 +269,42 @@ def test_external_agent_keeps_session_and_rules(brain, monkeypatch):
     assert calls[1]["permission"] == "livre"
 
 
+def test_grok_as_main_model_gets_orbita_team_through_the_bridge(brain, monkeypatch, tmp_path):
+    """Caso real: Grok como principal pedia "agentes com o DeepSeek" e saía procurando DeepSeek e Blender no PC."""
+    from agent.core import grok_bridge
+
+    bridge = grok_bridge.Bridge(info_file=tmp_path / "ponte.json")
+    monkeypatch.setattr(grok_bridge, "get_bridge", lambda: bridge)
+    seen = []
+
+    class FakeGrok:
+        external_agent = True
+        supports_native_tools = False
+
+        def bridge_ready(self):
+            return True
+
+        def run_agent(self, prompt, **kwargs):
+            key = kwargs["env"][grok_bridge.KEY_ENV]               # o processo do Grok recebe a chave da sessão
+            tools = bridge.handle({"token": bridge.token, "key": key, "op": "tools"})["tools"]
+            denied = bridge.handle({"token": bridge.token, "key": key, "op": "call", "name": "run_shell",
+                                    "arguments": {"command": "dir"}})
+            seen.append({"prompt": prompt, "rules": kwargs["rules"], "tools": [t["name"] for t in tools],
+                         "denied": denied})
+            return "feito", "sessao-1", {}
+
+    monkeypatch.setattr(loop, "get_provider", lambda name, settings: FakeGrok())
+    s = AgentSession(brain, brain.profiles.get("geral"), "grok", "grok-4.7", approve=lambda r: "no")
+    assert s.run("cria um jogo usando agentes com o deepseek") == "feito"
+    s.run("e agora?")
+    first, second = seen
+    assert "delegate_task" in first["tools"] and "run_shell" not in first["tools"]   # ler/editar/terminal: os do Grok
+    assert first["denied"]["is_error"]
+    assert "MCP 'orbita'" in first["rules"] and "## Sua equipe (delegate_task)" in first["rules"]
+    assert grok_bridge.TURN_REMINDER in second["prompt"]                              # regras só vão no 1º turno
+    assert bridge.sessions == {}                                                      # turno acabou: desanexada
+
+
 def test_delegate_structured_contract_and_verify(brain, provider):
     seen_prompts = []
 

@@ -123,6 +123,13 @@ class GrokBuildProvider(Provider):
     def supports_vision(self, model: str) -> bool:
         return False
 
+    def bridge_ready(self) -> bool:
+        """Servidor MCP "orbita" registrado no Grok (equipe, skills e ferramentas do Órbita — grok_bridge.py)."""
+        from agent.core import grok_bridge
+
+        exe = executable()
+        return bool(exe) and grok_bridge.ensure_registered(exe)
+
     def list_models(self) -> list[str]:
         exe = executable()
         if exe:
@@ -149,7 +156,8 @@ class GrokBuildProvider(Provider):
                   on_text: Optional[Callable[[str], None]] = None,
                   on_reasoning: Optional[Callable[[str], None]] = None,
                   on_tool: Optional[Callable[[str, dict], None]] = None,
-                  cancel: Optional[threading.Event] = None) -> tuple[str, Optional[str], dict]:
+                  cancel: Optional[threading.Event] = None,
+                  env: Optional[dict] = None) -> tuple[str, Optional[str], dict]:
         """Executa um turno do Grok Build. Devolve (texto, id da sessão, uso de tokens)."""
         exe = executable()
         if not exe:
@@ -179,7 +187,8 @@ class GrokBuildProvider(Provider):
             command += ["--max-turns", str(max_turns)]
 
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
-                                   encoding="utf-8", errors="replace", creationflags=_NO_WINDOW)
+                                   encoding="utf-8", errors="replace", creationflags=_NO_WINDOW,
+                                   env={**os.environ, **env} if env else None)
         watcher = None
         if cancel is not None:
             def watch():

@@ -750,6 +750,9 @@ class Api(QObject):
                 models = self.brain.list_models(provider)
             except Exception:
                 models = []
+            if models and provider != "ollama":
+                clean = [m for m in models if not looks_like_secret(m, self._known_keys(provider))]
+                self.brain.settings.remember_models(provider, clean, only_if_empty=True)
             self.push({"type": "models", "provider": provider, "models": models})
         threading.Thread(target=work, daemon=True).start()
 

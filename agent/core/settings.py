@@ -264,6 +264,21 @@ class Settings:
         cfg = providers[name]
         return {**cfg, "models": list(cfg.get("models", []))}
 
+    def remember_models(self, name: str, models: list[str], *, only_if_empty: bool = False) -> bool:
+        """Guarda modelos na lista do provedor: a equipe (tabela de modelos) só enxerga modelos listados."""
+        if name not in self._merged_providers():
+            return False
+        current = self.provider(name).get("models", [])
+        if only_if_empty and current:
+            return False
+        merged = list(dict.fromkeys([*current, *(str(m).strip() for m in models if str(m).strip())]))[:40]
+        if merged == current:
+            return False
+        stored = dict(self.get("providers") or {})
+        stored[name] = {**(stored.get(name) or {}), "models": merged}
+        self.set("providers", stored)
+        return True
+
     def add_custom_provider(self, *, label: str, base_url: str, api_key: str = "",
                             models: list[str] | None = None) -> str:
         """Registra uma API compatível com a OpenAI. A chave, se houver, vai para o .env."""

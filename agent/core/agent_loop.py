@@ -24,12 +24,13 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-from agent.core import capabilities, integration, routing, teamwork
+from agent.core import capabilities, grok_bridge, integration, routing, teamwork
 from agent.core.profiles import Profile
 from agent.core.providers import ChatResult, ProviderError, ToolsUnsupported, get_provider, new_call_id
 from agent.core.settings import resolve_workspace
@@ -547,14 +548,24 @@ class AgentSession:
         facts = self.brain.memory.facts(15) if "memoria" in self.tool_groups() else []
         if facts:
             rules.append("Sobre o usuário: " + "; ".join(facts))
+        # Ponte MCP: o Grok usa a equipe, as skills e as ferramentas do Órbita (grok_bridge.py).
+        bridge = None
+        if getattr(provider, "bridge_ready", None) and provider.bridge_ready():
+            bridge = grok_bridge.get_bridge()
+            team = self._team_text() if "agentes" in self.tool_groups() else ""
+            rules.append(grok_bridge.rules_text(team))
         prompt = text
+        if bridge is not None and self.external_session is not None:
+            prompt = f"{text}\n\n({grok_bridge.TURN_REMINDER})"   # as regras só vão na primeira mensagem
+        if not self.depth and getattr(self, "_turn_hint", ""):
+            prompt = f"{prompt}\n\n{self._turn_hint}"
         if self.external_session is None:
             # Primeiro turno nesta sessão do Grok: leva junto o contexto recente da conversa.
             recent = [m for m in history if m["role"] in ("user", "assistant") and m.get("content")][-6:]
             if recent:
                 context = "\n".join(f"{'Usuário' if m['role'] == 'user' else 'Assistente'}: {m['content'][:700]}"
                                     for m in recent)
-                prompt = f"Contexto da conversa até aqui:\n{context}\n\nPedido atual:\n{text}"
+                prompt = f"Contexto da conversa até aqui:\n{context}\n\nPedido atual:\n{prompt}"
 
         def on_text(chunk: str):
             if self.depth == 0:
@@ -571,11 +582,13 @@ class AgentSession:
 
         self.events("model_start", {"agent": self.label, "model": f"{self.provider_name}:{self.model}"})
         try:
-            answer, session_id, usage = provider.run_agent(
-                prompt, model=self.model, cwd=str(self.workspace), session_id=self.external_session,
-                rules="\n\n".join(r for r in rules if r), permission=self.settings.get("permission_mode", "auto"),
-                max_turns=self.profile.max_steps, on_text=on_text, on_reasoning=on_reasoning, on_tool=on_tool,
-                cancel=self.cancel)
+            with (bridge.attached(self) if bridge is not None else nullcontext()) as key:
+                extra = {"env": {grok_bridge.KEY_ENV: key}} if key else {}
+                answer, session_id, usage = provider.run_agent(
+                    prompt, model=self.model, cwd=str(self.workspace), session_id=self.external_session,
+                    rules="\n\n".join(r for r in rules if r), permission=self.settings.get("permission_mode", "auto"),
+                    max_turns=self.profile.max_steps, on_text=on_text, on_reasoning=on_reasoning, on_tool=on_tool,
+                    cancel=self.cancel, **extra)
         except ProviderError as error:
             self.events("error", {"message": str(error), "agent": self.label})
             return f"⚠️ {error}"
@@ -963,6 +976,39 @@ class AgentSession:
                 self.events("status", {"text": "A equipe entregou partes que não se encaixam; corrigindo…",
                                        "agent": self.label})
         return ToolResult(text="\n\n".join(reports))
+
+    # ── Ponte do Grok (grok_bridge.py) ───────────────────────
+
+    def _bridge_tool(self, name: str) -> Optional[Tool]:
+        tool = self.brain.registry.get(name) if name in grok_bridge.EXPOSED else None
+        return tool if tool is not None and tool.group in self.tool_groups() else None
+
+    def bridge_tools(self) -> list[dict]:
+        """Ferramentas do Órbita que o Grok pode chamar, conforme os grupos liberados no perfil."""
+        return [tool.schema() for name in grok_bridge.EXPOSED if (tool := self._bridge_tool(name))]
+
+    def run_bridge_tool(self, name: str, args: dict) -> ToolResult:
+        """Chamada do Grok pela ponte: mesma permissão e mesmo painel ao vivo das chamadas normais."""
+        tool = self._bridge_tool(name)
+        if tool is None:
+            return ToolResult.error(f"Ferramenta '{name}' não está liberada neste perfil do Órbita.")
+        if self.cancel.is_set():
+            return ToolResult.error("Cancelado pelo usuário.")
+        call_id = new_call_id()
+        self.events("tool_start", {"id": call_id, "name": name, "args": args, "agent": self.label})
+        answer = "yes"
+        if self._needs_approval(tool):
+            answer = (self.approve({"type": "tool", "tool": name, "risk": tool.risk, "args": args, "agent": self.label})
+                      if self.approve else "no")
+            if answer == "always":
+                self.always_allowed.add(name)
+        if answer in ("yes", "always"):
+            result = tool.run(args, self._context())
+        else:
+            result = ToolResult.error("O usuário NEGOU esta ação. Não tente de novo da mesma forma.")
+        self.events("tool_end", {"id": call_id, "name": name, "result": result.text[:4000],
+                                 "is_error": result.is_error, "images": result.images, "agent": self.label})
+        return result
 
     def _run_checked(self, tool: Tool, args: dict) -> ToolResult:
         """Executa uma ferramenta fora do fluxo do modelo, respeitando o modo de permissão."""

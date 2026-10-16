@@ -96,6 +96,27 @@ def test_probe_lists_models_and_normalizes_the_base_url(monkeypatch):
     assert "http" in refused["error"]
 
 
+def test_used_models_become_visible_to_the_team(tmp_path, monkeypatch):
+    """Caso real: API própria (river) com chave e lista de modelos vazia não aparecia para a equipe — o Grok
+    gastou ~100 s procurando no PC o nome do DeepSeek para delegar."""
+    from agent.core import routing
+
+    settings = Settings(tmp_path / "settings.json")
+    monkeypatch.setattr(Settings, "save_api_key", staticmethod(lambda env, value: None))
+    monkeypatch.setattr(Settings, "api_key", lambda self, cfg: "rv-teste" if cfg.get("api_key_env") else "")
+    settings.add_custom_provider(label="river", base_url="https://api.exemplo/v1", api_key="rv-teste")
+    refs = lambda: routing.candidate_refs(settings, ("grok", "grok-4.7"), [], [])  # noqa: E731
+    assert not any(r.startswith("river:") for r in refs())
+
+    assert settings.remember_models("river", ["deepseek-ai/DeepSeek-V4.1-Flash"])
+    assert "river:deepseek-ai/DeepSeek-V4.1-Flash" in refs()
+    # Lista vinda da API só preenche quando estava vazia (não incha provedores com centenas de modelos)
+    assert not settings.remember_models("river", ["zai-org/GLM-5.3-Flash"], only_if_empty=True)
+    assert settings.remember_models("river", ["zai-org/GLM-5.3-Flash"])
+    assert settings.provider("river")["models"] == ["deepseek-ai/DeepSeek-V4.1-Flash", "zai-org/GLM-5.3-Flash"]
+    assert not settings.remember_models("nao-existe", ["x"])
+
+
 def test_local_gateway_without_key_end_to_end(tmp_path):
     """Gateway local sem chave (ex.: OmniRoute em 127.0.0.1:20128): endereço sem /v1, adicionar e listar modelos."""
     import json
