@@ -360,3 +360,17 @@ label.row { cursor: pointer; }
 #topbar #chip-perm { flex: none; max-width: none; }
 #topbar #chip-project { flex: none; max-width: 220px; }
 #topbar #chip-project.need { border-style: dashed; border-color: var(--accent); }
+/* Projetos recentes no diálogo */
+.recent { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 1px solid var(--line); background: var(--bg2); color: var(--text); border-radius: 10px; padding: 8px 10px; cursor: pointer; }
+.recent:hover { border-color: var(--accent); }
+.recent span { display: flex; flex-direction: column; min-width: 0; }
+.recent small { color: var(--dim); font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* O compositor nunca é empurrado para fora da janela: só a área de mensagens rola */
+#chat-main { min-height: 0; overflow: hidden; }
+#messages { min-height: 0; }
+/* Topo: em janelas mais estreitas, os chips encolhem e o texto do medidor some */
+#topbar #chip-profile { max-width: 180px; }
+#topbar #chip-model { max-width: 200px; }
+@media (max-width: 1700px) { #meter-txt { display: none; } #topbar #chip-project { max-width: 170px; } }
+@media (max-width: 1450px) { #profile-name { display: none; } }
+.toast span { overflow-wrap: anywhere; }

@@ -1,6 +1,5 @@
 """Pasta de projeto e API compatível com a OpenAI adicionada na mão."""
 
-from pathlib import Path
 
 import httpx
 

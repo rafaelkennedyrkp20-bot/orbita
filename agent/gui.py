@@ -32,6 +32,7 @@ from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMainWindow, QMenu, QSystemTrayIcon
 
+from agent import __version__
 from agent.core import grok_cli, routing
 from agent.core.brain import Brain
 from agent.core.config import (
@@ -228,6 +229,8 @@ class Api(QObject):
             "provider": provider, "model": model, "model_label": _short_model(f"{provider}:{model}"),
             "workspace": str(workspace),
             "workspace_name": workspace.name,
+            "recent_workspaces": brain.recent_workspaces(),
+            "projects_parent": str(brain.default_projects_parent()),
             "workspace_set": bool((brain.profile.workspace or "").strip() or (settings.get("default_workspace") or "").strip()),
             "providers": providers,
             "mcp": brain.mcp.status(),
@@ -243,6 +246,7 @@ class Api(QObject):
             "all_groups": ALL_GROUPS,
             "quick_prompts": QUICK_PROMPTS,
             "pygments_css": render.pygments_css(),
+            "version": __version__,
         }
 
     def _state_json(self) -> str:

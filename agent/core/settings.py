@@ -111,6 +111,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "onboarded": False,
     "user_name": "",
     "default_workspace": "",          # pasta de trabalho quando o perfil não define uma
+    "recent_workspaces": [],          # projetos abertos recentemente (diálogo "Projeto")
     "theme": "dark",
     "native_notifications": True,     # avisos do Windows quando a janela não está em foco
     "active_profile": "geral",

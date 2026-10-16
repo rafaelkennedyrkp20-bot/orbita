@@ -144,3 +144,22 @@ def test_generate_image_saves_sidecar_metadata(brain, tmp_path, monkeypatch):
     meta = json.loads(meta_file.read_text(encoding="utf-8"))
     assert meta["shot_id"] == "shot_01" and meta["size"] == "1536x1024"
 
+
+
+def test_verify_project_needs_exec_permission(brain):
+    tool = brain.registry.get("verify_project")
+    assert tool.risk == "exec" and tool.group == "shell"
+
+
+def test_daily_log_is_append_only_jsonl(tmp_path, monkeypatch):
+    import agent.memory.memory_manager as mm
+
+    monkeypatch.setattr(mm, "DAILY_LOGS_DIR", tmp_path)
+    monkeypatch.setattr(mm, "LONG_TERM_DIR", tmp_path)
+    monkeypatch.setattr(mm, "USER_PROFILE", tmp_path / "profile.json")
+    memory = mm.MemoryManager()
+    memory.log_interaction("oi", "olá")
+    memory.log_interaction("tchau", "até")
+    lines = memory._today_jsonl_file.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2 and not list(tmp_path.glob("????-??-??.json"))
+    assert [e["user"] for e in mm.MemoryManager()._session_log] == ["oi", "tchau"]

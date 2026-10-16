@@ -781,7 +781,7 @@ function renderSettings() {
         ${field("Ler respostas em voz alta", "Voz neural local (Kokoro). Código não é lido.", toggle("voice_replies", st.voice_replies))}</div>`;
       break;
     case "sobre":
-      html = `<h1>Sobre</h1><div class="group" style="padding:20px"><div class="row"><img src="logo.svg" style="width:64px"><div><h2 style="margin:0">Órbita</h2><span style="color:var(--muted)">Seu agente pessoal de IA — suas regras, seu computador.</span></div></div>
+      html = `<h1>Sobre</h1><div class="group" style="padding:20px"><div class="row"><img src="logo.svg" style="width:64px"><div><h2 style="margin:0">Órbita <span class="tag grad" style="vertical-align:middle">v${esc(S.version || "")}</span></h2><span style="color:var(--muted)">Seu agente pessoal de IA — suas regras, seu computador.</span></div></div>
         <div class="row" style="margin-top:16px"><button class="btn small" data-open="data">${icon("folder")} Pasta de dados</button><button class="btn small" data-open="logs">${icon("file")} Logs</button><button class="btn small" data-open="roadmap">${icon("book")} ROADMAP</button><button class="btn small" data-open="license">${icon("shield")} Licença GPL v3</button></div>
         <p style="color:var(--muted);font-size:12.5px;margin:16px 0 0">Software livre sob a GNU GPL v3: você pode usar, estudar, modificar e compartilhar. Versões modificadas distribuídas devem continuar abertas sob a mesma licença.</p></div>`;
       break;
@@ -924,14 +924,16 @@ async function useProject(res) {
   toast("success", "Projeto aberto", S.workspace, 3200);
 }
 function projectDialog() {
-  const current = S.workspace || "";
-  const parent = current.replace(/[\\/][^\\/]+$/, "") || current;
-  openModal(`<div class="modal"><h2>Projeto</h2>
-    <p class="sub">O agente lê, cria e edita arquivos dentro desta pasta. Abra um projeto que já existe ou crie uma pasta nova.</p>
-    <div class="pathbox">${current && S.workspace_set ? esc(current) : "Nenhuma pasta escolhida. Hoje ele usa a sua pasta de usuário."}</div>
+  const current = S.workspace_set ? (S.workspace || "") : "";
+  const parent = current ? current.replace(/[\\/][^\\/]+$/, "") : (S.projects_parent || "");
+  const recent = (S.recent_workspaces || []).filter(p => p !== current).slice(0, 6);
+  openModal(`<div class="modal"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Projeto</h2>
+      <button class="icon-btn" id="pj-close" title="Fechar (Esc)">${icon("x")}</button></div>
+    <p class="sub" style="margin-top:6px">O agente lê, cria e edita arquivos dentro da pasta do projeto.</p>
+    <div class="pathbox">${current ? esc(current) : "Nenhum projeto aberto — o agente está usando a sua pasta de usuário."}</div>
     <div class="actions" style="justify-content:flex-start">
-      <button class="btn primary" id="pj-open">${icon("folder")} Abrir pasta</button>
-      <button class="btn" id="pj-new">${icon("plus")} Criar pasta nova</button>
+      <button class="btn primary" id="pj-open">${icon("folder")} Abrir pasta existente</button>
+      <button class="btn" id="pj-new">${icon("plus")} Criar projeto novo</button>
     </div>
     <div id="pj-create" hidden>
       <div class="stack">
@@ -942,11 +944,14 @@ function projectDialog() {
       </div>
       <div class="actions" style="justify-content:flex-start"><button class="btn primary" id="pj-create-go">${icon("check")} Criar e abrir</button></div>
     </div>
+    ${recent.length ? `<div class="stack"><label>Recentes</label>${recent.map(p => `<button class="recent" data-recent="${esc(p)}">${icon("folder")}<span><b>${esc(p.split(/[\\/]/).pop())}</b><small>${esc(p)}</small></span></button>`).join("")}</div>` : ""}
     <label class="row" style="margin-top:14px"><span class="toggle"><input type="checkbox" id="pj-fresh" ${S.conversation_id ? "" : "checked"}><span></span></span> Começar uma conversa nova neste projeto</label>
-  </div>`, false);
+  </div>`);
+  const guard = () => busy && (toast("warn", "Aguarde", "O agente ainda está trabalhando nesta conversa."), true);
+  $("#pj-close").onclick = closeModal;
   $("#pj-open").onclick = async () => {
-    if (busy) return toast("warn", "Aguarde", "O agente ainda está trabalhando nesta conversa.");
-    const folder = await call("pickFolder", current);
+    if (guard()) return;
+    const folder = await call("pickFolder", current || parent);
     if (folder) useProject(await call("setWorkspace", folder));
   };
   $("#pj-new").onclick = () => { $("#pj-create").hidden = false; $("#pj-fresh").checked = true; $("#pj-name").focus(); };
@@ -954,12 +959,17 @@ function projectDialog() {
     const folder = await call("pickFolder", $("#pj-parent").value);
     if (folder) $("#pj-parent").value = folder;
   };
+  $("#pj-name").addEventListener("keydown", e => { if (e.key === "Enter") $("#pj-create-go").click(); });
   $("#pj-create-go").onclick = async () => {
-    if (busy) return toast("warn", "Aguarde", "O agente ainda está trabalhando nesta conversa.");
+    if (guard()) return;
     const name = $("#pj-name").value.trim();
     if (!name) return toast("warn", "Projeto", "Dê um nome para a pasta.");
     useProject(await call("createWorkspace", JSON.stringify({ parent: $("#pj-parent").value.trim(), name })));
   };
+  $$("[data-recent]", $("#modal-root")).forEach(b => b.addEventListener("click", async () => {
+    if (guard()) return;
+    useProject(await call("setWorkspace", b.dataset.recent));
+  }));
 }
 function onModels(e) {
   const p = S.providers.find(x => x.id === e.provider); if (p && e.models.length) p.models = e.models;

@@ -144,9 +144,6 @@ INPUT_MODE = "gui"
 # Número máximo de entradas no log diário antes de compactar
 DAILY_LOG_MAX_ENTRIES = 200
 
-# Salva cada interação no histórico diário para não perder conversas em caso
-# de fechamento inesperado.
-CHAT_AUTOSAVE_EVERY_INTERACTION = True
 
 # ─────────────────────────────────────────────
 # WEB SEARCH

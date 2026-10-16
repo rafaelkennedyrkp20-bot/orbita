@@ -5,7 +5,6 @@ import sys
 import textwrap
 import time
 
-import pytest
 
 from agent.core.mcp_hub import MCPHub, _safe_name
 from agent.core.skills import SkillManager, parse_skill_file

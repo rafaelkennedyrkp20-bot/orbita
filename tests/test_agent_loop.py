@@ -275,7 +275,7 @@ def test_delegate_structured_contract_and_verify(brain, provider):
     assert "## Contrato da Subtarefa" in seen_prompts[0]
     assert "agent/a.py" in seen_prompts[0] and "0 erros no pyflakes" in seen_prompts[0]
     tool_msg = next(m for m in s.messages if m["role"] == "tool")
-    assert "Gate de Verificação Automática" in tool_msg["content"]
+    assert "Verificação automática da equipe" in tool_msg["content"]
     assert "Quality Gate: PASS" in tool_msg["content"]
 
 
@@ -295,3 +295,22 @@ def test_reasoning_kept_in_current_turn_and_pruned_in_old(brain, provider):
     old_assistants = [m for m in fake.calls[2]["messages"] if m["role"] == "assistant"]
     assert all("reasoning" not in m for m in old_assistants)
 
+
+
+def test_team_verification_runs_once_and_respects_permission(brain, provider):
+    from agent.core.tools import Tool, ToolResult
+    runs = []
+    brain.registry.register(Tool("verify_project", "verify", {"type": "object"},
+                                 lambda a, c: runs.append(1) or ToolResult("Quality Gate: PASS"),
+                                 risk="exec", group="shell"))
+    provider([
+        ChatResult(tool_calls=[call("delegate_task", tasks=[
+            {"task": "parte A", "verify": True}, {"task": "parte B", "verify": True}])]),
+        ChatResult(text="A pronta"), ChatResult(text="B pronta"),
+        ChatResult(text="fim"),
+    ])
+    s = session(brain, mode="auto")          # "exec" pede permissão no modo automático
+    s.approve = lambda request: "no"
+    s.run("divida")
+    tool_msg = next(m for m in s.messages if m["role"] == "tool")
+    assert runs == [] and "não autorizada" in tool_msg["content"]

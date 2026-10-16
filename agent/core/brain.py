@@ -186,12 +186,23 @@ class Brain:
         if (profile.workspace or "").strip():
             profile.workspace = resolved
             self.profiles.save(profile)
+        recent = [resolved] + [p for p in (self.settings.get("recent_workspaces") or []) if p != resolved]
+        self.settings.set("recent_workspaces", recent[:8], save=False)
         self.settings.set("default_workspace", resolved)
         return path
 
+    def recent_workspaces(self) -> list[str]:
+        """Projetos abertos recentemente que ainda existem (o mais recente primeiro)."""
+        return [p for p in (self.settings.get("recent_workspaces") or []) if Path(p).is_dir()]
+
+    @staticmethod
+    def default_projects_parent() -> Path:
+        documents = Path.home() / "Documents"
+        return documents if documents.is_dir() else Path.home()
+
     def create_workspace(self, parent: str, name: str) -> Path:
         """Cria uma pasta de projeto dentro de `parent` e passa a trabalhar nela."""
-        parent_path = Path(parent).expanduser() if (parent or "").strip() else Path.home()
+        parent_path = Path(parent).expanduser() if (parent or "").strip() else self.default_projects_parent()
         if not parent_path.is_dir():
             raise ValueError("Escolha uma pasta que já existe para criar o projeto dentro dela.")
         folder = parent_path / project_folder_name(name)
@@ -369,5 +380,4 @@ class Brain:
     def shutdown(self) -> None:
         logger.info("Encerrando agente.")
         self.mcp.shutdown()
-        self.memory.save_daily_log()
         self.memory.save_long_term()

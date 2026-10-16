@@ -28,7 +28,7 @@ from agent.core.config import DATA_DIR
 from agent.core.tools import ToolContext, ToolRegistry, ToolResult, tool
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
-SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "__pycache__", ".mypy_cache", ".pytest_cache",
+SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "env", "__pycache__", ".mypy_cache", ".pytest_cache",
              "dist", "build", ".idea", ".vs", "models"}
 TEXT_PREVIEW_LIMIT = 2000
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
@@ -216,30 +216,34 @@ def _register_files(r: ToolRegistry) -> None:
         ctx.emit("preview", {"path": str(path)})
         return f"Exibindo {path} no painel lateral."
 
+    # risk="exec": pytest EXECUTA o código do projeto (testes, conftest, plugins) — precisa da mesma
+    # permissão que run_shell. Não rebaixar para "read" para "evitar confirmação".
     @tool(r, "verify_project",
-          "Run deterministic quality gates (static lint via pyflakes and automated tests via pytest) "
-          "in the workspace and return a structured PASS/FAIL report. Call this after code edits.",
+          "Run Python quality gates in the workspace (pyflakes lint + pytest) and return a PASS/FAIL report. "
+          "Uses the project's own venv when it has one. For other languages use run_shell (npm test, cargo test...).",
           {"target": {"type": "string", "description": "Optional specific file/folder to lint (default: auto-detect)"},
            "pytest_args": {"type": "string", "description": "Optional pytest filter, e.g. 'tests/test_tools.py -k edit'"},
            "skip_tests": {"type": "boolean", "description": "If true, runs only fast static analysis"}},
-          group="arquivos")
+          risk="exec", group="shell")
     def verify_project(args, ctx: ToolContext):
         cwd = ctx.workspace
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        python = _project_python(cwd)
         checks = []
         failed = False
 
         # 1) Lint estático (pyflakes)
-        lint_target = args.get("target")
-        if not lint_target:
-            lint_target = "agent" if (cwd / "agent").is_dir() else "."
+        targets = [args["target"]] if args.get("target") else _lint_targets(cwd)
+        lint_target = " ".join(targets) or "."
         try:
             proc = subprocess.run(
-                [sys.executable, "-m", "pyflakes", lint_target],
+                [python, "-m", "pyflakes", *targets],
                 cwd=str(cwd), capture_output=True, text=True, timeout=45, creationflags=flags,
             )
             out = (proc.stdout + proc.stderr).strip()
-            if proc.returncode == 0:
+            if "No module named pyflakes" in out:
+                checks.append("[SKIP] pyflakes não instalado neste projeto (pip install pyflakes)")
+            elif proc.returncode == 0:
                 checks.append(f"[PASS] pyflakes ({lint_target}): 0 erros")
             else:
                 failed = True
@@ -252,11 +256,13 @@ def _register_files(r: ToolRegistry) -> None:
             extra = (args.get("pytest_args") or "tests").split()
             try:
                 proc = subprocess.run(
-                    [sys.executable, "-m", "pytest", *extra, "-q", "--tb=short"],
+                    [python, "-m", "pytest", *extra, "-q", "--tb=short"],
                     cwd=str(cwd), capture_output=True, text=True, timeout=120, creationflags=flags,
                 )
                 out = ANSI_RE.sub("", (proc.stdout + proc.stderr).strip())
-                if proc.returncode == 0:
+                if "No module named pytest" in out:
+                    checks.append("[SKIP] pytest não instalado neste projeto (pip install pytest)")
+                elif proc.returncode == 0:
                     summary_line = out.splitlines()[-1] if out else "ok"
                     checks.append(f"[PASS] pytest ({' '.join(extra)}): {summary_line}")
                 else:
@@ -268,6 +274,26 @@ def _register_files(r: ToolRegistry) -> None:
 
         status = "FAIL" if failed else "PASS"
         return ToolResult(text=f"Quality Gate: {status}\n" + "\n".join(checks), is_error=failed)
+
+
+def _project_python(folder: Path) -> str:
+    """Python do venv do próprio projeto (venv/.venv/env); senão, o do Órbita."""
+    for name in ("venv", ".venv", "env"):
+        candidate = folder / name / "Scripts" / "python.exe"
+        if candidate.is_file():
+            return str(candidate)
+    return sys.executable
+
+
+def _lint_targets(folder: Path) -> list[str]:
+    """Pastas/arquivos de código do projeto, sem venv, node_modules, build etc."""
+    targets = []
+    for item in sorted(folder.iterdir()):
+        if item.name.startswith(".") or item.name in SKIP_DIRS:
+            continue
+        if item.is_dir() or item.suffix == ".py":
+            targets.append(item.name)
+    return targets
 
 
 def _walk_files(base: Path, pattern: str | None):
@@ -534,7 +560,7 @@ def _register_agents(r: ToolRegistry) -> None:
               "acceptance_criteria": {"type": "array", "items": {"type": "string"},
                                       "description": "Verifiable conditions required for completion"},
               "verify": {"type": "boolean",
-                         "description": "If true, runs verify_project automatically after the sub-agent finishes"}},
+                         "description": "If true, runs verify_project once after all sub-agents finish (asks permission like any command)"}},
               "required": ["task"]}}},
           ["tasks"], group="agentes")
     def delegate_task(args, ctx: ToolContext):

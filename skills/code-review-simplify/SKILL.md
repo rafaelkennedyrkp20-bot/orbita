@@ -17,7 +17,7 @@ Executa revisão técnica rigorosa (nível Staff Engineer) para encontrar bugs c
 ## Process
 
 ### 1. Mapeamento do Diff e Superfície de Impacto
-- Identifique todos os arquivos modificados (`verify_project` com `git_diff=True` ou `read_file`).
+- Identifique todos os arquivos modificados (`run_shell` com `git status` e `git diff`, ou `read_file`).
 - Leia os chamadores (`grep`) de qualquer função cuja assinatura ou retorno tenha mudado.
 
 ### 2. Checklist Adversarial (Caça a Bugs Reais)

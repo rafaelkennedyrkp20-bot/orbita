@@ -726,19 +726,32 @@ class AgentSession:
             except Exception as error:  # um subagente nunca derruba o principal
                 logger.exception("Subagente falhou")
                 report = f"Falhou: {error}"
-            verify_note = ""
-            if spec.get("verify") and self.brain.registry.get("verify_project"):
-                v_res = self.brain.registry.get("verify_project").run({}, sub._context())
-                verify_note = f"\n\n### Gate de Verificação Automática\n{v_res.text[:1500]}"
             with self._lock:
                 self.turn_tokens += sub.turn_tokens
             self.events("subagent_end", {"agent": label, "tokens": sub.turn_tokens, "report": report[:2000]})
-            return f"## {label} ({provider}:{model} | {sub.turn_tokens} tok)\n{report[:8000]}{verify_note}"
+            return f"## {label} ({provider}:{model} | {sub.turn_tokens} tok)\n{report[:8000]}"
 
         workers = min(4, len(tasks))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             reports = list(pool.map(run_one, enumerate(tasks)))
+        verifier = self.brain.registry.get("verify_project")
+        if verifier is not None and any(spec.get("verify") for spec in tasks) and not self.cancel.is_set():
+            # Uma verificação só, depois que TODOS terminaram (em paralelo disputariam a mesma pasta),
+            # passando pela mesma permissão de qualquer chamada do agente.
+            result = self._run_checked(verifier, {})
+            reports.append(f"## Verificação automática da equipe\n{result.text[:2000]}")
         return ToolResult(text="\n\n".join(reports))
+
+    def _run_checked(self, tool: Tool, args: dict) -> ToolResult:
+        """Executa uma ferramenta fora do fluxo do modelo, respeitando o modo de permissão."""
+        if self._needs_approval(tool):
+            answer = (self.approve({"type": "tool", "tool": tool.name, "risk": tool.risk, "args": args,
+                                    "agent": self.label}) if self.approve else "no")
+            if answer == "always":
+                self.always_allowed.add(tool.name)
+            elif answer != "yes":
+                return ToolResult.error("Verificação não autorizada pelo usuário.")
+        return tool.run(args, self._context())
 
     def _forward_events(self, kind: str, data: dict) -> None:
         if kind in ("tool_start", "tool_end", "preview", "subagent_start", "subagent_end", "error", "status",

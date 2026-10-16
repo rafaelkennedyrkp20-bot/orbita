@@ -68,7 +68,8 @@ Modos de execução:
 def run_health_check():
     """Verifica se todas as dependências estão ok."""
     print("\n" + "═" * 60)
-    print("  Órbita — Verificação de Saúde")
+    from agent import __version__
+    print(f"  Órbita {__version__} — Verificação de Saúde")
     print("═" * 60)
 
     checks = []
