@@ -47,6 +47,11 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   mais rápida, tempo até o 1º token do motor de 854 ms para 28 ms e montagem por turno de 116 ms para 6 ms).
 
 ### Corrigido
+- Configurações › Modelos: os modelos do provedor aparecem numa lista clicável (antes ficavam escondidos num campo de
+  sugestões que sumia quando o campo tinha outro texto). A lista é buscada sozinha quando está vazia.
+- Chave de API colada no lugar do nome do modelo (na API manual, no modelo principal, no perfil ou na primeira
+  execução) agora é recusada com explicação. Quem já tinha salvo assim é corrigido sozinho ao abrir o programa: a
+  chave sai das configurações e continua só no `.env`.
 - Cancelar uma resposta enquanto o modelo já preparava chamadas de ferramenta não deixa mais chamadas incompletas no
   histórico da conversa (o que impedia continuar a mesma conversa nas APIs na nuvem).
 - No modo de ferramentas por texto (`<tool_call>`), o filtro de streaming não engole mais os últimos caracteres da

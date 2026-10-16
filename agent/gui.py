@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -79,6 +80,23 @@ def _args_summary(args: dict, limit: int = 120) -> str:
         return f"{len(args['tasks'])} tarefa(s)"
     raw = json.dumps(args, ensure_ascii=False)
     return raw if len(raw) <= limit else raw[:limit] + "…"
+
+
+_KEY_PREFIX = re.compile(r"^(sk|sk-or|sk-ant|rv|gsk|xai|pplx|csk|r8|hf|ghp|AIza)[-_]?[A-Za-z0-9]", re.I)
+
+
+def looks_like_secret(text: str, known_keys: tuple[str, ...] = ()) -> bool:
+    """Chave de API colada no lugar do nome do modelo (acontece muito na tela de API manual)."""
+    text = (text or "").strip()
+    if not text:
+        return False
+    if any(key and text == key.strip() for key in known_keys):
+        return True
+    if "/" in text or ":" in text or " " in text:
+        return False   # nomes de modelo: "meta-llama/...", "qwen3:14b"
+    longest = max((len(part) for part in re.split(r"[-_.]", text)), default=0)
+    mixed = re.search(r"[A-Z]", text) and re.search(r"[a-z]", text) and re.search(r"\d", text)
+    return bool(mixed and (longest >= 24 or (_KEY_PREFIX.match(text) and len(text) >= 24)))
 
 
 def _visible_user_text(text: str) -> str:
@@ -427,8 +445,45 @@ class Api(QObject):
         self.brain.select_profile(profile_id)
         return self._state_json()
 
+    def _known_keys(self, provider: Optional[str] = None) -> tuple[str, ...]:
+        settings = self.brain.settings
+        names = [provider] if provider else list(settings.providers())
+        keys = []
+        for name in names:
+            try:
+                keys.append(settings.api_key(settings.provider(name)))
+            except Exception:
+                continue
+        return tuple(k for k in keys if k)
+
+    def scrub_secret_models(self) -> bool:
+        """Conserta quem já salvou uma chave de API como nome de modelo. A chave continua só no .env."""
+        settings, fixed = self.brain.settings, False
+        stored = dict(settings.get("providers") or {})
+        for name, cfg in stored.items():
+            models = (cfg or {}).get("models") or []
+            clean = [m for m in models if not looks_like_secret(m, self._known_keys(name))]
+            if clean != models:
+                stored[name] = {**cfg, "models": clean}
+                fixed = True
+        if fixed:
+            settings.set("providers", stored, save=False)
+        provider, model = settings.get("provider") or "", settings.get("model") or ""
+        if provider and looks_like_secret(model, self._known_keys(provider)):
+            options = (stored.get(provider) or {}).get("models") or []
+            settings.set("model", options[0] if options else "", save=False)
+            fixed = True
+        if fixed:
+            settings.save()
+            logger.warning("Chave de API encontrada no lugar do nome do modelo: removida das configurações.")
+        return fixed
+
     @pyqtSlot(str, str, result=str)
     def selectModel(self, provider: str, model: str) -> str:
+        if looks_like_secret(model, self._known_keys(provider)):
+            return json.dumps({"error": "Isso é uma chave de API, não o nome do modelo. A chave vai em "
+                                        "Configurações › Chaves de API; aqui escolha um modelo da lista."},
+                              ensure_ascii=False)
         bound = self.brain.select_model(provider, model.strip()) if model.strip() else None
         return json.dumps({"state": self.state(), "bound_profile": bound.name if bound else None},
                           ensure_ascii=False, default=str)
@@ -453,6 +508,12 @@ class Api(QObject):
         if isinstance(models, str):
             models = [item.strip() for item in models.split(",") if item.strip()]
         model = (data.get("model") or "").strip()
+        known = tuple(k for k in (data.get("key") or "",) if k.strip())
+        if looks_like_secret(model, known):
+            return json.dumps({"error": "O campo Modelo está com a chave de API. Coloque a chave só no campo Chave e, "
+                                        "no Modelo, o nome (use Verificar modelos para ver a lista)."},
+                              ensure_ascii=False)
+        models = [m for m in models if not looks_like_secret(m, known)]
         if model and model not in models:
             models.insert(0, model)
         try:
@@ -509,6 +570,9 @@ class Api(QObject):
     def saveProfile(self, raw: str) -> str:
         data = json.loads(raw)
         bind = data.pop("bind", False)
+        if looks_like_secret(data.get("model") or "", self._known_keys()):
+            return json.dumps({"error": "O campo Modelo está com uma chave de API. Coloque o nome do modelo."},
+                              ensure_ascii=False)
         manager = self.brain.profiles
         if not data.get("id"):
             base = manager.slugify(data.get("name", "perfil"))
@@ -548,7 +612,7 @@ class Api(QObject):
             env = settings.provider(provider).get("api_key_env")
             if env and data.get("key"):
                 settings.save_api_key(env, data["key"].strip())
-            if model:
+            if model and not looks_like_secret(model, (data.get("key") or "",) + self._known_keys(provider)):
                 self.brain.select_model(provider, model)
         if data.get("user_name"):
             self.brain.memory.user_name = data["user_name"].strip()
@@ -782,6 +846,11 @@ class MainWindow(QMainWindow):
         self.worker.start()
         QTimer.singleShot(900, self.start_prompt_if_any)
         QTimer.singleShot(2500, self.api.report_last_update)
+        if self.api.scrub_secret_models():
+            QTimer.singleShot(6000, lambda: self.api.push({   # depois que a página conectou
+                "type": "toast", "kind": "warn", "title": "Modelo corrigido", "ms": 15000,
+                "text": "Havia uma chave de API no lugar do nome do modelo. Ela foi tirada dali (continua no .env). "
+                        "Escolha o modelo em Configurações › Modelos."}))
         if brain.settings.get("update_check", True):
             QTimer.singleShot(8000, self.api.check_updates)
 

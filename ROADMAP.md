@@ -249,3 +249,9 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   "Mostrar na pasta", atualizador e config do Claude Desktop nos caminhos do Linux. Verificado: Windows — pyflakes 0,
   pytest 99 + 2 pulados (só Linux); Linux (Docker, Debian, Python 3.12) — pyflakes 0, pytest 101 passando, janela real
   em Xvfb com captura (interface completa, shell = /usr/bin/bash) e `./iniciar_orbita.sh --check` do zero.
+- **2026-10-16 — Claude Opus 5.5**: correção relatada pelo usuário — "3 modelos disponíveis" sem conseguir escolher.
+  Causa: `<datalist>` só sugere opções que combinam com o texto do campo, e o campo tinha a chave de API (colada no
+  Modelo da API manual, salva em `settings.json` como modelo e na lista do provedor). Correção: lista clicável com
+  filtro, `looks_like_secret` (gui.py e app.js) recusando chave como modelo em todas as entradas e `scrub_secret_models`
+  limpando configurações já salvas ao abrir. Verificado: pytest 111 + 2 pulados (12 novos); janela real com a
+  configuração quebrada → aviso "Modelo corrigido", 3 modelos clicáveis, chave fora do `settings.json`.

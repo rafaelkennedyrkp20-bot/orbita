@@ -730,7 +730,7 @@ function onEvent(e) {
     case "compacted": note(`Histórico compactado: ${e.messages} mensagens antigas viraram um resumo`); break;
     case "approval": approval(e); break;
     case "preview": preview(e); break;
-    case "toast": toast(e.kind, e.title, e.text); break;
+    case "toast": toast(e.kind, e.title, e.text, e.ms || 4200); break;
     case "voice_text": if ($(".welcome")) $("#messages").innerHTML = ""; addUser(e.text); break;
     case "listening": $("#mic").classList.add("rec"); setLive(true, "Ouvindo…"); break;
     case "mcp": S.mcp = e.servers; $("#mcp-dot").classList.toggle("on", e.servers.some(s => s.status === "erro")); if ($("#page-connections").classList.contains("active")) renderConnections(); break;
@@ -962,7 +962,8 @@ function renderSettings() {
       html = `<h1>Modelos</h1><p class="lead">Escolha a IA principal, gerencie os modelos locais e como a equipe escolhe modelos.</p>
         <div class="group"><h3>Modelo principal</h3>
         ${field("Provedor", "De onde vem a IA principal.", `<select class="inp" id="m-prov">${providerOptions(S.provider, false)}</select>`)}
-        ${field("Modelo", "Digite ou escolha da lista.", `<div class="row"><input class="inp" style="flex:1" id="m-model" list="m-models" value="${esc(S.model)}"><datalist id="m-models"></datalist><button class="btn small" id="m-refresh" title="Buscar modelos do provedor">${icon("refresh")}</button></div>`)}
+        ${field("Modelo", "Clique em um modelo da lista abaixo ou digite o nome exato.", `<div class="row"><input class="inp" style="flex:1" id="m-model" value="${esc(S.model)}" placeholder="nome do modelo" spellcheck="false" autocomplete="off"><button class="btn small" id="m-refresh" title="Buscar modelos do provedor">${icon("refresh")}</button></div><div class="warn-line" id="m-warn"></div>`)}
+        <div class="model-pick" id="m-list"></div>
         <div class="row" style="padding:10px 0"><button class="btn primary" id="m-apply">${icon("check")} Usar este modelo</button><span class="status" id="m-hint"></span></div></div>
         <div class="group"><h3>Modelos locais (Ollama)</h3><div id="local-models"><div class="empty">Carregando…</div></div>
         <div class="row" style="padding:12px 0"><input class="inp" style="flex:1" id="pull-name" placeholder="baixar modelo, ex.: qwen3:14b, llama3.2-vision, gemma3:12b"><button class="btn" id="pull-btn">${icon("download")} Baixar</button></div>
@@ -1071,19 +1072,48 @@ function bindSettings() {
   const upOpen = $("#up-open"); if (upOpen) upOpen.onclick = () => updateModal(S.update);
   if (settingsSection === "modelos") bindModels();
 }
+// Chave de API colada no lugar do modelo (mesma regra do Python, em gui.looks_like_secret).
+function looksLikeKey(text) {
+  const t = (text || "").trim();
+  if (!t || /[\/: ]/.test(t)) return false;
+  const longest = Math.max(0, ...t.split(/[-_.]/).map(s => s.length));
+  const mixed = /[A-Z]/.test(t) && /[a-z]/.test(t) && /\d/.test(t);
+  return mixed && (longest >= 24 || (/^(sk|sk-or|sk-ant|rv|gsk|xai|pplx|csk|r8|hf|ghp|AIza)[-_]?[A-Za-z0-9]/i.test(t) && t.length >= 24));
+}
+let modelList = null;   // redesenha a lista de Configurações › Modelos quando chegam modelos novos
 function bindModels() {
-  const prov = $("#m-prov");
-  const fill = list => { $("#m-models").innerHTML = (list || []).map(m => `<option value="${esc(m)}">`).join(""); };
-  fill((S.providers.find(p => p.id === prov.value) || {}).models);
-  prov.onchange = () => { fill((S.providers.find(p => p.id === prov.value) || {}).models); $("#m-model").value = ((S.providers.find(p => p.id === prov.value) || {}).models || [""])[0]; call("refreshModels", prov.value); $("#m-hint").textContent = "buscando modelos…"; };
-  $("#m-refresh").onclick = () => { call("refreshModels", prov.value); $("#m-hint").textContent = "buscando modelos…"; };
-  $("#m-apply").onclick = async () => {
-    const res = await call("selectModel", prov.value, $("#m-model").value.trim());
-    S = res.state; renderAll();
+  const prov = $("#m-prov"), input = $("#m-model");
+  const current = () => S.providers.find(p => p.id === prov.value) || {};
+  const refresh = () => { call("refreshModels", prov.value); $("#m-hint").textContent = "buscando modelos…"; };
+  const apply = async model => {
+    if (looksLikeKey(model)) return toast("error", "Isso é uma chave", "A chave vai em Configurações › Chaves de API. Aqui escolha um modelo da lista.", 7000);
+    const res = await call("selectModel", prov.value, model);
+    if (!res || res.error) return toast("error", "Modelo", (res && res.error) || "Não deu para usar esse modelo.", 7000);
+    S = res.state; renderAll(); renderSettings();
     toast("success", "Modelo ativo", S.model_label + (res.bound_profile ? ` · perfil ${res.bound_profile}` : ""));
     const p = S.providers.find(x => x.id === prov.value);
     if (p && !p.has_credentials) toast("warn", "Falta acesso", p.type === "grok_cli" ? "Entre na conta Grok em Configurações › Conta Grok." : `Configure ${p.api_key_env} em Chaves de API.`, 6000);
   };
+  modelList = () => {
+    const models = current().models || [], q = input.value.trim().toLowerCase();
+    const bad = looksLikeKey(input.value);
+    $("#m-warn").innerHTML = bad ? `${icon("alert")}<span>Isso parece uma <b>chave de API</b>, não o nome de um modelo. A chave vai em Chaves de API; aqui, clique em um modelo da lista.</span>` : "";
+    $("#m-apply").disabled = bad;
+    const filtered = !q || bad || models.some(m => m.toLowerCase() === q) ? models : models.filter(m => m.toLowerCase().includes(q));
+    const active = m => S.provider === prov.value && S.model === m;
+    $("#m-list").innerHTML = !models.length
+      ? `<div class="empty">Nenhum modelo carregado ainda. Clique em ${icon("refresh")} para buscar a lista no provedor.</div>`
+      : filtered.slice(0, 300).map(m => `<button class="mp ${active(m) ? "on" : ""}" data-m="${esc(m)}" title="Usar ${esc(m)}">${icon(active(m) ? "check" : "cpu")}<span>${esc(m)}</span></button>`).join("")
+        + (filtered.length ? "" : `<div class="empty">Nenhum modelo com “${esc(input.value.trim())}”. Para usar mesmo assim, clique em Usar este modelo.</div>`);
+    $$("[data-m]", $("#m-list")).forEach(b => b.onclick = () => { input.value = b.dataset.m; apply(b.dataset.m); });
+    $("#m-hint").textContent = models.length ? `${models.length} ${models.length === 1 ? "modelo disponível" : "modelos disponíveis"} · clique para usar` : "";
+  };
+  input.oninput = modelList;
+  prov.onchange = () => { input.value = (current().models || [""])[0] || ""; modelList(); refresh(); };
+  $("#m-refresh").onclick = refresh;
+  $("#m-apply").onclick = () => apply(input.value.trim());
+  modelList();
+  if (!(current().models || []).length || looksLikeKey(S.model)) refresh();
   $("#pull-btn").onclick = () => { const n = $("#pull-name").value.trim(); if (n) { call("pullModel", n); toast("info", "Ollama", `Baixando ${n}…`); } };
   call("localModels").then(list => {
     $("#local-models").innerHTML = (list && list.length) ? list.map(m => `<div class="model-row"><span class="nm">${esc(m.name)}</span><span class="sz">${esc(m.size)} · ${esc(m.params || "")}</span><button class="btn small" data-use-local="${esc(m.name)}">${S.provider === "ollama" && S.model === m.name ? "Em uso ✓" : "Usar"}</button></div>`).join("")
@@ -1110,6 +1140,8 @@ function bindManualApi() {
     };
     if (!data.label || !data.url) return toast("warn", "API", "Informe o nome e o endereço.");
     if (!data.model) return toast("warn", "API", "Informe o modelo, ou clique em Verificar modelos e escolha um.");
+    if (looksLikeKey(data.model) || (data.key && data.model === data.key.trim()))
+      return toast("error", "Modelo", "O campo Modelo está com a chave de API. A chave vai só no campo Chave; no Modelo, o nome (clique em Verificar modelos para ver a lista).", 8000);
     const res = await call("addProvider", JSON.stringify(data));
     if (!res || res.error) return toast("error", "API", (res && res.error) || "Não deu para salvar.");
     S = res.state;
@@ -1220,8 +1252,11 @@ function projectDialog() {
   }));
 }
 function onModels(e) {
-  const p = S.providers.find(x => x.id === e.provider); if (p && e.models.length) p.models = e.models;
-  if ($("#m-prov") && $("#m-prov").value === e.provider) { $("#m-models").innerHTML = e.models.map(m => `<option value="${esc(m)}">`).join(""); $("#m-hint").textContent = `${e.models.length} modelos disponíveis`; }
+  const p = S.providers.find(x => x.id === e.provider); if (p && e.models.length) p.models = e.models.filter(m => !looksLikeKey(m));
+  if ($("#m-prov") && $("#m-prov").value === e.provider && modelList) {
+    modelList();
+    if (!e.models.length) $("#m-hint").textContent = "O provedor não devolveu a lista. Confira a chave em Chaves de API ou digite o nome do modelo.";
+  }
 }
 function onPull(e) {
   const box = $("#pull-progress"); if (!box) { if (e.done) toast(e.error ? "error" : "success", "Ollama", e.error || `${e.model} pronto!`); return; }
