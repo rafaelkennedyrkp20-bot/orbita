@@ -374,3 +374,22 @@ label.row { cursor: pointer; }
 @media (max-width: 1700px) { #meter-txt { display: none; } #topbar #chip-project { max-width: 170px; } }
 @media (max-width: 1450px) { #profile-name { display: none; } }
 .toast span { overflow-wrap: anywhere; }
+
+/* ── Ícones dos agentes ───────────────────────── */
+.agent-ic { --s: 40px; width: var(--s); height: var(--s); flex: none; display: inline-grid; place-items: center;
+  border-radius: calc(var(--s) * .3); position: relative; overflow: hidden; vertical-align: middle;
+  background: linear-gradient(140deg, var(--a), var(--b));
+  box-shadow: 0 6px 18px -6px var(--a), inset 0 0 0 1px rgba(255,255,255,.18);
+  transition: transform .2s ease, box-shadow .2s ease; }
+.agent-ic::after { content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: radial-gradient(120% 70% at 25% 0%, rgba(255,255,255,.38), transparent 55%); pointer-events: none; }
+.agent-ic svg { width: 58%; height: 58%; position: relative; z-index: 1; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.25)); }
+.agent-ic.emoji { background: var(--panel3); box-shadow: inset 0 0 0 1px var(--line2); font-size: calc(var(--s) * .5); }
+.tile:hover .agent-ic, .opt:hover .agent-ic, .agent-row:hover .agent-ic { transform: translateY(-1px) rotate(-4deg) scale(1.04);
+  box-shadow: 0 10px 24px -6px var(--a), inset 0 0 0 1px rgba(255,255,255,.25); }
+.tile .em.has-ic { background: none; width: auto; height: auto; }
+.chip .agent-ic { box-shadow: none; }
+.icon-pick { display: flex; flex-wrap: wrap; gap: 8px; }
+.icon-pick button { border: 2px solid transparent; background: none; padding: 2px; border-radius: 14px; cursor: pointer; }
+.icon-pick button.on { border-color: var(--accent); }
+.welcome .who-line { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }

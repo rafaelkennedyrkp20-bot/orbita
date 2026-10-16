@@ -19,6 +19,9 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## [Não lançado]
 
 ### Melhorias
+- Ícones próprios para os agentes, no lugar dos emojis do Windows: cada perfil tem símbolo e cor exclusivos
+  (estrela em órbita, código, revisão, pesquisa, criação, DNA, raio, automação, liderança, robô). O editor de
+  perfil ganhou um seletor de ícone; perfis antigos com emoji passam a usar o ícone correspondente sozinhos.
 - Agentes de pesquisa (perfil com especialidade "pesquisa" e acesso à web, como o Pesquisador) passam a receber o
   protocolo "Descobrir o melhor agente" e a lista dos modelos com acesso: pesquisam fontes atuais, recomendam o
   melhor modelo disponível e uma alternativa, e oferecem a configuração sem alterar nada sozinhos.

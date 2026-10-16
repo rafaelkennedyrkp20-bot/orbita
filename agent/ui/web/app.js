@@ -49,6 +49,54 @@ const ICONS = {
   mouse: "M12 3a6 6 0 0 1 6 6v6a6 6 0 0 1-12 0V9a6 6 0 0 1 6-6zM12 7v3",
   layers: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5",
 };
+// ── Ícones dos agentes: símbolo próprio sobre degradê (substituem os emojis do Windows) ──
+const S_ = 'stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"';
+const F_ = 'fill="#fff"';
+const AGENT_ICONS = {
+  spark: { label: "Órbita", a: "#22d3ee", b: "#a855f7", svg:
+    `<ellipse cx="12" cy="12.5" rx="9.6" ry="3.8" transform="rotate(-24 12 12.5)" ${S_} opacity=".65"/>
+     <path d="M12 3.6c.7 4.3 2.3 5.9 6.6 6.6-4.3.7-5.9 2.3-6.6 6.6-.7-4.3-2.3-5.9-6.6-6.6 4.3-.7 5.9-2.3 6.6-6.6z" ${F_}/>
+     <circle cx="18.6" cy="6" r="1.3" ${F_}/>` },
+  lead: { label: "Liderança", a: "#f59e0b", b: "#ef4444", svg:
+    `<circle cx="12" cy="5.5" r="2.4" ${F_}/><path d="M12 8v3.5M5.5 15.5v-2a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v2M12 11.5v4" ${S_}/>
+     <circle cx="5.5" cy="18" r="2.1" ${S_}/><circle cx="12" cy="18" r="2.1" ${S_}/><circle cx="18.5" cy="18" r="2.1" ${S_}/>` },
+  code: { label: "Código", a: "#3b82f6", b: "#06b6d4", svg:
+    `<path d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5" ${S_} stroke-width="2"/><path d="M13.4 5.5l-2.8 13" ${S_} opacity=".8"/>` },
+  review: { label: "Revisão", a: "#10b981", b: "#0d9488", svg:
+    `<circle cx="10.5" cy="10.5" r="6.2" ${S_}/><path d="m15.2 15.2 4.6 4.6" ${S_} stroke-width="2.2"/>
+     <path d="m7.9 10.6 1.9 1.9 3.4-3.6" ${S_} stroke-width="1.9"/>` },
+  research: { label: "Pesquisa", a: "#0ea5e9", b: "#6366f1", svg:
+    `<circle cx="11" cy="13" r="7.2" ${S_}/><path d="M3.8 13h14.4M11 5.8c2.2 2.2 2.2 12.2 0 14.4M11 5.8c-2.2 2.2-2.2 12.2 0 14.4" ${S_} opacity=".75"/>
+     <circle cx="19" cy="5" r="1.7" ${F_}/><path d="M17.6 6.4 15.9 8" ${S_} opacity=".7"/>` },
+  design: { label: "Criação", a: "#ec4899", b: "#f97316", svg:
+    `<path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.1 0 1.7-.8 1.7-1.7 0-1.2-1-1.6-1-2.7 0-.9.8-1.5 1.7-1.5h2.3a3.8 3.8 0 0 0 3.8-3.8c0-4.1-3.8-7.3-8.5-7.3z" ${S_}/>
+     <circle cx="7.6" cy="11" r="1.25" ${F_}/><circle cx="9.9" cy="7.3" r="1.25" ${F_}/><circle cx="14.3" cy="7.3" r="1.25" ${F_}/><circle cx="16.9" cy="10.6" r="1.25" ${F_}/>` },
+  reverse: { label: "Engenharia reversa", a: "#a855f7", b: "#d946ef", svg:
+    `<path d="M7.5 3c0 4.6 9 4.4 9 9s-9 4.4-9 9M16.5 3c0 4.6-9 4.4-9 9s9 4.4 9 9" ${S_}/>
+     <path d="M9 6.2h6M9.4 17.8h5.2" ${S_} opacity=".7"/>` },
+  bolt: { label: "Agente externo", a: "#facc15", b: "#f97316", svg:
+    `<path d="M13.6 2.8 5.2 13.4h5.9l-1 7.8 8.7-11h-6z" ${F_}/>` },
+  cursor: { label: "Automação", a: "#14b8a6", b: "#22c55e", svg:
+    `<path d="M4 6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4.5M4 6v8a2 2 0 0 0 2 2h4.5M4 8h14" ${S_}/>
+     <path d="m13 12.2 7.6 2.9-3.3 1.3-1.3 3.3z" ${F_}/>` },
+  bot: { label: "Agente", a: "#64748b", b: "#6366f1", svg:
+    `<rect x="4.5" y="8" width="15" height="11" rx="3" ${S_}/><path d="M12 4.5V8" ${S_}/><circle cx="12" cy="4" r="1.2" ${F_}/>
+     <circle cx="9.3" cy="13.2" r="1.3" ${F_}/><circle cx="14.7" cy="13.2" r="1.3" ${F_}/>` },
+};
+// Perfis salvos antes trazem emoji: continuam funcionando, agora com o ícone novo.
+const EMOJI_TO_ICON = { "✨": "spark", "🧠": "lead", "💻": "code", "🔍": "review", "🌐": "research", "🎨": "design",
+                        "🧬": "reverse", "⚡": "bolt", "🖱️": "cursor", "🖱": "cursor", "🤖": "bot" };
+function agentIconKey(value) {
+  const v = String(value || "").trim();
+  return AGENT_ICONS[v] ? v : (EMOJI_TO_ICON[v] || (v ? null : "bot"));
+}
+function agentIcon(p, size = 40) {
+  const key = agentIconKey(p && p.icon);
+  if (!key) return `<span class="agent-ic emoji" style="--s:${size}px">${esc(p.icon)}</span>`;  // emoji escolhido pelo usuário
+  const ic = AGENT_ICONS[key];
+  return `<span class="agent-ic" style="--s:${size}px;--a:${ic.a};--b:${ic.b}" title="${esc(ic.label)}"><svg viewBox="0 0 24 24">${ic.svg}</svg></span>`;
+}
+
 function icon(name, cls = "i") {
   return `<svg class="${cls}" viewBox="0 0 24 24"><path d="${ICONS[name] || ICONS.sparkle}"/></svg>`;
 }
@@ -197,7 +245,7 @@ function autosize() { const i = $("#input"); i.style.height = "auto"; i.style.he
 // ── Topo do chat ───────────────────────────────────────────────────────────────
 function renderTopbar() {
   const p = S.profile || {};
-  $("#profile-ic").textContent = p.icon || "✨";
+  $("#profile-ic").innerHTML = agentIcon(p, 20);
   $("#profile-name").textContent = p.name || "Perfil";
   $("#project-name").textContent = S.workspace_set ? (S.workspace_name || "Projeto") : "Abrir projeto";
   $("#chip-project").classList.toggle("need", !S.workspace_set);
@@ -223,11 +271,11 @@ async function cyclePermission() {
 }
 function profileMenu() {
   openModal(`<div class="modal palette"><input id="pf-q" placeholder="Trocar perfil…"><div class="opts">${
-    S.profiles.map(p => `<div class="opt" data-id="${esc(p.id)}"><span style="font-size:18px">${esc(p.icon)}</span><div><b>${esc(p.name)}</b><div style="font-size:12px">${esc(p.description)}</div></div>${p.id === S.profile.id ? icon("check") : ""}</div>`).join("")
+    S.profiles.map(p => `<div class="opt" data-id="${esc(p.id)}">${agentIcon(p, 34)}<div><b>${esc(p.name)}</b><div style="font-size:12px">${esc(p.description)}</div></div>${p.id === S.profile.id ? icon("check") : ""}</div>`).join("")
   }</div></div>`);
   $$(".opt", $("#modal-root")).forEach(o => o.addEventListener("click", async () => {
     S = await call("selectProfile", o.dataset.id); closeModal(); renderAll();
-    toast("success", "Perfil ativo", `${S.profile.icon} ${S.profile.name} · ${S.model_label}`);
+    toast("success", "Perfil ativo", `${S.profile.name} · ${S.model_label}`);
   }));
   filterOpts("#pf-q");
 }
@@ -300,7 +348,7 @@ function renderWelcome() {
   const project = S.workspace_set ? (S.workspace || "") : "";
   $("#messages").innerHTML = `<div class="welcome"><img class="orb" src="logo.svg" alt="">
     <h1>${name ? `Olá, <span>${esc(name)}</span>` : `<span>Órbita</span>`}</h1>
-    <p>${esc(S.profile?.icon || "")} ${esc(S.profile?.name || "")} · ${esc(S.model_label || "")} — o que vamos fazer hoje?</p>
+    <p class="who-line">${agentIcon(S.profile, 22)} ${esc(S.profile?.name || "")} · ${esc(S.model_label || "")} — o que vamos fazer hoje?</p>
     <div class="project-banner"><div class="txt"><b>${project ? "Projeto aberto" : "Nenhum projeto aberto"}</b><span>${project ? esc(project) : "Escolha ou crie a pasta em que o agente vai trabalhar."}</span></div><button class="btn primary" id="welcome-project">${icon("folder")} ${project ? "Trocar projeto" : "Abrir ou criar projeto"}</button></div>
     <div class="cards">${cards.map(([ic, t, p]) => `<div class="card" data-prompt="${esc(p)}"><div class="ci">${icon(ic)}</div><b>${t}</b><span>${esc(p.length > 70 ? p.slice(0, 70) + "…" : p)}</span></div>`).join("")}</div></div>`;
   const openProject = $("#welcome-project");
@@ -461,7 +509,7 @@ function feed(kind, html) {
 }
 function renderAgents(live = {}) {
   const team = S.team || [];
-  $("#agents").innerHTML = team.map(m => `<div class="agent-row"><span class="em">${esc(m.icon)}</span><div class="grow"><b>${esc(m.name)}</b><div class="sm">${esc(m.model_label)}</div></div>${live[m.name] ? `<span class="spin"></span>` : ""}</div>`).join("")
+  $("#agents").innerHTML = team.map(m => `<div class="agent-row">${agentIcon(m, 30)}<div class="grow"><b>${esc(m.name)}</b><div class="sm">${esc(m.model_label)}</div></div>${live[m.name] ? `<span class="spin"></span>` : ""}</div>`).join("")
     + `<button class="btn small" data-go="team">${icon("edit")} Configurar equipe</button>`;
 }
 function setLive(on, text) {
@@ -493,13 +541,13 @@ function onEvent(e) {
       else feed(e.status, `${e.status === "ok" ? "✓" : "✗"} ${esc(toolInfo(e.name)[1])}`);
       if ((e.images || []).length) preview({ path: e.images[0], kind: "image" });
       break;
-    case "sub_start": subCard(e, false); feed("sub", `👥 <b>${esc(e.agent)}</b> começou com <b>${esc(e.model)}</b>`); renderAgents({ [e.agent.replace(/ #\d+$/, "")]: true }); break;
+    case "sub_start": subCard(e, false); feed("sub", `<b>${esc(e.agent)}</b> começou com <b>${esc(e.model)}</b>`); renderAgents({ [e.agent.replace(/ #\d+$/, "")]: true }); break;
     case "sub_end": subCard(e, true); feed("ok", `✓ <b>${esc(e.agent)}</b> terminou (${fmt(e.tokens)} tokens)`); renderAgents(); break;
     case "status": setLive(true, e.text); break;
     case "usage": S.conversation_tokens = e.total; updateMeter(e.total); break;
     case "turn_end": closeTurn(); refreshConvs().then(() => { S.conversation_id = e.conversation_id || S.conversation_id; S.conversation_title = e.title || S.conversation_title; renderTopbar(); renderConvs(); }); break;
     case "error": note("⚠ " + e.message, "err"); toast("error", "Erro", e.message); break;
-    case "compacted": note(`🗜 Histórico compactado: ${e.messages} mensagens antigas viraram um resumo`); break;
+    case "compacted": note(`Histórico compactado: ${e.messages} mensagens antigas viraram um resumo`); break;
     case "approval": approval(e); break;
     case "preview": preview(e); break;
     case "toast": toast(e.kind, e.title, e.text); break;
@@ -590,7 +638,7 @@ function palette(initial = "") {
     ["moon", "Alternar tema claro/escuro", () => action("theme")],
     ["key", "Chaves de API", () => { settingsSection = "chaves"; go("settings"); }],
     ["bolt", "Conta Grok (xAI)", () => { settingsSection = "grok"; go("settings"); }],
-    ...(S.profiles || []).map(p => [null, `Perfil: ${p.icon} ${p.name}`, async () => { S = await call("selectProfile", p.id); renderAll(); toast("success", "Perfil ativo", p.name); }]),
+    ...(S.profiles || []).map(p => [null, `Perfil: ${p.name}`, async () => { S = await call("selectProfile", p.id); renderAll(); toast("success", "Perfil ativo", p.name); }]),
     ...(S.quick_prompts || []).map(q => ["sparkle", `Prompt: ${q.label}`, () => { $("#input").value = q.text; autosize(); $("#input").focus(); }]),
   ];
   openModal(`<div class="modal palette"><input id="pl-q" placeholder="Digite um comando…" value="${esc(initial)}"><div class="opts">${
@@ -619,7 +667,7 @@ function filterOpts(sel) {
 
 // ── Página: Equipe e perfis ────────────────────────────────────────────────────
 function renderTeamPage() {
-  const tile = p => `<div class="tile"><div class="top"><div class="em">${esc(p.icon)}</div><div style="flex:1"><h3>${esc(p.name)}</h3>
+  const tile = p => `<div class="tile"><div class="top"><div class="em has-ic">${agentIcon(p, 44)}</div><div style="flex:1"><h3>${esc(p.name)}</h3>
     ${p.in_team ? `<span class="tag grad">equipe</span>` : ""}${p.id === S.profile.id ? `<span class="tag grad">ativo</span>` : ""}${p.auto_startup ? `<span class="tag">prompt inicial</span>` : ""}</div></div>
     <div class="desc">${esc(p.description || "Sem descrição")}</div>
     <div>${(p.skills_tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
@@ -639,10 +687,12 @@ function providerOptions(selected, allowEmpty) {
 }
 function profileEditor(p) {
   const isNew = !p;
-  p = p || { id: "", name: "", icon: "🤖", description: "", system_prompt: "", startup_prompt: "", auto_startup: false, provider: "", model: "", temperature: null, effort: "", workspace: "", tool_groups: S.all_groups, mcp_servers: [], max_steps: null, in_team: false, skills_tags: [], bound: false };
+  p = p || { id: "", name: "", icon: "bot", description: "", system_prompt: "", startup_prompt: "", auto_startup: false, provider: "", model: "", temperature: null, effort: "", workspace: "", tool_groups: S.all_groups, mcp_servers: [], max_steps: null, in_team: false, skills_tags: [], bound: false };
   const groupLabels = { arquivos: "Arquivos", shell: "Terminal", web: "Internet", pc: "Controle do PC", memoria: "Memória", skills: "Skills", agentes: "Equipe", mcp: "MCP", imagem: "Imagens" };
   openModal(`<div class="modal wide"><h2>${isNew ? "Novo perfil" : "Editar perfil"}</h2><p class="sub">O prompt de sistema entra em toda conversa; o prompt inicial é enviado sozinho ao abrir uma conversa.</p>
-    <div class="row"><input class="inp" id="pe-icon" style="width:64px;text-align:center;font-size:18px" value="${esc(p.icon)}"><input class="inp" id="pe-name" style="flex:1" placeholder="Nome" value="${esc(p.name)}"></div>
+    <div class="row"><input type="hidden" id="pe-icon" value="${esc(agentIconKey(p.icon) || p.icon)}"><input class="inp" id="pe-name" style="flex:1" placeholder="Nome" value="${esc(p.name)}"></div>
+    <div class="icon-pick" id="pe-icons" style="margin-top:10px">${Object.keys(AGENT_ICONS).map(k =>
+      `<button type="button" data-icon="${k}" class="${(agentIconKey(p.icon) || "") === k ? "on" : ""}" title="${esc(AGENT_ICONS[k].label)}">${agentIcon({ icon: k }, 34)}</button>`).join("")}</div>
     <div style="margin-top:10px"><input class="inp" id="pe-desc" placeholder="Descrição de uma linha (o agente principal lê isto para delegar)" value="${esc(p.description)}"></div>
     <div style="margin-top:12px"><b>Prompt de sistema (injeção)</b><textarea class="inp" id="pe-sys" placeholder="Ex.: Você é especialista em React + TypeScript…">${esc(p.system_prompt)}</textarea></div>
     <div style="margin-top:12px"><b>Prompt inicial</b><textarea class="inp" id="pe-start" style="min-height:70px" placeholder="Ex.: Leia o README do projeto e me diga o estado atual.">${esc(p.startup_prompt)}</textarea>
@@ -660,11 +710,15 @@ function profileEditor(p) {
     <div class="actions">${!isNew && p.id !== "geral" ? `<button class="btn danger" id="pe-del">${icon("trash")} Apagar</button>` : ""}<span style="flex:1"></span><button class="btn" id="pe-cancel">Cancelar</button><button class="btn primary" id="pe-save">Salvar perfil</button></div></div>`, false);
   const fillModels = () => { const prov = S.providers.find(x => x.id === $("#pe-prov").value); $("#pe-models").innerHTML = (prov?.models || []).map(m => `<option value="${esc(m)}">`).join(""); };
   $("#pe-prov").onchange = fillModels; fillModels();
+  $$("[data-icon]", $("#pe-icons")).forEach(b => b.addEventListener("click", () => {
+    $("#pe-icon").value = b.dataset.icon;
+    $$("[data-icon]", $("#pe-icons")).forEach(x => x.classList.toggle("on", x === b));
+  }));
   $("#pe-pick").onclick = async () => { const f = await call("pickFolder", $("#pe-ws").value); if (f) $("#pe-ws").value = f; };
   $("#pe-cancel").onclick = closeModal;
   if ($("#pe-del")) $("#pe-del").onclick = async () => { if (await confirmBox("Apagar perfil?", p.name)) { S = await call("deleteProfile", p.id); renderAll(); renderTeamPage(); } };
   $("#pe-save").onclick = async () => {
-    const data = { id: p.id, name: $("#pe-name").value.trim(), icon: $("#pe-icon").value.trim() || "🤖", description: $("#pe-desc").value.trim(),
+    const data = { id: p.id, name: $("#pe-name").value.trim(), icon: $("#pe-icon").value.trim() || "bot", description: $("#pe-desc").value.trim(),
       system_prompt: $("#pe-sys").value.trim(), startup_prompt: $("#pe-start").value.trim(), auto_startup: $("#pe-auto").checked,
       provider: $("#pe-prov").value, model: $("#pe-prov").value ? $("#pe-model").value.trim() : "",
       temperature: $("#pe-temp").value === "" ? null : +$("#pe-temp").value, effort: p.effort || "", max_tokens: p.max_tokens ?? null,
@@ -1017,7 +1071,7 @@ function showOnboarding() {
     $("#ob-next").onclick = async () => {
       if (step < steps.length - 1) { step++; return render(); }
       S = await call("completeOnboarding", JSON.stringify(data)); closeModal(); renderAll();
-      toast("success", "Configuração concluída", `${S.profile.icon} ${S.profile.name} · ${S.model_label}`);
+      toast("success", "Configuração concluída", `${S.profile.name} · ${S.model_label}`);
     };
   };
   const detail = () => {

@@ -177,3 +177,6 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   automática ficou como item `[ ]`. Verificado: pyflakes 0 avisos; pytest 62 passando (60 anteriores + 2 novos:
   protocolo e tabela presentes no Pesquisador; ausentes no Assistente Geral). Não testado com modelo real nem na
   interface (não há mudança visual).
+- **2026-10-16 — Claude (Opus 5.5)**: conjunto de ícones próprio para os agentes (SVG em degradê, mesmo estilo do
+  logo) substituindo os emojis em cartões, topo, menus, painel da equipe e editor (com seletor). Emojis de perfis
+  já salvos são convertidos na exibição. Verificado na janela (capturas da equipe, menu e editor); 60 testes.

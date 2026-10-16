@@ -37,7 +37,7 @@ ALL_GROUPS = ["arquivos", "shell", "web", "pc", "memoria", "skills", "agentes", 
 class Profile:
     id: str
     name: str
-    icon: str = "🤖"
+    icon: str = "bot"                     # chave de ícone da interface (spark, code, review...) ou emoji
     description: str = ""
     system_prompt: str = ""
     startup_prompt: str = ""
@@ -73,19 +73,19 @@ LEAD_DEV_PROMPT = """Você é o LÍDER TÉCNICO de uma equipe de agentes de IA. 
 
 DEFAULT_PROFILES: list[Profile] = [
     Profile(
-        id="geral", name="Assistente Geral", icon="✨",
+        id="geral", name="Assistente Geral", icon="spark",
         description="Agente principal: conversa, pesquisa, arquivos, PC e coordena a equipe.",
         system_prompt="Seja um parceiro proativo, técnico e direto. Resolva o pedido de ponta a ponta usando as "
                       "ferramentas, carregue skills relevantes com use_skill e valide alterações com verify_project.",
     ),
     Profile(
-        id="lider_dev", name="Líder de Desenvolvimento", icon="🧠",
+        id="lider_dev", name="Líder de Desenvolvimento", icon="lead",
         description="Planeja, divide o trabalho entre programadores em paralelo, revisa e integra.",
         system_prompt=LEAD_DEV_PROMPT,
         tool_groups=["arquivos", "shell", "web", "memoria", "skills", "agentes", "mcp", "imagem"],
     ),
     Profile(
-        id="programador", name="Programador", icon="💻", in_team=True,
+        id="programador", name="Programador", icon="code", in_team=True,
         description="Implementa código com qualidade: lê antes de editar, faz mudanças mínimas e testa.",
         skills_tags=["código", "debug", "testes", "refatoração"],
         system_prompt="Você é um Staff Software Engineer. Leia o código relevante antes de editar, siga o estilo "
@@ -95,7 +95,7 @@ DEFAULT_PROFILES: list[Profile] = [
         temperature=0.2,
     ),
     Profile(
-        id="revisor", name="Revisor de Código", icon="🔍", in_team=True,
+        id="revisor", name="Revisor de Código", icon="review", in_team=True,
         description="Revisa código procurando bugs reais, falhas de segurança, gargalos e código morto.",
         skills_tags=["revisão", "segurança", "desempenho"],
         system_prompt="Você é um revisor de código exigente (use a skill 'code-review-simplify' quando aplicável). "
@@ -106,7 +106,7 @@ DEFAULT_PROFILES: list[Profile] = [
         temperature=0.1,
     ),
     Profile(
-        id="pesquisador", name="Pesquisador", icon="🌐", in_team=True,
+        id="pesquisador", name="Pesquisador", icon="research", in_team=True,
         description="Pesquisa na web, lê fontes e entrega respostas com citações. Bom para descobrir "
                     "bibliotecas, APIs, modelos e as melhores ferramentas para uma tarefa.",
         skills_tags=["pesquisa", "comparação", "documentação"],
@@ -117,7 +117,7 @@ DEFAULT_PROFILES: list[Profile] = [
         temperature=0.3,
     ),
     Profile(
-        id="designer", name="Designer & Criativo", icon="🎨", in_team=True,
+        id="designer", name="Designer & Criativo", icon="design", in_team=True,
         description="Cria imagens, ícones, UI assets, storyboards e vídeos com consistência visual.",
         skills_tags=["imagem", "vídeo", "ícones", "UI"],
         system_prompt="Você é um diretor de arte e criador multimídia. Para séries, storyboards ou vídeos, "
@@ -126,7 +126,7 @@ DEFAULT_PROFILES: list[Profile] = [
         tool_groups=["imagem", "arquivos", "shell", "skills"],
     ),
     Profile(
-        id="engenharia_reversa", name="Engenharia Reversa (REA)", icon="🧬", in_team=True,
+        id="engenharia_reversa", name="Engenharia Reversa (REA)", icon="reverse", in_team=True,
         description="Analisa binários, apps Electron/JS, .NET, APKs, sites e firmware com o REA.",
         skills_tags=["engenharia reversa", "binários", "decompilação"],
         system_prompt="Use o servidor MCP 'rea' para análises de artefatos compilados. Comece carregando a "
@@ -137,7 +137,7 @@ DEFAULT_PROFILES: list[Profile] = [
         mcp_servers=["rea"],
     ),
     Profile(
-        id="grok_build", name="Grok Build (xAI)", icon="⚡", in_team=True,
+        id="grok_build", name="Grok Build (xAI)", icon="bolt", in_team=True,
         description="Agente de programação da xAI rodando com a SUA conta Grok: lê, edita e testa código "
                     "sozinho na pasta de trabalho. Ótimo para implementar partes inteiras de um projeto.",
         skills_tags=["código", "agente externo", "conta xAI"],
@@ -146,7 +146,7 @@ DEFAULT_PROFILES: list[Profile] = [
         tool_groups=["arquivos", "shell", "web"],
     ),
     Profile(
-        id="automacao_pc", name="Automação do PC", icon="🖱️",
+        id="automacao_pc", name="Automação do PC", icon="cursor",
         description="Controla o computador: abre programas, vê a tela, clica, digita, organiza arquivos.",
         system_prompt="Você opera o computador do usuário. Antes de clicar, tire um screenshot para ver a "
                       "tela; depois de cada ação importante, confirme o resultado com outro screenshot. "
