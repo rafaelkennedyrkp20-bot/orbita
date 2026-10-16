@@ -606,7 +606,11 @@ def _register_agents(r: ToolRegistry) -> None:
                                       "description": "Verifiable conditions required for completion"},
               "verify": {"type": "boolean",
                          "description": "If true, runs verify_project once after all sub-agents finish (asks permission like any command)"}},
-              "required": ["task"]}}},
+              "required": ["task"]}},
+           "contract": {"type": "string",
+                        "description": "Shared interface every sub-agent must follow when the parts must fit "
+                                       "together: class/ID names, file names and structure, function/endpoint "
+                                       "signatures, data formats. Same text goes to all sub-agents."}},
           ["tasks"], group="agentes")
     def delegate_task(args, ctx: ToolContext):
         if ctx.session is None:
@@ -614,7 +618,7 @@ def _register_agents(r: ToolRegistry) -> None:
         tasks = [t for t in args["tasks"] if isinstance(t, dict) and t.get("task")]
         if not tasks:
             return ToolResult.error("Informe ao menos uma tarefa.")
-        return ctx.session.delegate(tasks)
+        return ctx.session.delegate(tasks, contract=args.get("contract") or "")
 
 
 def _register_mcp_search(r: ToolRegistry, services) -> None:

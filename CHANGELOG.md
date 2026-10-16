@@ -29,6 +29,10 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   Na página Equipe dá para escolher "Automático por especialidade", se preferir.
 - **Liberdade por modelo**: modelos de ponta (Claude, GPT-5, Fable, Grok 4, Gemini Pro, DeepSeek) trabalham com mais
   autonomia e o dobro de passos; modelos locais pequenos trabalham em "modo foco", um passo por vez.
+- **Equipe que se encaixa**: antes de dividir partes que precisam combinar (HTML/CSS/JS, front/back), o agente
+  principal define um contrato (nomes de classes, IDs, arquivos, funções) que vai igual para todos os ajudantes. Quando
+  eles terminam, o Órbita confere sozinho se HTML, CSS e JS batem e devolve ao agente o que não encaixa, para ele
+  corrigir antes de dizer que está pronto.
 
 ### Corrigido
 - A barra de digitar não some mais durante trabalhos longos: o painel Ao vivo crescia e empurrava a página para fora

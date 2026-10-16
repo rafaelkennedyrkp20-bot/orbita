@@ -100,6 +100,42 @@ def test_delegate_uses_parent_model_by_default(brain, monkeypatch):
     assert "SEU mesmo modelo (river:deepseek-v4)" in session.system_prompt([])
 
 
+def test_contract_reaches_every_helper_and_mismatch_comes_back_to_the_lead(brain, monkeypatch, tmp_path):
+    from dataclasses import replace
+
+    def write(path, text):
+        return lambda: (tmp_path / path).write_text(text, encoding="utf-8")
+
+    class Writer(ScriptedProvider):   # cada ajudante "escreve" um arquivo e responde
+        def __init__(self):
+            super().__init__([])
+            self.calls = []
+
+        def chat(self, model, messages, tools=None, **kw):
+            with self.lock:
+                self.calls.append(messages)
+            task = messages[-1]["content"]
+            if "faça o HTML" in task:
+                write("index.html", '<header class="site-header"><div class="wrap"><a class="botao">x</a></div></header>')()
+                return ChatResult(text="Status: DONE\nVerificação: ok")
+            if "faça o CSS" in task:
+                write("style.css", ".header{} .container{} .btn{}")()
+                return ChatResult(text="Status: DONE\nVerificação: ok")
+            if len(self.calls) == 1:
+                return ChatResult(tool_calls=[call("delegate_task", contract="Classes: .header .container .btn",
+                                                   tasks=[{"task": "faça o HTML"}, {"task": "faça o CSS"}])])
+            return ChatResult(text="corrigido")
+    fake = Writer()
+    monkeypatch.setattr(loop, "get_provider", lambda name, settings: fake)
+    profile = replace(brain.profiles.get("geral"), workspace=str(tmp_path))
+    session = AgentSession(brain, profile, "river", "deepseek-v4", approve=lambda r: "yes")
+    assert session.run("site em 2 agentes") == "corrigido"
+    helper_prompts = [m[-1]["content"] for m in fake.calls if "faça o" in m[-1]["content"]]
+    assert len(helper_prompts) == 2 and all("Classes: .header .container .btn" in p for p in helper_prompts)
+    delegate_result = next(m["content"] for m in session.messages if m["role"] == "tool")
+    assert "Checagem automática de integração" in delegate_result and ".site-header" in delegate_result
+
+
 def test_delegate_uses_routed_model_when_team_is_automatic(brain, monkeypatch):
     brain.settings.set("team_model", "auto", save=False)
     brain.route_model = lambda specialty: {"codigo": "deepseek:deepseek-chat"}.get(specialty)

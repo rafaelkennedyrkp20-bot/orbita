@@ -22,13 +22,14 @@ import platform
 import re
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-from agent.core import capabilities, routing
+from agent.core import capabilities, integration, routing
 from agent.core.profiles import Profile
 from agent.core.providers import ChatResult, ProviderError, ToolsUnsupported, get_provider, new_call_id
 from agent.core.settings import resolve_workspace
@@ -362,6 +363,10 @@ class AgentSession:
                  "Para acelerar, divida o trabalho em partes independentes e delegue em paralelo: cada subagente tem "
                  "contexto próprio e trabalha na mesma pasta, numa tarefa diferente. Dê a cada um arquivos "
                  "diferentes ('files') para não se atropelarem; depois revise e integre o que voltar. "
+                 "Se as partes precisam se encaixar (HTML/CSS/JS, front/back, módulos que se chamam), ANTES de "
+                 "delegar defina o contrato e passe em 'contract': nomes de classes e IDs, estrutura e nomes dos "
+                 "arquivos, funções/endpoints e formatos de dados — todos recebem o mesmo. Se for difícil fixar "
+                 "o contrato, crie você o esqueleto primeiro (ex.: o HTML com as classes) e delegue o resto. "
                  + ("Sem 'model', o sistema escolhe o modelo pela especialidade. " if auto else
                     f"Sem 'model', cada subagente usa o SEU mesmo modelo ({same}) — são cópias suas com tarefas "
                     "diferentes. Só passe 'model' se o usuário pedir outro modelo; nunca troque para um modelo "
@@ -790,9 +795,11 @@ class AgentSession:
 
     # ── Equipe de agentes ────────────────────────────────────
 
-    def delegate(self, tasks: list[dict]) -> ToolResult:
+    def delegate(self, tasks: list[dict], contract: str = "") -> ToolResult:
         if self.depth >= MAX_DEPTH:
             return ToolResult.error("Profundidade máxima de delegação atingida; faça você mesmo.")
+        started = time.time()
+        contract = (contract or "").strip()
 
         def run_one(index_spec):
             index, spec = index_spec
@@ -825,6 +832,11 @@ class AgentSession:
                 contract_parts.append(f"- Critérios de Aceite: {ac_text}")
             if contract_parts:
                 task_prompt = f"{task_prompt}\n\n## Contrato da Subtarefa\n" + "\n".join(contract_parts)
+            if contract:
+                task_prompt += ("\n\n## Contrato compartilhado da equipe (siga à risca)\n"
+                                "Outros agentes estão fazendo as outras partes ao mesmo tempo usando exatamente estes "
+                                "nomes. Não invente nomes de classes, IDs, arquivos ou funções fora deste contrato; se "
+                                f"faltar algo, siga o padrão dele e cite no relatório.\n{contract}")
             self.events("subagent_start", {"agent": label, "model": f"{provider}:{model}", "task": spec["task"][:300]})
             try:
                 report = sub.run(task_prompt)
@@ -845,6 +857,17 @@ class AgentSession:
             # passando pela mesma permissão de qualquer chamada do agente.
             result = self._run_checked(verifier, {})
             reports.append(f"## Verificação automática da equipe\n{result.text[:2000]}")
+        if len(tasks) > 1 and not self.cancel.is_set():
+            # Partes feitas em paralelo se encaixam? (sites: classes/IDs entre HTML, CSS e JS)
+            try:
+                mismatch = integration.check_workspace(self.workspace, started - 1)
+            except Exception:   # a checagem nunca derruba a delegação
+                logger.exception("Checagem de integração falhou")
+                mismatch = ""
+            if mismatch:
+                reports.append(mismatch)
+                self.events("status", {"text": "A equipe entregou partes que não se encaixam; corrigindo…",
+                                       "agent": self.label})
         return ToolResult(text="\n\n".join(reports))
 
     def _run_checked(self, tool: Tool, args: dict) -> ToolResult:

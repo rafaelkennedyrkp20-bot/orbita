@@ -293,3 +293,11 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   CPU tiny parcial 0,6 s, base final 0,9 s; GPU small final 1,0 s, turbo parcial 0,5 s/final 0,8 s; janela real com
   microfone simulado tocando a frase: parciais desde ~4 s e final ~1 s após Concluir; telas Equipe e Voz capturadas.
   Não verificado: nuvem com chave real (o usuário não tem chave da Groq/OpenAI) — formato coberto por teste.
+- **2026-10-16 — Claude Opus 5.5**: caso real do usuário (DeepSeek, site de jogos com 3 agentes): HTML e CSS feitos
+  em paralelo usaram nomes diferentes (18 classes do HTML sem estilo, header não fixo); só o revisor percebeu no fim.
+  Correção na causa: `delegate_task` ganhou `contract` (mesmo texto para todos os ajudantes) e o prompt da equipe manda
+  definir o contrato — ou criar o esqueleto — antes de delegar partes que se encaixam; novo
+  `agent/core/integration.py` compara classes/IDs entre HTML, CSS e JS alterados durante a delegação e anexa o que não
+  bate ao resultado (CSS com variantes sem uso não conta sozinho; varredura limitada em profundidade/tempo). Verificado:
+  pytest 143 + 2 pulados (4 novos, incluindo delegação real com 2 ajudantes escrevendo arquivos); no site do usuário já
+  corrigido a checagem fica em silêncio; pasta do usuário inteira varrida em 0,24 s.
