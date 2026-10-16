@@ -155,6 +155,28 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [ ] Renomear pasta/arquivos `.bat` para Órbita (mantidos por compatibilidade por enquanto)
 - [ ] Sons sutis de notificação; animação do logo enquanto trabalha
 
+## Fase 9 — Ferramentas de criação e o que os usuários mais pedem (pesquisa 2026-10-16)
+
+> Fontes: discussões de usuários de agentes pessoais (memória persistente é o pedido nº 1; controle de programas é a
+> maior lacuna; local-first com permissões por escopo é o mais elogiado) e de quem faz jogos com IA (Blender gera os
+> assets 3D, Godot monta o jogo; ImageMagick é o padrão de edição de imagem por linha de comando).
+
+- [ ] ⭐ **Caixa de ferramentas opcional** (Opus/Antigravity): catálogo de programas que a IA sabe usar, baixados
+  só quando a pessoa (ou o agente, com permissão) quiser, de URL oficial fixa com SHA-256, para `models/tools/`:
+  ImageMagick (imagem), Blender (3D, modo sem janela por script Python), OpenSCAD (3D por código, leve), Godot (jogos),
+  FFmpeg (vídeo/áudio). Página na interface com tamanho, status e instalar/remover; ferramenta do agente para listar e
+  pedir instalação; nada entra no `requirements.txt`
+- [ ] ⭐ **Skills de criação** junto com a caixa (Opus/Antigravity): `editar-imagem`, `modelagem-3d`, `jogos-godot`,
+  `jogos-web` (Canvas/Three.js, sem instalar nada) e `video-ffmpeg`, cada uma com fluxo testável e exemplos
+- [ ] ⭐ Memória por projeto: o agente lembra sozinho decisões e estado de cada pasta de projeto entre conversas
+  (junto com o painel de memórias já listado na Fase 5)
+- [ ] ⭐ Tarefas agendadas/recorrentes ("todo dia às 9h, resuma meus e-mails"), com histórico e pausa
+- [ ] Permissões por pasta: liberar escrita só no projeto aberto e leitura no resto, configurável
+- [ ] Servidores MCP populares com um clique (Playwright, GitHub, Blender MCP, Godot MCP), com explicação do que fazem
+- [ ] Perguntar antes da compactação automática (hoje compacta e avisa), com opção "sempre automático"
+- [~] Equipe com modelos reais: DeepSeek e GLM testados (Diário 2026-10-16); falta Nemotron e medir custo por modelo
+  (Claude Opus 5.5)
+
 ## Diário
 
 - **2026-10-15 — Claude (Opus 5.5)**: diagnóstico completo; criação do ROADMAP, ARCHITECTURE e AGENTS.md;
