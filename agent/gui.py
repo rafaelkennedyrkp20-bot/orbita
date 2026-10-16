@@ -52,7 +52,7 @@ WEB_INDEX = brand.WEB_DIR / "index.html"
 SETTABLE = {"theme", "user_name", "default_workspace", "native_notifications", "show_reasoning", "permission_mode",
             "economy_mode", "turn_token_budget", "daily_token_budget", "voice_replies", "auto_routing",
             "cheap_model", "image_model", "ollama_num_ctx", "ollama_keep_alive", "checkpoints", "update_check",
-            "team_model", "stt_model", "stt_engine"}
+            "team_model", "stt_model", "stt_engine", "team_max_parallel"}
 # Modo plano: vai junto da mensagem; as ferramentas que alteram algo ficam bloqueadas no turno.
 PLAN_NOTE = ("\n\n[Modo plano] Ainda NÃO execute: não crie, edite nem apague arquivos e não rode comandos que "
              "alterem algo — essas ferramentas estão bloqueadas neste turno. Leia e pesquise o que precisar e "

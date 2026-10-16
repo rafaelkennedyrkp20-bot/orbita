@@ -33,6 +33,11 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   principal define um contrato (nomes de classes, IDs, arquivos, funções) que vai igual para todos os ajudantes. Quando
   eles terminam, o Órbita confere sozinho se HTML, CSS e JS batem e devolve ao agente o que não encaixa, para ele
   corrigir antes de dizer que está pronto.
+- **O ambiente sugere a equipe**: em pedidos grandes (site/sistema do zero, várias partes listadas, "3 agentes"...),
+  o agente recebe naquele turno uma sugestão de quantos ajudantes usar e um fluxo em 3 fases (contrato → partes em
+  paralelo → integração). Pedidos pequenos não recebem nada. Cada ajudante sabe o que os outros estão fazendo.
+  Até 6 ao mesmo tempo com modelos de ponta na nuvem, 4 nos demais e 2 com modelo local; o resto espera na fila
+  (ajustável na página Equipe).
 
 ### Corrigido
 - A barra de digitar não some mais durante trabalhos longos: o painel Ao vivo crescia e empurrava a página para fora

@@ -1128,12 +1128,18 @@ function renderTeamPage() {
       <div class="tm-opts">
         <button class="tm-opt ${mode === "principal" ? "on" : ""}" data-team-model="principal"><b>Mesmo modelo do principal</b><span>Recomendado. Cada ajudante é uma cópia do agente principal (${esc(S.model_label || "")}) com uma tarefa diferente. Perfil com modelo fixo continua usando o dele.</span></button>
         <button class="tm-opt ${mode === "auto" ? "on" : ""}" data-team-model="auto"><b>Automático por especialidade</b><span>O Órbita escolhe o modelo de cada ajudante pelo catálogo e pelo modo de economia. Pode usar modelos locais ou mais baratos.</span></button>
-      </div></div>
+      </div>
+      <div class="tm-par"><div><b>Ajudantes ao mesmo tempo</b><span>Automático: até 6 com modelos de ponta na nuvem, 4 nos demais e 2 com modelo local (todos dividem a mesma placa). Se o agente criar mais, os outros esperam na fila. Pedidos grandes recebem a sugestão de dividir sozinhos.</span></div>
+        <div class="seg" id="tm-par">${[["0", "Automático"], ["2", "2"], ["4", "4"], ["6", "6"], ["8", "8"]].map(([v, l]) => `<button data-v="${v}" class="${String(S.settings.team_max_parallel || 0) === v ? "on" : ""}">${l}</button>`).join("")}</div></div></div>
     <div class="row" style="margin-bottom:18px"><button class="btn primary" data-edit="">${icon("plus")} Novo perfil</button></div>
     <h3 style="color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.08em">Equipe</h3><div class="grid">${team.map(tile).join("")}</div>
     <h3 style="color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin-top:26px">Perfis principais</h3><div class="grid">${others.map(tile).join("")}</div>`;
   $$("[data-edit]", $("#team-body")).forEach(b => b.addEventListener("click", () => profileEditor(S.profiles.find(p => p.id === b.dataset.edit))));
   $$("[data-use]", $("#team-body")).forEach(b => b.addEventListener("click", async () => { S = await call("selectProfile", b.dataset.use); renderAll(); renderTeamPage(); toast("success", "Perfil ativo", S.profile.name); }));
+  $$("#tm-par button", $("#team-body")).forEach(b => b.addEventListener("click", async () => {
+    await setSetting("team_max_parallel", +b.dataset.v, true); renderTeamPage();
+    toast("success", "Equipe", +b.dataset.v ? `Até ${b.dataset.v} ajudantes ao mesmo tempo.` : "Quantidade automática conforme o modelo.");
+  }));
   $$("[data-team-model]", $("#team-body")).forEach(b => b.addEventListener("click", async () => {
     await setSetting("team_model", b.dataset.teamModel, true); renderTeamPage();
     toast("success", "Equipe", b.dataset.teamModel === "auto" ? "Cada ajudante usa o modelo escolhido pela especialidade." : "Os ajudantes usam o mesmo modelo do agente principal.");

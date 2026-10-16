@@ -301,3 +301,9 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   bate ao resultado (CSS com variantes sem uso não conta sozinho; varredura limitada em profundidade/tempo). Verificado:
   pytest 143 + 2 pulados (4 novos, incluindo delegação real com 2 ajudantes escrevendo arquivos); no site do usuário já
   corrigido a checagem fica em silêncio; pasta do usuário inteira varrida em 0,24 s.
+- **2026-10-16 — Claude Opus 5.5**: equipe sugerida pelo ambiente, para qualquer modelo. Novo `agent/core/teamwork.py`:
+  estimativa do pedido (construção, escopo, partes listadas, contagem pedida, perguntas curtas excluídas) vira uma
+  sugestão só daquele turno, no fim do prompt (o resto continua em cache), com nº de ajudantes e as 3 fases; modelos
+  compactos só se a pessoa pedir. Paralelismo por nível/provedor (6/4/2; local = 2 por dividir a GPU), fila para o
+  excedente, configurável (`team_max_parallel`). Ajudantes recebem a lista do que os colegas fazem. Verificado: pytest
+  155 + 2 pulados (12 novos, incluindo prompt real de turno grande × pequeno); página Equipe capturada.

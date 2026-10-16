@@ -29,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-from agent.core import capabilities, integration, routing
+from agent.core import capabilities, integration, routing, teamwork
 from agent.core.profiles import Profile
 from agent.core.providers import ChatResult, ProviderError, ToolsUnsupported, get_provider, new_call_id
 from agent.core.settings import resolve_workspace
@@ -339,12 +339,23 @@ class AgentSession:
         if self.prompted_tools:
             schemas = "\n".join(json.dumps(t.schema(), ensure_ascii=False) for t in tools)
             parts.append(PROMPTED_TOOLS_TEMPLATE.format(tools=schemas))
+        if not self.depth and getattr(self, "_turn_hint", ""):
+            parts.append(self._turn_hint)   # por último: só este turno muda, o resto do prompt continua em cache
         return "\n\n".join(parts)
 
     @property
     def tier(self) -> str:
         """Nível do modelo atual (capabilities.py): quanta liberdade ele recebe."""
         return capabilities.tier(self.provider_name, self.model)
+
+    @property
+    def parallel_cap(self) -> int:
+        """Quantos ajudantes rodam juntos (teamwork.py); o resto espera na fila."""
+        try:
+            setting = int(self.settings.get("team_max_parallel") or 0)
+        except (TypeError, ValueError):
+            setting = 0
+        return teamwork.max_parallel(self.tier, self.provider_name, setting)
 
     def _project_instructions(self) -> Optional[tuple[str, str]]:
         for name in ("AGENTS.md", "CLAUDE.md"):
@@ -367,6 +378,8 @@ class AgentSession:
                  "delegar defina o contrato e passe em 'contract': nomes de classes e IDs, estrutura e nomes dos "
                  "arquivos, funções/endpoints e formatos de dados — todos recebem o mesmo. Se for difícil fixar "
                  "o contrato, crie você o esqueleto primeiro (ex.: o HTML com as classes) e delegue o resto. "
+                 "Quantos: 1 parte → faça você mesmo; 2–3 partes independentes → 2–3 ajudantes; projeto grande → um "
+                 f"ajudante por módulo/tela/área ({self.parallel_cap} rodam ao mesmo tempo; os demais esperam na fila). "
                  + ("Sem 'model', o sistema escolhe o modelo pela especialidade. " if auto else
                     f"Sem 'model', cada subagente usa o SEU mesmo modelo ({same}) — são cópias suas com tarefas "
                     "diferentes. Só passe 'model' se o usuário pedir outro modelo; nunca troque para um modelo "
@@ -392,6 +405,10 @@ class AgentSession:
         """Processa um pedido até a resposta final (pode encadear várias ferramentas)."""
         if self.depth == 0:
             self.cancel.clear()
+            # O ambiente avisa quando o pedido é grande o bastante para dividir em equipe (teamwork.py).
+            asked = text.split("\n\n---\nArquivos citados", 1)[0]   # sem o anexo de @arquivos
+            self._turn_hint = (teamwork.turn_hint(asked, self.tier, self.parallel_cap)
+                               if "agentes" in self.tool_groups() else "")
         self.turn_tokens = 0
         self._budget_steps = 0
         self.loaded_skills.clear()
@@ -832,6 +849,13 @@ class AgentSession:
                 contract_parts.append(f"- Critérios de Aceite: {ac_text}")
             if contract_parts:
                 task_prompt = f"{task_prompt}\n\n## Contrato da Subtarefa\n" + "\n".join(contract_parts)
+            if len(tasks) > 1:
+                others = [f"- Ajudante #{i + 1}: {' '.join(str(t.get('task', '')).split())[:160]}"
+                          for i, t in enumerate(tasks) if i != index]
+                task_prompt += ("\n\n## Equipe trabalhando agora (não faça a parte deles)\n"
+                                f"Você é o ajudante #{index + 1} de {len(tasks)}, na mesma pasta. Os outros cuidam de:\n"
+                                + "\n".join(others)
+                                + "\nNão edite arquivos que são da parte de outro ajudante; se precisar, cite no relatório.")
             if contract:
                 task_prompt += ("\n\n## Contrato compartilhado da equipe (siga à risca)\n"
                                 "Outros agentes estão fazendo as outras partes ao mesmo tempo usando exatamente estes "
@@ -848,7 +872,10 @@ class AgentSession:
             self.events("subagent_end", {"agent": label, "tokens": sub.turn_tokens, "report": report[:2000]})
             return f"## {label} ({provider}:{model} | {sub.turn_tokens} tok)\n{report[:8000]}{handoff_note(report)}"
 
-        workers = min(4, len(tasks))
+        workers = min(self.parallel_cap, len(tasks))
+        if len(tasks) > workers:
+            self.events("status", {"text": f"{len(tasks)} ajudantes, {workers} por vez (os demais na fila)…",
+                                   "agent": self.label})
         with ThreadPoolExecutor(max_workers=workers) as pool:
             reports = list(pool.map(run_one, enumerate(tasks)))
         verifier = self.brain.registry.get("verify_project")

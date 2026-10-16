@@ -342,6 +342,9 @@ pre.diff .f { color: var(--text); font-weight: 700; background: var(--panel2); b
 .tm-opt span { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
 .tm-opt:hover { border-color: var(--line2); }
 .tm-opt.on { border-color: var(--accent); background: var(--grad-soft); }
+.tm-par { display: flex; align-items: center; gap: 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.tm-par > div:first-child { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 4px; }
+.tm-par span { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
 
 /* Lista de modelos (Configurações › Modelos) */
 .model-pick { display: flex; flex-wrap: wrap; gap: 8px; max-height: 280px; overflow-y: auto; padding: 4px 0 10px; }

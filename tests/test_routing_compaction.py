@@ -115,10 +115,10 @@ def test_contract_reaches_every_helper_and_mismatch_comes_back_to_the_lead(brain
             with self.lock:
                 self.calls.append(messages)
             task = messages[-1]["content"]
-            if "faça o HTML" in task:
+            if task.startswith("faça o HTML"):
                 write("index.html", '<header class="site-header"><div class="wrap"><a class="botao">x</a></div></header>')()
                 return ChatResult(text="Status: DONE\nVerificação: ok")
-            if "faça o CSS" in task:
+            if task.startswith("faça o CSS"):
                 write("style.css", ".header{} .container{} .btn{}")()
                 return ChatResult(text="Status: DONE\nVerificação: ok")
             if len(self.calls) == 1:
@@ -132,8 +132,20 @@ def test_contract_reaches_every_helper_and_mismatch_comes_back_to_the_lead(brain
     assert session.run("site em 2 agentes") == "corrigido"
     helper_prompts = [m[-1]["content"] for m in fake.calls if "faça o" in m[-1]["content"]]
     assert len(helper_prompts) == 2 and all("Classes: .header .container .btn" in p for p in helper_prompts)
+    html_helper = next(p for p in helper_prompts if p.startswith("faça o HTML"))
+    assert "Equipe trabalhando agora" in html_helper and "faça o CSS" in html_helper   # sabe da parte do outro
     delegate_result = next(m["content"] for m in session.messages if m["role"] == "tool")
     assert "Checagem automática de integração" in delegate_result and ".site-header" in delegate_result
+
+
+def test_environment_suggests_team_only_for_big_requests(brain, monkeypatch):
+    fake = install(monkeypatch, [ChatResult(text="ok"), ChatResult(text="ok")])
+    session = AgentSession(brain, brain.profiles.get("geral"), "anthropic", "claude-opus-5-5", approve=lambda r: "yes")
+    session.run("crie um site completo de loja com página inicial, catálogo, carrinho, checkout e painel admin")
+    big_prompt = fake.calls[0]["messages"][0]["content"]
+    assert "Sugestão do ambiente para este pedido" in big_prompt and "6 rodam ao mesmo tempo" in big_prompt
+    session.run("o que é um closure?")
+    assert "Sugestão do ambiente" not in fake.calls[1]["messages"][0]["content"]
 
 
 def test_delegate_uses_routed_model_when_team_is_automatic(brain, monkeypatch):
