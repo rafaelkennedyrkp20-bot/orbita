@@ -94,3 +94,45 @@ def test_probe_lists_models_and_normalizes_the_base_url(monkeypatch):
     refused = probe_compat_models("ftp://arquivo", "")
     assert refused["ok"] is False
     assert "http" in refused["error"]
+
+
+def test_local_gateway_without_key_end_to_end(tmp_path):
+    """Gateway local sem chave (ex.: OmniRoute em 127.0.0.1:20128): endereço sem /v1, adicionar e listar modelos."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from agent.core.providers import get_provider
+
+    class Gateway(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path != "/v1/models":
+                self.send_response(404)
+                self.end_headers()
+                return
+            body = json.dumps({"object": "list", "data": [{"id": "kr/claude-sonnet-4.5"}, {"id": "gh/gpt-5"}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Gateway)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        address = f"http://127.0.0.1:{server.server_address[1]}"
+        found = probe_compat_models(address, "")
+        assert found["ok"] and found["base_url"] == address + "/v1"
+        assert found["models"] == ["gh/gpt-5", "kr/claude-sonnet-4.5"]
+
+        settings = Settings(tmp_path / "settings.json")
+        provider_id = settings.add_custom_provider(label="OmniRoute", base_url=found["base_url"],
+                                                   models=["kr/claude-sonnet-4.5"])
+        assert settings.has_credentials(provider_id)                       # sem chave conta como pronto
+        assert get_provider(provider_id, settings).list_models() == ["gh/gpt-5", "kr/claude-sonnet-4.5"]
+    finally:
+        server.shutdown()
+        server.server_close()

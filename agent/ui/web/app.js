@@ -225,7 +225,7 @@ function bindChrome() {
   $("#pin-banner").addEventListener("click", pinnedPromptModal);
   $("#chip-profile").addEventListener("click", profileMenu);
   $("#chip-project").addEventListener("click", () => projectDialog());
-  $("#chip-model").addEventListener("click", () => { settingsSection = "modelos"; go("settings"); });
+  $("#chip-model").addEventListener("click", modelMenu);
   $("#chip-perm").addEventListener("click", cyclePermission);
   $("#compact-btn").addEventListener("click", compactConversation);
   $("#dict-done").addEventListener("click", stopDictation);
@@ -339,6 +339,41 @@ function profileMenu() {
   }));
   filterOpts("#pf-q");
 }
+
+// Troca rápida de modelo pelo topo: lista os modelos da API (busca no provedor se ainda não tiver a lista).
+let quickModelList = null;
+function modelMenu() {
+  const usable = S.providers.filter(p => p.has_credentials || p.id === S.provider);
+  openModal(`<div class="modal palette model-menu">
+    <div class="mm-head"><select class="inp" id="mm-prov" title="Provedor">${usable.map(p => `<option value="${esc(p.id)}" ${p.id === S.provider ? "selected" : ""}>${esc(p.label)}</option>`).join("")}</select>
+      <input id="mm-q" placeholder="Buscar modelo…" spellcheck="false" autocomplete="off">
+      <button class="icon-btn" id="mm-refresh" title="Buscar a lista de modelos no provedor">${icon("refresh")}</button></div>
+    <div class="model-pick mm-list" id="mm-list"></div>
+    <div class="mm-foot"><span id="mm-hint"></span><button class="btn small" id="mm-settings">${icon("settings")} Configurações › Modelos</button></div>
+  </div>`);
+  const prov = $("#mm-prov");
+  const pick = async model => {
+    const res = await call("selectModel", prov.value, model);
+    if (!res || res.error) return toast("error", "Modelo", (res && res.error) || "Não deu para usar esse modelo.", 7000);
+    S = res.state; closeModal(); renderAll();
+    toast("success", "Modelo ativo", S.model_label + (res.bound_profile ? ` · perfil ${res.bound_profile}` : ""));
+  };
+  quickModelList = bindSearchableModels({
+    provEl: prov, modelEl: document.createElement("input"), searchEl: $("#mm-q"), listEl: $("#mm-list"),
+    hintEl: $("#mm-hint"), refreshBtn: $("#mm-refresh"),
+    isActive: (provId, m) => S.provider === provId && S.model === m, onPick: pick,
+  });
+  const fetchOnce = () => {   // lista completa da API uma vez por sessão; depois abre na hora
+    if (!prov.value || quickFetched.has(prov.value)) return;
+    quickFetched.add(prov.value);
+    call("refreshModels", prov.value);
+  };
+  prov.addEventListener("change", fetchOnce);
+  fetchOnce();
+  $("#mm-settings").onclick = () => { closeModal(); settingsSection = "modelos"; go("settings"); };
+  $("#mm-q").focus();
+}
+const quickFetched = new Set();
 
 // ── Conversas ──────────────────────────────────────────────────────────────────
 async function refreshConvs() { S.conversations = await call("listConversations"); renderConvs(); }
@@ -1702,6 +1737,10 @@ function onModels(e) {
   }
   if ($("#pe-prov") && $("#pe-prov").value === e.provider && peModelList) {
     peModelList(true);
+  }
+  if ($("#mm-prov") && $("#mm-prov").value === e.provider && quickModelList) {
+    quickModelList(true);
+    if (!e.models.length) $("#mm-hint").textContent = "O provedor não devolveu a lista. Confira a chave em Configurações › Chaves de API.";
   }
 }
 function onPull(e) {

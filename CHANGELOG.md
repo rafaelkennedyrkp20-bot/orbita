@@ -19,6 +19,8 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## [Não lançado]
 
 ### Melhorias
+- **Troca rápida de modelo no topo**: clicar no nome do modelo abre a lista de modelos da API (busca no provedor
+  na primeira vez), com pesquisa, setas + Enter e troca de provedor, sem passar por Configurações.
 - **Ferramentas de criação** (página Conexões): ImageMagick, OpenSCAD, Blender, Godot e FFmpeg, que a IA sabe usar
   para editar imagem, modelar 3D, fazer jogos e vídeo. Nada vem instalado; baixa só com clique ou com permissão do
   agente, de URL oficial fixa e com conferência de SHA-256. Novas skills: `editar-imagem`, `modelagem-3d`,

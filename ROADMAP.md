@@ -370,3 +370,10 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   Reproduzido com um Python 3.14 real (`pip install --dry-run`), corrigido com marcador `python_version < "3.14"`;
   `speaker.py` e `main.py` já importam o kokoro dentro de `try` (cai na voz do sistema). Verificado: instalação real
   do `requirements.txt` num venv 3.14 + pytest nele.
+- **2026-10-16 — Claude Opus 5.5**: chip do modelo no topo vira menu (pedido do usuário): reaproveita
+  `bindSearchableModels` (mesma busca de Configurações › Modelos), consulta `/models` uma vez por provedor na sessão.
+  Verificado na janela real com o river (3 modelos — é o que a API devolve), busca "glm" e troca para GLM-5.3-Flash.
+  Issue #1 (OmniRoute): é um gateway compatível com a OpenAI em `http://127.0.0.1:20128/v1`; entra em API manual.
+  Novo teste com servidor HTTP local sem chave (sonda sem `/v1`, adiciona, lista modelos). Testado também se o river
+  aceita o formato Claude (`/v1/messages`): não — qualquer rota devolve 200 vazio (gRPC); Claude Code com o river só
+  via proxy (ex.: free-claude-code, AGPL, programa separado). pytest 180 + 2 pulados.
