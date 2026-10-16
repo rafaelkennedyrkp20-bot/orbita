@@ -264,7 +264,10 @@ class Api(QObject):
         self._grok_cache: tuple[float, dict] = (0.0, {})
 
     def push(self, payload: dict) -> None:
-        self._relay.emit(json.dumps(payload, ensure_ascii=False, default=str))
+        try:
+            self._relay.emit(json.dumps(payload, ensure_ascii=False, default=str))
+        except RuntimeError:
+            pass
 
     # ── Estado ───────────────────────────────────────────────
 
@@ -318,6 +321,7 @@ class Api(QObject):
             "conversations": brain.conversations.list(),
             "conversation_id": brain.conversation_id,
             "conversation_title": brain.conversation_title,
+            "pinned_prompt": brain.pinned_prompt,
             "conversation_tokens": session.total_tokens if session else 0,
             "usage": brain.usage.today(),
             "grok": self.grok_status(),
@@ -407,6 +411,10 @@ class Api(QObject):
         self.win.start_prompt_if_any()
         return "{}"
 
+    @pyqtSlot(str, result=str)
+    def setPinnedPrompt(self, prompt: str) -> str:
+        return json.dumps({"pinned_prompt": self.brain.set_pinned_prompt(prompt)}, ensure_ascii=False)
+
     @pyqtSlot(result=str)
     def listConversations(self) -> str:
         return json.dumps(self.brain.conversations.list(), ensure_ascii=False)
@@ -423,13 +431,16 @@ class Api(QObject):
                 block["html"] = render.markdown_html(block.pop("md"))
             elif block["kind"] == "tool":
                 block["summary"] = _args_summary(block.get("args") or {})
-        payload = {"id": data["id"], "title": data.get("title", ""), "blocks": data["blocks"],
-                   "model_label": f"{data.get('provider', '')}:{data.get('model', '')}"}
+        payload = {"id": data["id"], "title": data.get("title", ""), "pinned_prompt": data.get("pinned_prompt", ""),
+                   "blocks": data["blocks"], "model_label": f"{data.get('provider', '')}:{data.get('model', '')}"}
         return json.dumps(payload, ensure_ascii=False, default=str)
 
     @pyqtSlot(str, result=str)
     def deleteConversation(self, conversation_id: str) -> str:
-        return json.dumps(self.brain.conversations.delete(conversation_id))
+        ok = self.brain.conversations.delete(conversation_id)
+        if ok and conversation_id == self.brain.conversation_id:
+            self.brain.new_conversation()
+        return json.dumps(ok)
 
     @pyqtSlot(str, str, result=str)
     def renameConversation(self, conversation_id: str, title: str) -> str:

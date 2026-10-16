@@ -283,6 +283,8 @@ class AgentSession:
         brain = self.brain
         mode = self.settings.get("permission_mode", "auto")
         parts = [BASE_PROMPT]
+        if getattr(self, "pinned_prompt", "").strip():
+            parts.append(f"## Instruções fixas desta conversa\n{self.pinned_prompt.strip()}")
         if self.depth:
             parts.append(
                 f"## Você é um subagente ({self.label})\n"

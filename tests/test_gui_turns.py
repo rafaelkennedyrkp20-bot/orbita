@@ -142,3 +142,67 @@ def test_send_attaches_mentions_and_plan_note(setup):
     assert command == "turn" and plan is True
     assert "print('oi')" in text and "[Modo plano]" in text
     assert gui._visible_user_text(text) == "explique @app.py"
+
+
+def test_api_rename_and_delete_conversation(tmp_path):
+    from agent.core.brain import Brain
+    from agent.core.conversations import ConversationStore
+
+    brain = Brain(start_mcp=False)
+    brain.conversations = ConversationStore(tmp_path / "convs")
+    api = gui.Api.__new__(gui.Api)
+    api.brain = brain
+
+    session = brain.new_session()
+    session.messages = [{"role": "user", "content": "oi"}, {"role": "assistant", "content": "olá"}]
+    cid = brain.save_conversation()
+    assert cid and brain.conversation_id == cid
+
+    assert json.loads(gui.Api.renameConversation(api, cid, "  Título Personalizado  ")) is True
+    assert brain.conversation_title == "Título Personalizado"
+    saved = brain.conversations.load(cid)
+    assert saved["title"] == "Título Personalizado" and saved["pinned_title"] is True
+
+    assert json.loads(gui.Api.deleteConversation(api, cid)) is True
+    assert brain.conversations.load(cid) is None
+    assert brain.conversation_id is None and brain.session is None
+
+
+def test_pinned_prompt_saved_reapplied_and_in_system_prompt(tmp_path):
+    from agent.core.brain import Brain
+    from agent.core.conversations import ConversationStore
+
+    brain = Brain(start_mcp=False)
+    brain.conversations = ConversationStore(tmp_path / "convs")
+    api = gui.Api.__new__(gui.Api)
+    api.brain = brain
+
+    # Conversa nova sem mensagens: vale desde o primeiro turno
+    res = json.loads(gui.Api.setPinnedPrompt(api, "  Responda sempre em tópicos curtos.  "))
+    assert res["pinned_prompt"] == "Responda sempre em tópicos curtos."
+    session = brain.new_session()
+    sys_prompt = session.system_prompt(session.visible_tools())
+    assert "## Instruções fixas desta conversa\nResponda sempre em tópicos curtos." in sys_prompt
+
+    session.messages = [{"role": "user", "content": "teste"}, {"role": "assistant", "content": "ok"}]
+    cid = brain.save_conversation()
+    assert brain.conversations.load(cid)["pinned_prompt"] == "Responda sempre em tópicos curtos."
+
+    # Nova conversa limpa o prompt fixo
+    brain.new_conversation()
+    assert brain.pinned_prompt == ""
+    clean_session = brain.new_session()
+    assert "## Instruções fixas desta conversa" not in clean_session.system_prompt(clean_session.visible_tools())
+
+    # Reabrir a conversa reaplica o prompt fixo na sessão e no system prompt
+    reopened = json.loads(gui.Api.openConversation(api, cid))
+    assert reopened["pinned_prompt"] == "Responda sempre em tópicos curtos."
+    assert brain.pinned_prompt == "Responda sempre em tópicos curtos."
+    reopened_prompt = brain.session.system_prompt(brain.session.visible_tools())
+    assert "## Instruções fixas desta conversa\nResponda sempre em tópicos curtos." in reopened_prompt
+
+    # Remover o prompt fixo atualiza a sessão e o arquivo salvo
+    gui.Api.setPinnedPrompt(api, "")
+    assert brain.pinned_prompt == ""
+    assert "## Instruções fixas desta conversa" not in brain.session.system_prompt(brain.session.visible_tools())
+    assert brain.conversations.load(cid)["pinned_prompt"] == ""

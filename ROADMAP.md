@@ -100,6 +100,9 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Dica de conversa longa: sugere conversa nova para assunto novo (menos deriva e menos tokens)
 - [x] ⭐ Desbloquear confirmação pendente (`AgentWorker.approve`) ao fechar o modal com `Esc` ou clicar em `Parar` (`agent/gui.py`, `agent/ui/web/app.js`)
 - [ ] ⭐ Painel na interface para listar, editar e apagar memórias salvas por `remember` (`agent/memory/memory_manager.py`, `agent/ui/web`)
+- [x] Conversas: menu próprio no botão direito (Renomear na linha, Apagar com confirmação) e "Renomear" no Ctrl+K
+- [x] Prompt fixo por conversa (`pinned_prompt`, salvo na conversa, injetado como "## Instruções fixas desta conversa")
+- [x] Busca de modelos (sem acento/maiúscula, por partes, contagem, setas + Enter) em Configurações › Modelos e no editor de perfil
 
 ## Fase 6 — Economia de tokens
 
@@ -146,7 +149,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Publicado no GitHub (rafaelkennedyrkp20-bot/orbita), só código-fonte
 - [x] Roda no Linux: `iniciar_orbita.sh`, atalho `.desktop`, shell bash no `run_shell` (mata o grupo de processos no timeout), abrir programas por `.desktop`/`xdg-open`, volume por `pactl`/`amixer`, controle de tela sem derrubar o resto quando não há sessão gráfica, login/instalação do Grok em terminal do sistema, prompt com o SO real; testado em contêiner Debian + Python 3.12
 - [x] Aviso de atualização e atualização com um clique usando o GitHub como âncora: git (`pull --ff-only`, recusa com alteração local) ou ZIP (substitui só o programa, cópia de segurança, manifesto para remoções); dados nunca tocados (`agent/core/updater.py`)
-- [x] Versionamento SemVer alfa (`agent/__init__.py`, `CHANGELOG.md`, regras no AGENTS.md); versão atual 0.1.0-alpha
+- [x] Versionamento SemVer alfa (`agent/__init__.py`, `CHANGELOG.md`, regras no AGENTS.md); versão atual 0.2.0-alpha
 - [x] Prompt padrão para evoluir o projeto com qualquer IA (`docs/PROMPT_EVOLUCAO.md`)
 - [ ] Integração contínua no GitHub (rodar pyflakes + pytest a cada envio)
 - [ ] Renomear pasta/arquivos `.bat` para Órbita (mantidos por compatibilidade por enquanto)
@@ -255,3 +258,14 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   filtro, `looks_like_secret` (gui.py e app.js) recusando chave como modelo em todas as entradas e `scrub_secret_models`
   limpando configurações já salvas ao abrir. Verificado: pytest 111 + 2 pulados (12 novos); janela real com a
   configuração quebrada → aviso "Modelo corrigido", 3 modelos clicáveis, chave fora do `settings.json`.
+- **2026-10-16 — Gemini 4 Argon → Claude Opus 5.5 (versão 0.2.0-alpha)**: conversas com menu próprio no botão direito
+  (Renomear na linha com Enter/Esc, atualizando `#conv-title`; Apagar com `confirmBox`, abrindo conversa nova se era a
+  aberta; `Api.deleteConversation` também zera o Brain), "Renomear conversa" e "Prompt da conversa" no Ctrl+K; prompt
+  fixo por conversa (`Brain.pinned_prompt`/`set_pinned_prompt`, campo `pinned_prompt` no JSON, `Api.setPinnedPrompt`,
+  selo e faixa no topo; em `agent_loop.py` só 2 linhas em `system_prompt`); busca de modelos compartilhada
+  (`bindSearchableModels`) em Configurações › Modelos e no editor de perfil (sem `<datalist>`), mantendo `looksLikeKey`.
+  `Api.push` ignora `RuntimeError` se a janela fechar com uma thread ainda respondendo. Verificado: pyflakes 0; pytest
+  113 + 2 pulados (2 novos: renomear/apagar pela Api; prompt fixo salvo, limpo em conversa nova, reaplicado ao reabrir e
+  presente/ausente no system prompt); janela real com `QWidget.grab` e `data/settings.json` restaurado (menu de
+  contexto, renomear inline, Ctrl+K, apagar a conversa aberta, modal e selo do prompt, busca "CLÁUDE son" → 1 de 6 e
+  Enter aplicando o modelo, busca "deepseek r1" no editor de perfil).

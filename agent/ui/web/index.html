@@ -38,6 +38,7 @@
       <header id="topbar">
         <button class="icon-btn" data-action="toggle-convs" title="Mostrar/ocultar conversas"><svg class="i" data-ic="sidebar"></svg></button>
         <div id="conv-title" contenteditable="true" spellcheck="false">Nova conversa</div>
+        <button class="chip" id="chip-pin" title="Prompt fixo desta conversa"><svg class="i" data-ic="pin"></svg><span id="pin-name">Prompt da conversa</span><i class="pin-badge" id="pin-badge" hidden>ativo</i></button>
         <button class="chip need" id="chip-project" title="Abrir ou criar a pasta do projeto"><svg class="i" data-ic="folder"></svg><span id="project-name">Abrir projeto</span></button>
         <button class="chip" id="chip-profile" title="Trocar perfil"><span id="profile-ic"></span><span id="profile-name">Perfil</span><svg class="i" data-ic="chevdown"></svg></button>
         <button class="chip" id="chip-model" title="Modelo — altere em Configurações › Modelos"><svg class="i" data-ic="cpu"></svg><span id="model-name">modelo</span></button>
@@ -45,6 +46,7 @@
         <div class="meter" title="Tokens desta conversa / orçamento por tarefa"><div class="bar"><i id="meter-bar"></i></div><span id="meter-txt">0</span></div>
         <button class="icon-btn" data-action="toggle-side" title="Painel ao vivo (Ctrl+B)"><svg class="i" data-ic="panel"></svg></button>
       </header>
+      <div id="pin-banner" hidden></div>
       <div id="messages"></div>
       <div id="live"><div class="dots"><i></i><i></i><i></i></div><span class="t" id="live-text">Pensando…</span><span class="clock" id="live-clock">0s</span></div>
       <div class="suggest" id="quick"></div>
@@ -86,6 +88,7 @@
 </div>
 <div id="toasts"></div>
 <div id="modal-root"></div>
+<div id="ctx-menu"></div>
 <script src="app.js"></script>
 </body>
 </html>

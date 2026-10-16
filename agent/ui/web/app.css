@@ -473,3 +473,29 @@ label.row { cursor: pointer; }
 .icon-pick button { border: 2px solid transparent; background: none; padding: 2px; border-radius: 14px; cursor: pointer; }
 .icon-pick button.on { border-color: var(--accent); }
 .welcome .who-line { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+
+/* ── Menu de contexto, renomear conversa, prompt fixo e busca de modelos ── */
+.ctx-menu { position: fixed; z-index: 70; min-width: 175px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 12px; padding: 5px; box-shadow: var(--shadow); animation: pop .14s ease; }
+.ctx-item { display: flex; align-items: center; gap: 9px; width: 100%; border: 0; background: transparent; color: var(--text); padding: 8px 11px; border-radius: 8px; cursor: pointer; font-size: 13px; text-align: left; }
+.ctx-item .i { width: 15px; height: 15px; color: var(--muted); }
+.ctx-item:hover { background: var(--grad-soft); }
+.ctx-item.danger { color: var(--err); }
+.ctx-item.danger .i { color: var(--err); }
+.ctx-item.danger:hover { background: rgba(248,113,113,.12); }
+.conv input.rename-inp { flex: 1; min-width: 0; border: 1px solid var(--accent); background: var(--bg); color: var(--text); border-radius: 7px; padding: 3px 7px; font-size: 13px; outline: 0; }
+#topbar #chip-pin { flex: none; max-width: 220px; }
+#topbar #chip-pin.on { border-color: var(--accent); background: var(--grad-soft); }
+#topbar #chip-pin.on svg.i { color: var(--accent2); }
+.pin-badge { font-style: normal; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--grad); color: #fff; flex: none; }
+#pin-banner { display: flex; align-items: center; gap: 8px; padding: 6px 20px; border-bottom: 1px solid var(--line); background: var(--grad-soft); font-size: 12px; color: var(--muted); cursor: pointer; }
+#pin-banner[hidden] { display: none; }
+#pin-banner .i { width: 14px; height: 14px; color: var(--accent2); flex: none; }
+#pin-banner b { color: var(--text); font-weight: 650; white-space: nowrap; }
+#pin-banner .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-search { display: flex; align-items: center; gap: 8px; background: var(--bg2); border: 1px solid var(--line2); border-radius: 10px; padding: 6px 10px; margin: 10px 0 8px; color: var(--muted); }
+.model-search:focus-within { border-color: var(--accent); }
+.model-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); }
+.model-search .cnt { font: 600 11.5px var(--mono); color: var(--muted); white-space: nowrap; background: var(--panel2); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.model-pick .mp.on { border-color: var(--ok); background: rgba(52,211,153,.1); font-weight: 600; }
+.model-pick .mp.sel { border-color: var(--accent2); box-shadow: 0 0 0 2px rgba(34,211,238,.28); background: var(--grad-soft); }
+@media (max-width: 1550px) { #pin-name { display: none; } }

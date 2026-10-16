@@ -53,6 +53,7 @@ const ICONS = {
   map: "M9 4L3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14",
   at: "M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1",
   diff: "M6 3h8l4 4v14H6zM9 11h6M12 8v6M9 17h6",
+  pin: "M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z",
 };
 // ── Ícones dos agentes: símbolo próprio sobre degradê (substituem os emojis do Windows) ──
 const S_ = 'stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"';
@@ -174,6 +175,7 @@ function go(page) {
 
 function bindChrome() {
   document.addEventListener("click", e => {
+    if (!e.target.closest("#ctx-menu")) closeCtxMenu();
     const goEl = e.target.closest("[data-go]");
     if (goEl) return go(goEl.dataset.go);
     const act = e.target.closest("[data-action]");
@@ -202,12 +204,22 @@ function bindChrome() {
     else if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); action("new"); }
     else if (e.ctrlKey && e.key.toLowerCase() === "b") { e.preventDefault(); action("toggle-side"); }
     else if (e.ctrlKey && e.key === ",") { e.preventDefault(); go("settings"); }
-    else if (e.key === "Escape") { if ($("#modal-root").innerHTML) closeModal(); else if (busy) call("stop"); }
+    else if (e.key === "Escape") { if ($("#ctx-menu").innerHTML) closeCtxMenu(); else if ($("#modal-root").innerHTML) closeModal(); else if (busy) call("stop"); }
   });
   $("#conv-search").addEventListener("input", renderConvs);
+  $("#conv-list").addEventListener("scroll", closeCtxMenu);
   const title = $("#conv-title");
-  title.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); title.blur(); } });
-  title.addEventListener("blur", () => { if (S.conversation_id) call("renameConversation", S.conversation_id, title.textContent.trim()).then(refreshConvs); });
+  title.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); title.blur(); }
+    else if (e.key === "Escape") { e.preventDefault(); title.textContent = S.conversation_title || "Nova conversa"; title.blur(); }
+  });
+  title.addEventListener("blur", () => {
+    const t = title.textContent.trim();
+    if (S.conversation_id && t) { S.conversation_title = t; call("renameConversation", S.conversation_id, t).then(refreshConvs); }
+    else title.textContent = S.conversation_title || "Nova conversa";
+  });
+  $("#chip-pin").addEventListener("click", pinnedPromptModal);
+  $("#pin-banner").addEventListener("click", pinnedPromptModal);
   $("#chip-profile").addEventListener("click", profileMenu);
   $("#chip-project").addEventListener("click", () => projectDialog());
   $("#chip-model").addEventListener("click", () => { settingsSection = "modelos"; go("settings"); });
@@ -263,7 +275,40 @@ function renderTopbar() {
   $("#perm-name").textContent = { perguntar: "Perguntar", auto: "Auto", livre: "Livre" }[perm] || perm;
   $("#chip-perm").className = "chip perm-" + perm;
   $("#conv-title").textContent = S.conversation_title || "Nova conversa";
+  const pin = (S.pinned_prompt || "").trim();
+  $("#chip-pin").classList.toggle("on", !!pin);
+  $("#chip-pin").title = pin ? ("Prompt da conversa: " + pin.slice(0, 140)) : "Definir instruções fixas para esta conversa";
+  $("#pin-badge").hidden = !pin;
+  const banner = $("#pin-banner");
+  if (banner) {
+    banner.hidden = !pin;
+    banner.innerHTML = pin ? `${icon("pin")}<b>Prompt da conversa</b><span class="txt">${esc(pin.replace(/\s+/g, " "))}</span><span class="pin-badge">ativo</span>` : "";
+  }
   updateMeter(S.conversation_tokens || 0);
+}
+function pinnedPromptModal() {
+  const current = (S.pinned_prompt || "").trim();
+  openModal(`<div class="modal"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${icon("pin")} Prompt da conversa</h2>
+      <button class="icon-btn" id="pin-close" title="Fechar (Esc)">${icon("x")}</button></div>
+    <p class="sub" style="margin-top:6px">Instruções fixas aplicadas em todos os turnos desta conversa, além do prompt do perfil.</p>
+    <textarea class="inp" id="pin-text" style="min-height:130px" placeholder="Ex.: Responda sempre em tópicos curtos, use Python 3.10 e não altere arquivos fora de src/…">${esc(current)}</textarea>
+    <div class="actions">
+      <button class="btn danger" id="pin-remove" ${current ? "" : "disabled"}>${icon("trash")} Remover</button>
+      <span style="flex:1"></span>
+      <button class="btn" id="pin-cancel">Cancelar</button>
+      <button class="btn primary" id="pin-save">${icon("check")} Salvar</button>
+    </div></div>`);
+  $("#pin-close").onclick = closeModal;
+  $("#pin-cancel").onclick = closeModal;
+  const applyPin = async text => {
+    const r = await call("setPinnedPrompt", text);
+    S.pinned_prompt = (r && r.pinned_prompt) || "";
+    closeModal();
+    renderTopbar();
+    toast("success", "Prompt da conversa", S.pinned_prompt ? "Instruções fixas ativadas nesta conversa." : "Prompt da conversa removido.", 2400);
+  };
+  $("#pin-save").onclick = () => applyPin($("#pin-text").value.trim());
+  $("#pin-remove").onclick = () => applyPin("");
 }
 function updateMeter(tokens) {
   const budget = S.settings.turn_token_budget || 0;
@@ -290,6 +335,74 @@ function profileMenu() {
 
 // ── Conversas ──────────────────────────────────────────────────────────────────
 async function refreshConvs() { S.conversations = await call("listConversations"); renderConvs(); }
+function closeCtxMenu() { const box = $("#ctx-menu"); if (box) box.innerHTML = ""; }
+function openConvMenu(id, x, y) {
+  const box = $("#ctx-menu");
+  const cx = Math.min(x, window.innerWidth - 190), cy = Math.min(y, window.innerHeight - 100);
+  box.innerHTML = `<div class="ctx-menu" style="left:${cx}px;top:${cy}px">
+    <button type="button" class="ctx-item" data-ctx="rename">${icon("edit")}<span>Renomear</span></button>
+    <button type="button" class="ctx-item danger" data-ctx="delete">${icon("trash")}<span>Apagar</span></button>
+  </div>`;
+  $('[data-ctx="rename"]', box).onclick = () => { closeCtxMenu(); startRenameConv(id); };
+  $('[data-ctx="delete"]', box).onclick = () => { closeCtxMenu(); deleteConvWithConfirm(id); };
+}
+async function deleteConvWithConfirm(id) {
+  if (!(await confirmBox("Apagar conversa?", "Ela será removida deste computador.", "Apagar"))) return;
+  await call("deleteConversation", id);
+  if (id === S.conversation_id) { await call("newConversation"); resetChat(); }
+  refreshConvs();
+}
+function startRenameConv(id) {
+  const row = $(`.conv[data-id="${CSS.escape(id)}"]`, $("#conv-list"));
+  if (!row) return;
+  const tEl = $(".t", row), delBtn = $(".x", row);
+  if (!tEl) return;
+  const oldTitle = ((S.conversations || []).find(c => c.id === id)?.title) || tEl.textContent || "";
+  const inp = document.createElement("input");
+  inp.className = "rename-inp";
+  inp.value = oldTitle;
+  inp.spellcheck = false;
+  if (delBtn) delBtn.style.display = "none";
+  tEl.replaceWith(inp);
+  inp.focus();
+  inp.select();
+  let finished = false;
+  const finish = async save => {
+    if (finished) return;
+    finished = true;
+    const val = inp.value.trim().slice(0, 80);
+    if (save && val && val !== oldTitle) {
+      await call("renameConversation", id, val);
+      if (id === S.conversation_id) {
+        S.conversation_title = val;
+        $("#conv-title").textContent = val;
+      }
+      await refreshConvs();
+    } else {
+      renderConvs();
+    }
+  };
+  inp.addEventListener("click", e => e.stopPropagation());
+  inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); }
+  });
+  inp.addEventListener("blur", () => finish(false));
+}
+function renameCurrentConv() {
+  go("chat");
+  if (S.conversation_id && !$("#page-chat").classList.contains("no-convs") && $(`.conv[data-id="${CSS.escape(S.conversation_id)}"]`, $("#conv-list"))) {
+    startRenameConv(S.conversation_id);
+  } else {
+    const t = $("#conv-title");
+    t.focus();
+    const range = document.createRange();
+    range.selectNodeContents(t);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+}
 function renderConvs() {
   const q = ($("#conv-search").value || "").toLowerCase();
   const items = (S.conversations || []).filter(c => !q || c.title.toLowerCase().includes(q));
@@ -304,26 +417,30 @@ function renderConvs() {
   const html = Object.entries(groups).map(([g, list]) => `<div class="conv-group">${g}</div>` + list.map(c =>
     `<div class="conv ${c.id === S.conversation_id ? "active" : ""}" data-id="${esc(c.id)}">${icon("chat")}<span class="t">${esc(c.title)}</span><button class="x" data-del="${esc(c.id)}" title="Apagar">${icon("trash")}</button></div>`).join("")).join("");
   $("#conv-list").innerHTML = html || `<div class="empty">Nenhuma conversa ainda.<br>Elas aparecem aqui automaticamente.</div>`;
-  $$(".conv", $("#conv-list")).forEach(el => el.addEventListener("click", async e => {
-    const del = e.target.closest("[data-del]");
-    if (del) {
+  $$(".conv", $("#conv-list")).forEach(el => {
+    el.addEventListener("contextmenu", e => {
+      e.preventDefault();
       e.stopPropagation();
-      if (await confirmBox("Apagar conversa?", "Ela será removida deste computador.")) {
-        await call("deleteConversation", del.dataset.del);
-        if (del.dataset.del === S.conversation_id) { await call("newConversation"); resetChat(); }
-        refreshConvs();
+      openConvMenu(el.dataset.id, e.clientX, e.clientY);
+    });
+    el.addEventListener("click", async e => {
+      if (e.target.closest(".rename-inp")) return;
+      const del = e.target.closest("[data-del]");
+      if (del) {
+        e.stopPropagation();
+        deleteConvWithConfirm(del.dataset.del);
+        return;
       }
-      return;
-    }
-    if (busy) return toast("warn", "Aguarde", "O agente ainda está trabalhando nesta conversa.");
-    openConversation(el.dataset.id);
-  }));
+      if (busy) return toast("warn", "Aguarde", "O agente ainda está trabalhando nesta conversa.");
+      openConversation(el.dataset.id);
+    });
+  });
 }
 async function openConversation(id) {
   const data = await call("openConversation", id);
   if (!data) return toast("error", "Conversa", "Não foi possível abrir.");
   resetChat(false);
-  S.conversation_id = data.id; S.conversation_title = data.title;
+  S.conversation_id = data.id; S.conversation_title = data.title; S.pinned_prompt = data.pinned_prompt || "";
   renderTopbar(); renderConvs();
   data.blocks.forEach(b => {
     if (b.kind === "user") addUser(b.text, b.images);
@@ -337,7 +454,7 @@ async function openConversation(id) {
 // ── Chat ───────────────────────────────────────────────────────────────────────
 function resetChat(welcome = true) {
   $("#messages").innerHTML = ""; turnEl = null; segEls = {}; stepEls = {}; stepsBox = null; longHintShown = false; undoNote = "";
-  S.conversation_id = null; S.conversation_title = ""; S.conversation_tokens = 0;
+  S.conversation_id = null; S.conversation_title = ""; S.pinned_prompt = ""; S.conversation_tokens = 0;
   $("#feed").innerHTML = `<div class="empty">As ações do agente aparecem aqui em tempo real.</div>`;
   renderTopbar(); renderConvs();
   if (welcome) renderWelcome();
@@ -814,6 +931,8 @@ function approval(e) {
 function palette(initial = "") {
   const cmds = [
     ["plus", "Nova conversa", () => action("new"), "Ctrl+N"],
+    ["edit", "Renomear conversa", () => renameCurrentConv()],
+    ["pin", "Prompt da conversa", () => pinnedPromptModal()],
     ["folder", "Abrir ou criar projeto", () => projectDialog()],
     ["globe", "Adicionar API manual", () => { settingsSection = "api"; go("settings"); }],
     ["settings", "Abrir configurações", () => go("settings"), "Ctrl+,"],
@@ -872,6 +991,7 @@ function renderTeamPage() {
 function providerOptions(selected, allowEmpty) {
   return (allowEmpty ? `<option value="">(usar o modelo padrão)</option>` : "") + S.providers.map(p => `<option value="${esc(p.id)}" ${p.id === selected ? "selected" : ""}>${esc(p.label)}${p.has_credentials ? "" : " — sem acesso"}</option>`).join("");
 }
+let peModelList = null;
 function profileEditor(p) {
   const isNew = !p;
   p = p || { id: "", name: "", icon: "bot", description: "", system_prompt: "", startup_prompt: "", auto_startup: false, provider: "", model: "", temperature: null, effort: "", workspace: "", tool_groups: S.all_groups, mcp_servers: [], max_steps: null, in_team: false, skills_tags: [], bound: false };
@@ -885,7 +1005,12 @@ function profileEditor(p) {
     <div style="margin-top:12px"><b>Prompt inicial</b><textarea class="inp" id="pe-start" style="min-height:70px" placeholder="Ex.: Leia o README do projeto e me diga o estado atual.">${esc(p.startup_prompt)}</textarea>
       <label class="row" style="margin-top:6px"><span class="toggle"><input type="checkbox" id="pe-auto" ${p.auto_startup ? "checked" : ""}><span></span></span> Enviar automaticamente ao abrir uma conversa</label></div>
     <div class="row" style="margin-top:14px"><div style="flex:1"><b>Provedor</b><select class="inp" id="pe-prov">${providerOptions(p.provider, true)}</select></div>
-      <div style="flex:1"><b>Modelo</b><input class="inp" id="pe-model" list="pe-models" value="${esc(p.model)}" placeholder="nome do modelo"><datalist id="pe-models"></datalist></div></div>
+      <div style="flex:1"><b>Modelo</b><div class="row"><input class="inp" style="flex:1" id="pe-model" value="${esc(p.model)}" placeholder="nome do modelo" spellcheck="false" autocomplete="off"><button type="button" class="btn small" id="pe-refresh" title="Buscar modelos do provedor">${icon("refresh")}</button></div></div></div>
+    <div class="warn-line" id="pe-warn"></div>
+    <div id="pe-model-box">
+      <label class="model-search">${icon("search")}<input id="pe-search" placeholder="Pesquisar modelo (ex.: claude son, qwen, gemini)…" spellcheck="false" autocomplete="off"><span class="cnt" id="pe-count">0 de 0</span></label>
+      <div class="model-pick" id="pe-list"></div>
+    </div>
     <label class="row" style="margin-top:8px"><span class="toggle"><input type="checkbox" id="pe-bind" ${p.bound ? "checked" : ""}><span></span></span> Ativar este perfil quando eu escolher este modelo</label>
     <div class="row" style="margin-top:12px"><div style="flex:2"><b>Pasta deste perfil</b><div class="row"><input class="inp" id="pe-ws" style="flex:1" value="${esc(p.workspace)}" placeholder="vazio = usar o projeto aberto na tela"><button class="btn small" id="pe-pick">${icon("folder")}</button></div></div>
       <div style="flex:1"><b>Temperatura</b><input class="inp" id="pe-temp" type="number" step="0.1" min="0" max="2" value="${p.temperature ?? ""}" placeholder="padrão"></div>
@@ -895,8 +1020,19 @@ function profileEditor(p) {
       <div style="flex:1"><b>Especialidades</b><input class="inp" id="pe-tags" value="${esc(p.skills_tags.join(", "))}" placeholder="código, testes…"></div></div>
     <label class="row" style="margin-top:10px"><span class="toggle"><input type="checkbox" id="pe-team" ${p.in_team ? "checked" : ""}><span></span></span> Faz parte da equipe (pode receber tarefas delegadas)</label>
     <div class="actions">${!isNew && p.id !== "geral" ? `<button class="btn danger" id="pe-del">${icon("trash")} Apagar</button>` : ""}<span style="flex:1"></span><button class="btn" id="pe-cancel">Cancelar</button><button class="btn primary" id="pe-save">Salvar perfil</button></div></div>`, false);
-  const fillModels = () => { const prov = S.providers.find(x => x.id === $("#pe-prov").value); $("#pe-models").innerHTML = (prov?.models || []).map(m => `<option value="${esc(m)}">`).join(""); };
-  $("#pe-prov").onchange = fillModels; fillModels();
+  peModelList = bindSearchableModels({
+    provEl: $("#pe-prov"),
+    modelEl: $("#pe-model"),
+    searchEl: $("#pe-search"),
+    countEl: $("#pe-count"),
+    listEl: $("#pe-list"),
+    warnEl: $("#pe-warn"),
+    refreshBtn: $("#pe-refresh"),
+    submitBtn: $("#pe-save"),
+    boxEl: $("#pe-model-box"),
+    isActive: (provId, m) => ($("#pe-model").value.trim() || S.model) === m,
+    onPick: m => { $("#pe-model").value = m; peModelList(false); },
+  });
   $$("[data-icon]", $("#pe-icons")).forEach(b => b.addEventListener("click", () => {
     $("#pe-icon").value = b.dataset.icon;
     $$("[data-icon]", $("#pe-icons")).forEach(x => x.classList.toggle("on", x === b));
@@ -905,9 +1041,11 @@ function profileEditor(p) {
   $("#pe-cancel").onclick = closeModal;
   if ($("#pe-del")) $("#pe-del").onclick = async () => { if (await confirmBox("Apagar perfil?", p.name)) { S = await call("deleteProfile", p.id); renderAll(); renderTeamPage(); } };
   $("#pe-save").onclick = async () => {
+    const modelVal = $("#pe-prov").value ? $("#pe-model").value.trim() : "";
+    if (looksLikeKey(modelVal)) return toast("error", "Isso é uma chave", "O campo Modelo está com uma chave de API. Escolha um modelo da lista.", 7000);
     const data = { id: p.id, name: $("#pe-name").value.trim(), icon: $("#pe-icon").value.trim() || "bot", description: $("#pe-desc").value.trim(),
       system_prompt: $("#pe-sys").value.trim(), startup_prompt: $("#pe-start").value.trim(), auto_startup: $("#pe-auto").checked,
-      provider: $("#pe-prov").value, model: $("#pe-prov").value ? $("#pe-model").value.trim() : "",
+      provider: $("#pe-prov").value, model: modelVal,
       temperature: $("#pe-temp").value === "" ? null : +$("#pe-temp").value, effort: p.effort || "", max_tokens: p.max_tokens ?? null,
       workspace: $("#pe-ws").value.trim(), tool_groups: $$(".pe-g").filter(c => c.checked).map(c => c.value),
       mcp_servers: $("#pe-mcp").value.split(",").map(s => s.trim()).filter(Boolean), max_steps: $("#pe-steps").value ? +$("#pe-steps").value : null,
@@ -963,6 +1101,7 @@ function renderSettings() {
         <div class="group"><h3>Modelo principal</h3>
         ${field("Provedor", "De onde vem a IA principal.", `<select class="inp" id="m-prov">${providerOptions(S.provider, false)}</select>`)}
         ${field("Modelo", "Clique em um modelo da lista abaixo ou digite o nome exato.", `<div class="row"><input class="inp" style="flex:1" id="m-model" value="${esc(S.model)}" placeholder="nome do modelo" spellcheck="false" autocomplete="off"><button class="btn small" id="m-refresh" title="Buscar modelos do provedor">${icon("refresh")}</button></div><div class="warn-line" id="m-warn"></div>`)}
+        <label class="model-search">${icon("search")}<input id="m-search" placeholder="Pesquisar modelo (ex.: claude son, qwen 27b, gpt-4o)…" spellcheck="false" autocomplete="off"><span class="cnt" id="m-count">0 de 0</span></label>
         <div class="model-pick" id="m-list"></div>
         <div class="row" style="padding:10px 0"><button class="btn primary" id="m-apply">${icon("check")} Usar este modelo</button><span class="status" id="m-hint"></span></div></div>
         <div class="group"><h3>Modelos locais (Ollama)</h3><div id="local-models"><div class="empty">Carregando…</div></div>
@@ -1080,11 +1219,89 @@ function looksLikeKey(text) {
   const mixed = /[A-Z]/.test(t) && /[a-z]/.test(t) && /\d/.test(t);
   return mixed && (longest >= 24 || (/^(sk|sk-or|sk-ant|rv|gsk|xai|pplx|csk|r8|hf|ghp|AIza)[-_]?[A-Za-z0-9]/i.test(t) && t.length >= 24));
 }
+function normSearch(s) {
+  return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+function matchModelQuery(name, query) {
+  const q = normSearch(query).trim();
+  if (!q) return true;
+  const hay = normSearch(name);
+  return q.split(/\s+/).every(part => hay.includes(part));
+}
+function bindSearchableModels({ provEl, modelEl, searchEl, countEl, listEl, warnEl, hintEl, refreshBtn, submitBtn, boxEl, isActive, onPick }) {
+  let selIdx = 0, shown = [];
+  const autoFetched = new Set();
+  const current = () => S.providers.find(p => p.id === provEl.value) || {};
+  const refresh = () => {
+    if (!provEl.value) return;
+    call("refreshModels", provEl.value);
+    if (hintEl) hintEl.textContent = "buscando modelos…";
+  };
+  const markSel = () => {
+    const items = $$("[data-m]", listEl);
+    items.forEach((b, i) => b.classList.toggle("sel", i === selIdx));
+    if (items[selIdx]) items[selIdx].scrollIntoView({ block: "nearest" });
+  };
+  const render = (resetIdx = false) => {
+    const provId = provEl.value;
+    if (boxEl) boxEl.hidden = !provId;
+    const models = (current().models || []).filter(m => !looksLikeKey(m));
+    const bad = looksLikeKey(modelEl.value);
+    if (warnEl) warnEl.innerHTML = bad ? `${icon("alert")}<span>Isso parece uma <b>chave de API</b>, não o nome de um modelo. A chave vai em Chaves de API; aqui, clique em um modelo da lista.</span>` : "";
+    if (submitBtn) submitBtn.disabled = bad;
+    const sq = searchEl.value.trim(), mq = modelEl.value.trim();
+    const q = sq || (!bad && mq && !models.some(m => normSearch(m) === normSearch(mq)) ? mq : "");
+    const filtered = q ? models.filter(m => matchModelQuery(m, q)) : models;
+    shown = filtered.slice(0, 300);
+    if (countEl) countEl.textContent = `${filtered.length} de ${models.length}`;
+    if (resetIdx) {
+      const actIdx = shown.findIndex(m => isActive(provId, m));
+      selIdx = actIdx >= 0 ? actIdx : 0;
+    } else {
+      selIdx = Math.max(0, Math.min(selIdx, Math.max(0, shown.length - 1)));
+    }
+    listEl.innerHTML = !provId ? ""
+      : !models.length ? `<div class="empty">Nenhum modelo carregado ainda. Clique em ${icon("refresh")} para buscar a lista no provedor.</div>`
+      : shown.map((m, i) => {
+          const on = isActive(provId, m);
+          return `<button type="button" class="mp ${on ? "on" : ""} ${i === selIdx ? "sel" : ""}" data-m="${esc(m)}" title="Usar ${esc(m)}">${icon(on ? "check" : "cpu")}<span>${esc(m)}</span></button>`;
+        }).join("") + (filtered.length ? "" : `<div class="empty">Nenhum modelo com “${esc(q)}”. Para usar mesmo assim, digite no campo Modelo.</div>`);
+    $$("[data-m]", listEl).forEach((b, i) => {
+      b.onclick = () => { selIdx = i; onPick(b.dataset.m); };
+    });
+    if (hintEl) hintEl.textContent = models.length ? `${filtered.length} de ${models.length} ${models.length === 1 ? "modelo disponível" : "modelos disponíveis"} · setas + Enter ou clique para usar` : "";
+    if (provId && !models.length && !autoFetched.has(provId)) {
+      autoFetched.add(provId);
+      refresh();
+    }
+  };
+  const onKey = e => {
+    if (!shown.length) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); selIdx = Math.min(selIdx + 1, shown.length - 1); markSel(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); selIdx = Math.max(selIdx - 1, 0); markSel(); }
+    else if (e.key === "Enter" && shown[selIdx]) { e.preventDefault(); e.stopPropagation(); onPick(shown[selIdx]); }
+  };
+  searchEl.addEventListener("input", () => { selIdx = 0; render(false); });
+  searchEl.addEventListener("keydown", onKey);
+  modelEl.addEventListener("input", () => render(false));
+  modelEl.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") onKey(e);
+  });
+  provEl.onchange = () => {
+    searchEl.value = "";
+    const first = (current().models || [""])[0] || "";
+    if (provEl.id === "m-prov" || !provEl.value) modelEl.value = provEl.value ? first : "";
+    else if (!modelEl.value.trim()) modelEl.value = first;
+    render(true);
+  };
+  if (refreshBtn) refreshBtn.onclick = refresh;
+  render(true);
+  if (looksLikeKey(modelEl.value) && provEl.value) refresh();
+  return render;
+}
 let modelList = null;   // redesenha a lista de Configurações › Modelos quando chegam modelos novos
 function bindModels() {
   const prov = $("#m-prov"), input = $("#m-model");
-  const current = () => S.providers.find(p => p.id === prov.value) || {};
-  const refresh = () => { call("refreshModels", prov.value); $("#m-hint").textContent = "buscando modelos…"; };
   const apply = async model => {
     if (looksLikeKey(model)) return toast("error", "Isso é uma chave", "A chave vai em Configurações › Chaves de API. Aqui escolha um modelo da lista.", 7000);
     const res = await call("selectModel", prov.value, model);
@@ -1094,26 +1311,20 @@ function bindModels() {
     const p = S.providers.find(x => x.id === prov.value);
     if (p && !p.has_credentials) toast("warn", "Falta acesso", p.type === "grok_cli" ? "Entre na conta Grok em Configurações › Conta Grok." : `Configure ${p.api_key_env} em Chaves de API.`, 6000);
   };
-  modelList = () => {
-    const models = current().models || [], q = input.value.trim().toLowerCase();
-    const bad = looksLikeKey(input.value);
-    $("#m-warn").innerHTML = bad ? `${icon("alert")}<span>Isso parece uma <b>chave de API</b>, não o nome de um modelo. A chave vai em Chaves de API; aqui, clique em um modelo da lista.</span>` : "";
-    $("#m-apply").disabled = bad;
-    const filtered = !q || bad || models.some(m => m.toLowerCase() === q) ? models : models.filter(m => m.toLowerCase().includes(q));
-    const active = m => S.provider === prov.value && S.model === m;
-    $("#m-list").innerHTML = !models.length
-      ? `<div class="empty">Nenhum modelo carregado ainda. Clique em ${icon("refresh")} para buscar a lista no provedor.</div>`
-      : filtered.slice(0, 300).map(m => `<button class="mp ${active(m) ? "on" : ""}" data-m="${esc(m)}" title="Usar ${esc(m)}">${icon(active(m) ? "check" : "cpu")}<span>${esc(m)}</span></button>`).join("")
-        + (filtered.length ? "" : `<div class="empty">Nenhum modelo com “${esc(input.value.trim())}”. Para usar mesmo assim, clique em Usar este modelo.</div>`);
-    $$("[data-m]", $("#m-list")).forEach(b => b.onclick = () => { input.value = b.dataset.m; apply(b.dataset.m); });
-    $("#m-hint").textContent = models.length ? `${models.length} ${models.length === 1 ? "modelo disponível" : "modelos disponíveis"} · clique para usar` : "";
-  };
-  input.oninput = modelList;
-  prov.onchange = () => { input.value = (current().models || [""])[0] || ""; modelList(); refresh(); };
-  $("#m-refresh").onclick = refresh;
+  modelList = bindSearchableModels({
+    provEl: prov,
+    modelEl: input,
+    searchEl: $("#m-search"),
+    countEl: $("#m-count"),
+    listEl: $("#m-list"),
+    warnEl: $("#m-warn"),
+    hintEl: $("#m-hint"),
+    refreshBtn: $("#m-refresh"),
+    submitBtn: $("#m-apply"),
+    isActive: (provId, m) => S.provider === provId && S.model === m,
+    onPick: m => { input.value = m; apply(m); },
+  });
   $("#m-apply").onclick = () => apply(input.value.trim());
-  modelList();
-  if (!(current().models || []).length || looksLikeKey(S.model)) refresh();
   $("#pull-btn").onclick = () => { const n = $("#pull-name").value.trim(); if (n) { call("pullModel", n); toast("info", "Ollama", `Baixando ${n}…`); } };
   call("localModels").then(list => {
     $("#local-models").innerHTML = (list && list.length) ? list.map(m => `<div class="model-row"><span class="nm">${esc(m.name)}</span><span class="sz">${esc(m.size)} · ${esc(m.params || "")}</span><button class="btn small" data-use-local="${esc(m.name)}">${S.provider === "ollama" && S.model === m.name ? "Em uso ✓" : "Usar"}</button></div>`).join("")
@@ -1254,8 +1465,11 @@ function projectDialog() {
 function onModels(e) {
   const p = S.providers.find(x => x.id === e.provider); if (p && e.models.length) p.models = e.models.filter(m => !looksLikeKey(m));
   if ($("#m-prov") && $("#m-prov").value === e.provider && modelList) {
-    modelList();
+    modelList(true);
     if (!e.models.length) $("#m-hint").textContent = "O provedor não devolveu a lista. Confira a chave em Chaves de API ou digite o nome do modelo.";
+  }
+  if ($("#pe-prov") && $("#pe-prov").value === e.provider && peModelList) {
+    peModelList(true);
   }
 }
 function onPull(e) {

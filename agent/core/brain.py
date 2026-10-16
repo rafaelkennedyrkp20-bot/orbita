@@ -89,6 +89,7 @@ class Brain:
         self.conversations = ConversationStore()
         self.conversation_id: Optional[str] = None
         self.conversation_title = ""
+        self.pinned_prompt = ""
         logger.info("Brain pronto: %d ferramentas, %d skills, %d perfis.",
                     len(self.registry.all()), len(self.skills.skills), len(self.profiles.profiles))
 
@@ -250,6 +251,7 @@ class Brain:
     def new_session(self, events: Optional[EventFn] = None, approve: Optional[ApproveFn] = None) -> AgentSession:
         provider, model = self.current_model
         self.session = AgentSession(self, self.profile, provider, model, events=events, approve=approve)
+        self.session.pinned_prompt = self.pinned_prompt
         return self.session
 
     # ── Conversas salvas ─────────────────────────────────────
@@ -258,12 +260,29 @@ class Brain:
         self.session = None
         self.conversation_id = None
         self.conversation_title = ""
+        self.pinned_prompt = ""
+
+    def set_pinned_prompt(self, prompt: str) -> str:
+        """Define ou limpa o prompt fixo desta conversa (vale já no próximo turno e é salvo com ela)."""
+        self.pinned_prompt = (prompt or "").strip()
+        if self.session is not None:
+            self.session.pinned_prompt = self.pinned_prompt
+        if self.conversation_id:
+            if self.session is not None and self.session.messages:
+                self.save_conversation()
+            else:
+                existing = self.conversations.load(self.conversation_id)
+                if existing:
+                    existing["pinned_prompt"] = self.pinned_prompt
+                    self.conversations.save(existing)
+        return self.pinned_prompt
 
     def open_conversation(self, conversation_id: str) -> Optional[dict]:
         """Reabre uma conversa salva; devolve os dados (com blocos para a interface)."""
         data = self.conversations.load(conversation_id)
         if not data:
             return None
+        self.pinned_prompt = (data.get("pinned_prompt") or "").strip()
         session = self.new_session()
         session.messages = data.get("messages", [])
         session.summary = data.get("summary")
@@ -271,6 +290,7 @@ class Brain:
             session.external_session = data.get("external_session")
         self.conversation_id = data["id"]
         self.conversation_title = data.get("title", "")
+        data["pinned_prompt"] = self.pinned_prompt
         data["blocks"] = to_ui_blocks(session.messages)
         return data
 
@@ -288,6 +308,7 @@ class Brain:
             "id": self.conversation_id,
             "title": existing.get("title") if existing.get("pinned_title") else self.conversation_title,
             "pinned_title": existing.get("pinned_title", False),
+            "pinned_prompt": self.pinned_prompt,
             "created": existing.get("created") or datetime.now().isoformat(timespec="seconds"),
             "profile": self.profile.id, "provider": provider, "model": model,
             "messages": session.messages, "summary": session.summary,
@@ -304,6 +325,7 @@ class Brain:
             session = self.new_session(events, approve)
         else:
             session.profile = self.profile
+            session.pinned_prompt = self.pinned_prompt
             if (session.provider_name, session.model) != (provider, model):
                 session.external_session = None   # outra IA: a sessão do Grok Build não vale mais
                 session.prompted_tools = False

@@ -18,7 +18,19 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## [Não lançado]
 
+## [0.2.0-alpha] — 2026-10-16
+
 ### Melhorias
+- **Conversas pelo botão direito**: na lista de conversas, o botão direito abre um menu com Renomear (edição na
+  própria linha: Enter salva, Esc cancela) e Apagar (com confirmação; se for a conversa aberta, começa uma nova).
+  A paleta de comandos (Ctrl+K) ganhou "Renomear conversa" e "Prompt da conversa".
+- **Prompt da conversa**: um botão no topo do chat define instruções fixas só daquela conversa, aplicadas em todos os
+  turnos (desde o primeiro, mesmo em conversa nova), além do prompt do perfil. Fica salvo com a conversa e volta ao
+  reabri-la; um selo discreto mostra quando está ativo.
+- **Busca de modelos**: Configurações › Modelos e o editor de perfil têm um campo de busca que ignora maiúsculas e
+  acentos e aceita partes do nome ("claude son" acha "anthropic/claude-sonnet-…"), com contagem ("1 de 380"), modelo
+  em uso destacado, setas + Enter para escolher e busca automática da lista quando ela está vazia. O editor de perfil
+  não usa mais `<datalist>`.
 - Ícones próprios para os agentes, no lugar dos emojis do Windows: cada perfil tem símbolo e cor exclusivos
   (estrela em órbita, código, revisão, pesquisa, criação, DNA, raio, automação, liderança, robô). O editor de
   perfil ganhou um seletor de ícone; perfis antigos com emoji passam a usar o ícone correspondente sozinhos.
