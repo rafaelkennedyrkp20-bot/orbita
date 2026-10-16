@@ -51,7 +51,8 @@ logger = logging.getLogger(__name__)
 WEB_INDEX = brand.WEB_DIR / "index.html"
 SETTABLE = {"theme", "user_name", "default_workspace", "native_notifications", "show_reasoning", "permission_mode",
             "economy_mode", "turn_token_budget", "daily_token_budget", "voice_replies", "auto_routing",
-            "cheap_model", "image_model", "ollama_num_ctx", "ollama_keep_alive", "checkpoints", "update_check"}
+            "cheap_model", "image_model", "ollama_num_ctx", "ollama_keep_alive", "checkpoints", "update_check",
+            "team_model", "stt_model", "stt_engine"}
 # Modo plano: vai junto da mensagem; as ferramentas que alteram algo ficam bloqueadas no turno.
 PLAN_NOTE = ("\n\n[Modo plano] Ainda NÃO execute: não crie, edite nem apague arquivos e não rode comandos que "
              "alterem algo — essas ferramentas estão bloqueadas neste turno. Leia e pesquise o que precisar e "
@@ -284,9 +285,12 @@ class Api(QObject):
         settings = self.brain.settings
         if profile.model_ref:
             data["model_label"] = _short_model(profile.model_ref)
-        elif profile.in_team:
+        elif profile.in_team and settings.get("team_model", "principal") == "auto":
             routed = self.brain.route_model(routing.specialty_for(profile))
             data["model_label"] = f"auto · {_short_model(routed)}" if routed else (settings.get("cheap_model") or "modelo principal")
+        elif profile.in_team:
+            provider, model = self.brain.current_model
+            data["model_label"] = f"mesmo do principal · {_short_model(f'{provider}:{model}')}"
         else:
             data["model_label"] = "modelo principal"
         data["bound"] = bool(profile.provider and profile.model
@@ -334,7 +338,12 @@ class Api(QObject):
             "pygments_css": render.pygments_css(),
             "version": __version__,
             "install": self.install_info(),
+            "voice_gpu": self.voice_gpu() if getattr(self, "_voice_gpu", None) else None,
         }
+
+    @pyqtSlot(result=str)
+    def voiceGpuStatus(self) -> str:
+        return json.dumps(self.voice_gpu())
 
     def install_info(self) -> dict:
         if not hasattr(self, "_install"):
@@ -400,7 +409,95 @@ class Api(QObject):
 
     @pyqtSlot()
     def voice(self) -> None:
+        """Conversa por voz: fala, o agente responde e lê a resposta (paleta de comandos)."""
         self.win.worker.commands.put(("voice", None))
+
+    # ── Ditado (microfone → texto no campo) ──────────────────
+
+    def stt_engine(self, with_key: bool = True) -> dict:
+        """Onde transcrever: nuvem (Groq/OpenAI, se houver chave) ou este PC (Whisper leve)."""
+        from agent.voice import dictation
+        settings = self.brain.settings
+        choice = settings.get("stt_engine") or "auto"
+        if choice in ("auto", "cloud"):
+            for name, model in dictation.CLOUD_MODELS.items():
+                try:
+                    cfg = settings.provider(name)
+                    key = settings.api_key(cfg)
+                except KeyError:
+                    continue
+                if key:
+                    engine = {"kind": "cloud", "label": f"{cfg.get('label', name)} · nuvem",
+                              "base_url": cfg.get("base_url", ""), "model": model}
+                    return {**engine, "key": key} if with_key else engine
+        size = settings.get("stt_model") or dictation.DEFAULT_LOCAL_MODEL
+        return {"kind": "local", "size": size, "label": f"neste PC · Whisper {size}",
+                "wanted_cloud": choice == "cloud"}
+
+    def dictation(self):
+        if getattr(self, "_dictation", None) is None:
+            from agent.voice.dictation import Dictation
+            self._dictation = Dictation(self.push, self.stt_engine)
+        return self._dictation
+
+    @pyqtSlot(result=str)
+    def sttStatus(self) -> str:
+        return json.dumps(self.stt_engine(with_key=False), ensure_ascii=False)
+
+    @pyqtSlot(result=str)
+    def dictationStart(self) -> str:
+        error = self.dictation().start()
+        return json.dumps({"error": error} if error else {}, ensure_ascii=False)
+
+    def voice_gpu(self) -> dict:
+        """Placa NVIDIA presente? Bibliotecas CUDA do Whisper instaladas? (calculado uma vez)"""
+        if not hasattr(self, "_voice_gpu"):
+            import importlib.util
+            try:
+                import ctranslate2
+                cuda = ctranslate2.get_cuda_device_count() > 0
+            except Exception:
+                cuda = False
+            libs = bool(importlib.util.find_spec("nvidia")) and any(
+                importlib.util.find_spec(f"nvidia.{name}") for name in ("cublas",))
+            self._voice_gpu = {"cuda": cuda, "libs": libs, "installing": False}
+        return self._voice_gpu
+
+    @pyqtSlot()
+    def installVoiceGpu(self) -> None:
+        """Instala cuBLAS/cuDNN (pip, ~1 GB) para o Whisper rodar na placa NVIDIA."""
+        info = self.voice_gpu()
+        if info["installing"]:
+            return
+        info["installing"] = True
+
+        def work():
+            command = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                       "nvidia-cublas-cu12", "nvidia-cudnn-cu12==9.*"]
+            self.push({"type": "voice_gpu", "state": "running"})
+            try:
+                result = subprocess.run(command, capture_output=True, text=True, timeout=3600,
+                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                ok = result.returncode == 0
+                if ok:
+                    from agent.voice import dictation
+                    dictation.WHISPER._cpu_only, dictation.WHISPER._dlls = False, False
+                    info["libs"] = True
+                self.push({"type": "voice_gpu", "state": "done" if ok else "error",
+                           "message": "" if ok else (result.stderr or result.stdout)[-600:]})
+            except Exception as error:
+                self.push({"type": "voice_gpu", "state": "error", "message": str(error)})
+            finally:
+                info["installing"] = False
+        threading.Thread(target=work, daemon=True).start()
+
+    @pyqtSlot()
+    def dictationStop(self) -> None:
+        self.dictation().stop()
+
+    @pyqtSlot()
+    def dictationCancel(self) -> None:
+        self.dictation().cancel()
 
     @pyqtSlot(str, str)
     def answerApproval(self, approval_id: str, value: str) -> None:

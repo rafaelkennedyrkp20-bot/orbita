@@ -194,6 +194,7 @@ function bindChrome() {
   input.addEventListener("input", () => { autosize(); slashHint(); mentionHint(); });
   input.addEventListener("keydown", e => {
     if (mentionKey(e)) return;
+    if (dict && e.key === "Enter") { e.preventDefault(); stopDictation(); return; }   // Enter termina o ditado, não envia
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   });
   input.addEventListener("blur", () => setTimeout(closeMention, 150));
@@ -204,6 +205,8 @@ function bindChrome() {
     else if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); action("new"); }
     else if (e.ctrlKey && e.key.toLowerCase() === "b") { e.preventDefault(); action("toggle-side"); }
     else if (e.ctrlKey && e.key === ",") { e.preventDefault(); go("settings"); }
+    else if (e.key === "Escape" && dict) { e.preventDefault(); cancelDictation(); }
+    else if (e.ctrlKey && e.key.toLowerCase() === "m") { e.preventDefault(); toggleDictation(); }
     else if (e.key === "Escape") { if ($("#ctx-menu").innerHTML) closeCtxMenu(); else if ($("#modal-root").innerHTML) closeModal(); else if (busy) call("stop"); }
   });
   $("#conv-search").addEventListener("input", renderConvs);
@@ -225,6 +228,8 @@ function bindChrome() {
   $("#chip-model").addEventListener("click", () => { settingsSection = "modelos"; go("settings"); });
   $("#chip-perm").addEventListener("click", cyclePermission);
   $("#compact-btn").addEventListener("click", compactConversation);
+  $("#dict-done").addEventListener("click", stopDictation);
+  $("#dict-cancel").addEventListener("click", cancelDictation);
   $$(".tab").forEach(t => t.addEventListener("click", () => selectTab(t.dataset.tab)));
   const box = $("#composer-box");
   box.addEventListener("dragover", e => { e.preventDefault(); box.classList.add("drag"); });
@@ -247,6 +252,7 @@ async function action(name, el) {
     case "toggle-convs": $("#page-chat").classList.toggle("no-convs"); break;
     case "attach": addAttachments(await call("pickImages") || []); break;
     case "voice": if (!busy) call("voice"); break;
+    case "dictate": toggleDictation(); break;
     case "theme": {
       const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
       applyTheme(t); call("setSetting", "theme", JSON.stringify(t)); break;
@@ -521,6 +527,54 @@ function maybeLongHint() {
   if (longHintShown || $$(".msg.user").length < 14) return;
   longHintShown = true;
   note("Conversa longa: para um assunto novo, comece outra conversa (Ctrl+N). O agente fica mais preciso e gasta menos tokens.", "tip");
+}
+
+// ── Ditado: fala vira texto no campo, enquanto se fala ─────────────────────────
+let dict = null;   // { before, after, start, timer } enquanto grava
+function toggleDictation() { if (dict) stopDictation(); else startDictation(); }
+async function startDictation() {
+  const i = $("#input");
+  dict = { before: i.value.slice(0, i.selectionStart), after: i.value.slice(i.selectionEnd), start: Date.now(), timer: null, text: "" };
+  $("#composer-box").classList.add("dictating"); $("#mic").classList.add("rec");
+  $("#dict-label").textContent = "Abrindo o microfone…";
+  dict.timer = setInterval(() => { if (!dict) return; const s = Math.floor((Date.now() - dict.start) / 1000); $("#dict-time").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }, 250);
+  const r = await call("dictationStart");
+  if (r && r.error) { endDictation(); toast("warn", "Ditado", r.error); }
+}
+function stopDictation() { if (!dict) return; $("#dict-label").textContent = "Transcrevendo…"; $("#composer-box").classList.add("finishing"); call("dictationStop"); }
+function cancelDictation() { if (!dict) return; call("dictationCancel"); applyDictation(""); endDictation(); }
+function applyDictation(text) {
+  if (!dict) return;
+  const i = $("#input"), b = dict.before, gap = b && !/\s$/.test(b) && text ? " " : "";
+  i.value = b + gap + text + dict.after;
+  const pos = (b + gap + text).length; i.setSelectionRange(pos, pos); autosize();
+}
+function endDictation() {
+  if (dict) clearInterval(dict.timer);
+  dict = null;
+  $("#composer-box").classList.remove("dictating", "finishing"); $("#mic").classList.remove("rec");
+  $("#input").classList.remove("partial"); $("#input").focus();
+}
+function renderVoiceGpu(g) {
+  const status = $("#vg-status"), btn = $("#vg-install");
+  if (!status || !g) return;
+  btn.style.display = g.cuda && !g.libs && !g.installing ? "" : "none";
+  status.innerHTML = !g.cuda ? "Nenhuma placa NVIDIA encontrada: o ditado usa a CPU (texto parcial em ~1 s)."
+    : g.installing ? `<span class="spin" style="display:inline-block;vertical-align:-3px"></span> Instalando as bibliotecas da NVIDIA (~1 GB). Pode continuar usando o programa.`
+    : g.libs ? `<span style="color:var(--ok)">● Ditado na placa de vídeo</span>: o texto aparece quase na hora.`
+    : "Placa NVIDIA encontrada, mas faltam as bibliotecas CUDA. Instale para o ditado ficar instantâneo (download de ~1 GB, uma vez).";
+}
+function onDictation(e) {
+  if (!dict && e.state !== "error") return;
+  switch (e.state) {
+    case "recording": $("#dict-label").textContent = "Ouvindo… fale à vontade"; $("#dict-label").title = e.engine ? "Transcrição: " + e.engine : ""; break;
+    case "level": $$(".dict-level i").forEach((bar, k) => bar.style.transform = `scaleY(${Math.max(.15, Math.min(1, e.level * (1.4 - Math.abs(k - 3) * .2)))})`); break;
+    case "partial": dict.text = e.text; $("#input").classList.add("partial"); applyDictation(e.text); break;
+    case "finishing": $("#dict-label").textContent = "Transcrevendo…"; $("#composer-box").classList.add("finishing"); break;
+    case "done": $("#input").classList.remove("partial"); applyDictation(e.text || ""); if (!e.text && e.message) toast("warn", "Ditado", e.message); endDictation(); break;
+    case "cancelled": endDictation(); break;
+    case "error": if (dict) { applyDictation(""); endDictation(); } toast("error", "Microfone", e.message || "O ditado falhou.", 8000); break;
+  }
 }
 
 // ── Modo plano ─────────────────────────────────────────────────────────────────
@@ -918,6 +972,11 @@ function onEvent(e) {
     case "toast": toast(e.kind, e.title, e.text, e.ms || 4200); break;
     case "voice_text": if ($(".welcome")) $("#messages").innerHTML = ""; addUser(e.text); break;
     case "listening": $("#mic").classList.add("rec"); setLive(true, "Ouvindo…"); break;
+    case "dictation": onDictation(e); break;
+    case "voice_gpu":
+      if (e.state === "done") { toast("success", "Ditado", "Pronto: o ditado agora usa a placa de vídeo."); renderVoiceGpu({ cuda: true, libs: true }); }
+      else if (e.state === "error") { toast("error", "Placa de vídeo", "A instalação falhou: " + (e.message || ""), 10000); renderVoiceGpu({ cuda: true, libs: false }); }
+      break;
     case "mcp": S.mcp = e.servers; $("#mcp-dot").classList.toggle("on", e.servers.some(s => s.status === "erro")); if ($("#page-connections").classList.contains("active")) renderConnections(); break;
     case "state": S = { ...S, ...e.state }; renderAll(); break;
     case "models": onModels(e); break;
@@ -1008,6 +1067,8 @@ function palette(initial = "") {
     ["users", "Equipe e perfis", () => go("team")],
     ["plug", "Conexões MCP e skills", () => go("connections")],
     ["panel", "Mostrar/ocultar painel ao vivo", () => action("toggle-side"), "Ctrl+B"],
+    ["mic", "Ditar mensagem (fala vira texto)", () => toggleDictation(), "Ctrl+M"],
+    ["wave", "Conversa por voz (fala e ouve a resposta)", () => action("voice")],
     ["layers", "Compactar conversa (resume o histórico)", () => compactConversation()],
     ["shield", "Alternar permissões", () => cyclePermission()],
     ["moon", "Alternar tema claro/escuro", () => action("theme")],
@@ -1057,16 +1118,26 @@ function renderTeamPage() {
     ${p.in_team ? `<span class="tag grad">equipe</span>` : ""}${p.id === S.profile.id ? `<span class="tag grad">ativo</span>` : ""}${p.auto_startup ? `<span class="tag">prompt inicial</span>` : ""}</div></div>
     <div class="desc">${esc(p.description || "Sem descrição")}</div>
     <div>${(p.skills_tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
-    <div class="foot"><span class="mono">${icon("cpu")} ${esc(p.model_label)}</span>
+    <div class="foot"><span class="mono" title="${esc(p.model_label)}">${icon("cpu")} ${esc(p.model_label)}</span>
       <button class="btn small" data-edit="${esc(p.id)}">${icon("edit")} Editar</button>
       ${p.id !== S.profile.id ? `<button class="btn small" data-use="${esc(p.id)}">Usar</button>` : ""}</div></div>`;
   const team = S.profiles.filter(p => p.in_team), others = S.profiles.filter(p => !p.in_team);
-  $("#team-body").innerHTML = `<h1>Equipe e perfis</h1><p class="lead">Cada perfil tem prompt de injeção, prompt inicial, modelo e ferramentas próprios. Os membros da <b>equipe</b> recebem tarefas do agente principal — em paralelo e cada um no modelo que você escolher (ou o melhor disponível, automaticamente).</p>
+  const mode = S.settings.team_model === "auto" ? "auto" : "principal";
+  $("#team-body").innerHTML = `<h1>Equipe e perfis</h1><p class="lead">Peça no chat algo como <i>“divida em 3 agentes: um faz o HTML, outro o CSS e outro o JS”</i>. O agente principal cria os ajudantes, eles trabalham <b>ao mesmo tempo</b> na mesma pasta, cada um na sua parte, e no fim ele revisa e junta tudo.</p>
+    <div class="team-mode"><div class="tm-head">${icon("cpu")}<b>Qual modelo a equipe usa</b></div>
+      <div class="tm-opts">
+        <button class="tm-opt ${mode === "principal" ? "on" : ""}" data-team-model="principal"><b>Mesmo modelo do principal</b><span>Recomendado. Cada ajudante é uma cópia do agente principal (${esc(S.model_label || "")}) com uma tarefa diferente. Perfil com modelo fixo continua usando o dele.</span></button>
+        <button class="tm-opt ${mode === "auto" ? "on" : ""}" data-team-model="auto"><b>Automático por especialidade</b><span>O Órbita escolhe o modelo de cada ajudante pelo catálogo e pelo modo de economia. Pode usar modelos locais ou mais baratos.</span></button>
+      </div></div>
     <div class="row" style="margin-bottom:18px"><button class="btn primary" data-edit="">${icon("plus")} Novo perfil</button></div>
     <h3 style="color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.08em">Equipe</h3><div class="grid">${team.map(tile).join("")}</div>
     <h3 style="color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin-top:26px">Perfis principais</h3><div class="grid">${others.map(tile).join("")}</div>`;
   $$("[data-edit]", $("#team-body")).forEach(b => b.addEventListener("click", () => profileEditor(S.profiles.find(p => p.id === b.dataset.edit))));
   $$("[data-use]", $("#team-body")).forEach(b => b.addEventListener("click", async () => { S = await call("selectProfile", b.dataset.use); renderAll(); renderTeamPage(); toast("success", "Perfil ativo", S.profile.name); }));
+  $$("[data-team-model]", $("#team-body")).forEach(b => b.addEventListener("click", async () => {
+    await setSetting("team_model", b.dataset.teamModel, true); renderTeamPage();
+    toast("success", "Equipe", b.dataset.teamModel === "auto" ? "Cada ajudante usa o modelo escolhido pela especialidade." : "Os ajudantes usam o mesmo modelo do agente principal.");
+  }));
 }
 function providerOptions(selected, allowEmpty) {
   return (allowEmpty ? `<option value="">(usar o modelo padrão)</option>` : "") + S.providers.map(p => `<option value="${esc(p.id)}" ${p.id === selected ? "selected" : ""}>${esc(p.label)}${p.has_credentials ? "" : " — sem acesso"}</option>`).join("");
@@ -1190,7 +1261,7 @@ function renderSettings() {
         ${field("Contexto do Ollama", "Tokens de memória de trabalho (mais = mais VRAM).", `<input class="inp" type="number" step="2048" data-num="ollama_num_ctx" value="${st.ollama_num_ctx}">`)}
         ${field("Manter carregado", "Tempo que o modelo fica na VRAM entre mensagens (ex.: 10m, 1h, 0).", `<input class="inp" data-text="ollama_keep_alive" value="${esc(st.ollama_keep_alive)}">`)}</div>
         <div class="group"><h3>Equipe e modelos especiais</h3>
-        ${field("Roteamento automático", "Cada agente da equipe usa o melhor modelo disponível para a especialidade dele.", toggle("auto_routing", st.auto_routing !== false))}
+        ${field("Modelo da equipe", "Mesmo do principal: os ajudantes são cópias do agente principal. Automático: cada um usa o modelo da especialidade (pode ser local ou mais barato).", seg("team_model", [["principal", "Mesmo do principal"], ["auto", "Automático"]], st.team_model === "auto" ? "auto" : "principal"))}
         ${field("Modelo econômico", "Usado para resumos e quando o roteador não achar nada (provedor:modelo).", `<input class="inp" data-text="cheap_model" value="${esc(st.cheap_model || "")}" placeholder="ex.: deepseek:deepseek-chat">`)}
         ${field("Modelo de imagem", "Para gerar imagens; vazio = automático.", `<input class="inp" data-text="image_model" value="${esc(st.image_model || "")}" placeholder="ex.: openai:gpt-image-1">`)}
         ${field("Catálogo de capacidades", "Notas por especialidade e custo de cada modelo.", `<button class="btn small" id="cat-open">${icon("code")} Editar catálogo</button>`)}</div>
@@ -1239,8 +1310,13 @@ function renderSettings() {
         ${field("Pontos de restauração", "Antes de cada resposta o Órbita guarda uma foto da pasta do projeto (fora dela, sem tocar no seu git). Dá para ver o que mudou e desfazer com um clique.", toggle("checkpoints", st.checkpoints !== false))}</div>`;
       break;
     case "voz":
-      html = `<h1>Voz</h1><p class="lead">Fale com o agente pelo botão do microfone; a transcrição roda localmente.</p><div class="group">
-        ${field("Ler respostas em voz alta", "Voz neural local (Kokoro). Código não é lido.", toggle("voice_replies", st.voice_replies))}</div>`;
+      html = `<h1>Voz</h1><p class="lead">Clique no microfone (ou Ctrl+M), fale e clique de novo: o texto aparece no campo enquanto você fala, e você revisa antes de enviar. Com chave da Groq ou da OpenAI, a transcrição vai para a nuvem (rápida em qualquer PC); sem chave, roda neste computador, sem internet.</p><div class="group">
+        ${field("Onde transcrever", `<span id="stt-status">Verificando…</span>`, seg("stt_engine", [["auto", "Automático"], ["cloud", "Na nuvem"], ["local", "Neste PC"]], st.stt_engine || "auto"))}
+        <div class="stt-tip">${icon("info")}<span><b>Na nuvem</b> é como no ChatGPT e no Claude: rápido em qualquer computador, mesmo fraco, porque o PC só grava e envia. Usa uma chave da <b>Groq</b> (tem plano grátis: <a href="https://console.groq.com/keys">console.groq.com/keys</a>) ou da <b>OpenAI</b>, colada em Chaves de API. <b>Neste PC</b> funciona sem internet e sem chave, com um modelo leve.</span></div>
+        <h3 style="margin-top:18px">Opcional: transcrição neste PC</h3>
+        ${field("Modelo local", "Leve (~150 MB, padrão) roda em qualquer PC. Melhor (~500 MB) e Máximo (~1,6 GB) são mais precisos e mais pesados: só valem a pena com placa de vídeo. O modelo é baixado só na primeira vez que for usado.", seg("stt_model", [["base", "Leve"], ["small", "Melhor"], ["large-v3-turbo", "Máximo"]], st.stt_model || "base"))}
+        ${field("Placa de vídeo NVIDIA (opcional)", `<span id="vg-status">Verificando…</span>`, `<button class="btn small" id="vg-install" style="display:none">${icon("bolt")} Acelerar com a placa de vídeo (~1 GB)</button>`)}
+        ${field("Ler respostas em voz alta", "Na conversa por voz (Ctrl+K › Conversa por voz). Voz neural local (Kokoro). Código não é lido.", toggle("voice_replies", st.voice_replies))}</div>`;
       break;
     case "sobre":
       html = `<h1>Sobre</h1><div class="group" style="padding:20px"><div class="row"><img src="logo.svg" style="width:64px"><div><h2 style="margin:0">Órbita <span class="tag grad" style="vertical-align:middle">v${esc(S.version || "")}</span></h2><span style="color:var(--muted)">Seu agente pessoal de IA — suas regras, seu computador.</span></div></div>
@@ -1286,6 +1362,17 @@ function bindSettings() {
   const gotoApi = $("#goto-api"); if (gotoApi) gotoApi.onclick = () => { settingsSection = "api"; renderSettings(); };
   if (settingsSection === "api") bindManualApi();
   const cat = $("#cat-open"); if (cat) cat.onclick = () => call("openPath", "catalog");
+  if (settingsSection === "voz") {
+    call("voiceGpuStatus").then(renderVoiceGpu);
+    call("sttStatus").then(s => {
+      const el = $("#stt-status"); if (!el || !s) return;
+      el.innerHTML = s.kind === "cloud" ? `<span style="color:var(--ok)">● Usando ${esc(s.label)}</span> — rápido em qualquer PC.`
+        : s.wanted_cloud ? `<span style="color:var(--warn)">● Sem chave da Groq ou OpenAI</span>: usando ${esc(s.label)} até você colar uma chave.`
+        : `● Usando ${esc(s.label)}.`;
+    });
+  }
+  const vg = $("#vg-install");
+  if (vg) vg.onclick = () => { call("installVoiceGpu"); renderVoiceGpu({ cuda: true, libs: false, installing: true }); };
   const upCheck = $("#up-check");
   if (upCheck) upCheck.onclick = () => { upCheck.disabled = true; upCheck.innerHTML = `<span class="spin"></span> Procurando…`; call("checkUpdate"); };
   const upOpen = $("#up-open"); if (upOpen) upOpen.onclick = () => updateModal(S.update);

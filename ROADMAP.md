@@ -280,3 +280,16 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   avulsos da outra IA (`test_improvements.py`, `MELHORIAS_*.md`, `RESUMO_*.md`) retirados do repositório.
   Verificado: pytest 115 + 2 pulados (2 novos de compactação); janela real: composer visível (817–922 de 940),
   overflow horizontal 0, raciocínio 1.320 caracteres aberto → fechado ao escrever.
+- **2026-10-16 — Claude Opus 5.5**: pedido do usuário — ditado no microfone, mais liberdade para os modelos e
+  equipe que não troque para modelo local sozinha. Diagnóstico da voz: a gravação antiga cancelava após 5 s sem
+  detectar fala, sem aviso, e mesmo funcionando enviava a mensagem e respondia falando. Novo `agent/voice/dictation.py`:
+  grava até o 2º clique, parcial a cada ~1 s, final preciso. A pedido do usuário, nada pesado por padrão: com chave
+  da Groq/OpenAI transcreve na nuvem (`/audio/transcriptions`, como ChatGPT/Claude — funciona em PC fraco; se a nuvem
+  cair no fim, fica o último parcial); sem chave, Whisper leve neste PC (tiny no parcial, base ~150 MB no final).
+  GPU e modelos maiores são opcionais (botão instala `nvidia-cublas-cu12`/`nvidia-cudnn-cu12`; aquecimento da GPU
+  durante a fala; volta para a CPU se faltar cuBLAS). Equipe: `team_model` = "principal" (padrão) faz o ajudante usar
+  o modelo do principal; roteador só em "auto". `agent/core/capabilities.py`: nível ponta/padrão/compacto ajusta
+  prompt e passos (permissões não mudam). Verificado: pytest 139 + 2 pulados (24 novos); motor com fala real em pt-BR:
+  CPU tiny parcial 0,6 s, base final 0,9 s; GPU small final 1,0 s, turbo parcial 0,5 s/final 0,8 s; janela real com
+  microfone simulado tocando a frase: parciais desde ~4 s e final ~1 s após Concluir; telas Equipe e Voz capturadas.
+  Não verificado: nuvem com chave real (o usuário não tem chave da Groq/OpenAI) — formato coberto por teste.

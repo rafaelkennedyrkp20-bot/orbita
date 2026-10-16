@@ -87,7 +87,21 @@ def install(monkeypatch, script):
     return fake
 
 
-def test_delegate_uses_routed_model(brain, monkeypatch):
+def test_delegate_uses_parent_model_by_default(brain, monkeypatch):
+    brain.route_model = lambda specialty: "ollama:modelo-local-barato"   # roteador quer ir para o local
+    fake = install(monkeypatch, [
+        ChatResult(tool_calls=[call("delegate_task", tasks=[{"task": "parte A"}, {"task": "parte B"}])]),
+        ChatResult(text="feito"), ChatResult(text="feito"),
+        ChatResult(text="integrado"),
+    ])
+    session = AgentSession(brain, brain.profiles.get("geral"), "river", "deepseek-v4", approve=lambda r: "yes")
+    assert session.run("faça em paralelo") == "integrado"
+    assert {c["model"] for c in fake.calls} == {"deepseek-v4"}   # cópias do principal, nada de modelo local
+    assert "SEU mesmo modelo (river:deepseek-v4)" in session.system_prompt([])
+
+
+def test_delegate_uses_routed_model_when_team_is_automatic(brain, monkeypatch):
+    brain.settings.set("team_model", "auto", save=False)
     brain.route_model = lambda specialty: {"codigo": "deepseek:deepseek-chat"}.get(specialty)
     fake = install(monkeypatch, [
         ChatResult(tool_calls=[call("delegate_task", tasks=[{"task": "implemente X", "profile": "programador"}])]),

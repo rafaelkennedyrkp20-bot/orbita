@@ -100,7 +100,7 @@ respostas precisa do Kokoro (`python setup_voz.py`); sem ele, é usado o `espeak
 | **Skills** | Lê skills `SKILL.md` de `skills/`, `plugins/*/skills`, `~/.claude/skills`, `~/.agents/skills` e `~/.codex/skills`. |
 | **Economia de tokens** | Modo Economia máxima / Equilibrado / Livre, orçamento por tarefa e por dia (o agente **pausa e pergunta** antes de estourar), medidor de tokens no rodapé, modelo econômico para subagentes. |
 | **Permissões** | *Perguntar* (confirma qualquer alteração), *Automático* (confirma só execução/controle do PC) ou *Livre*. |
-| **Voz** | 🎙 fala com o agente (Whisper local); respostas lidas pela voz neural Kokoro (código não é lido). |
+| **Voz** | 🎙 ditado: clique no microfone (ou Ctrl+M), fale e o texto vai aparecendo no campo; clique de novo para terminar e revise antes de enviar. Com chave da Groq (grátis) ou OpenAI, transcreve na nuvem, rápido em qualquer PC; sem chave, roda neste PC com um modelo leve (placa NVIDIA e modelos maiores são opcionais, em Configurações › Voz). Conversa por voz com respostas lidas pela voz neural Kokoro: Ctrl+K › Conversa por voz. |
 
 ## Grok Build com a sua conta xAI
 

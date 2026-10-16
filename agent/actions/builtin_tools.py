@@ -590,8 +590,10 @@ def _register_agents(r: ToolRegistry) -> None:
     @tool(r, "delegate_task",
           "Delegate work to sub-agents that run with their own fresh context and report back. Give each "
           "task complete, self-contained instructions and structured contracts (files, acceptance_criteria, verify). "
-          "Several tasks run in parallel. Optional per task: profile (e.g. 'pesquisador', 'programador', 'revisor'), "
-          "model ('provider:model') or specialty — without model, the best available model is chosen automatically.",
+          "Several tasks run in parallel in the same workspace — give each one different files. Optional per task: "
+          "profile (e.g. 'pesquisador', 'programador', 'revisor'), model ('provider:model') or specialty. Without "
+          "model, sub-agents use the profile's fixed model or else YOUR same model (copies of you with focused "
+          "tasks); set model only when the user asked for a different one.",
           {"tasks": {"type": "array", "items": {"type": "object", "properties": {
               "task": {"type": "string", "description": "Clear objective and context for the sub-agent"},
               "profile": {"type": "string"},

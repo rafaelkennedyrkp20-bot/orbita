@@ -40,7 +40,10 @@ Você ──► GUI (agent/gui.py) / terminal / voz
 | `agent/ui/web/` | Interface: `index.html`, `app.css` (design system "Órbita"), `app.js` (sem dependências externas), `logo.svg` |
 | `agent/ui/render.py` | Markdown → HTML **sanitizado** (sem HTML cru, sem `javascript:`) e texto para a voz |
 | `agent/ui/brand.py` | Nome, ícone (.ico gerado do SVG) e registro do app na barra de tarefas |
-| `agent/core/routing.py` | Catálogo de capacidades (`data/model_catalog.json`) e escolha do melhor modelo por especialidade |
+| `agent/core/routing.py` | Catálogo de capacidades (`data/model_catalog.json`) e escolha do melhor modelo por especialidade (só com a equipe em "Automático"; o padrão é o ajudante usar o modelo do principal) |
+| `agent/core/capabilities.py` | Nível de cada modelo (ponta / padrão / compacto): mais autonomia e passos para os de ponta, "modo foco" para os locais pequenos |
+| `agent/core/checkpoints.py` · `mentions.py` · `updater.py` | Pontos de restauração por resposta (git sombra) · `@arquivo` · atualização pelo GitHub |
+| `agent/voice/dictation.py` | Ditado no campo de mensagem: grava até o 2º clique, texto parcial ao vivo, final preciso; GPU (CUDA) com volta automática para a CPU |
 | `agent/core/conversations.py` | Conversas salvas (`data/conversations/`) e conversão para blocos da interface |
 | `agent/memory/memory_manager.py` | Histórico diário e fatos de longo prazo |
 | `agent/voice/` | Microfone (faster-whisper + Silero VAD), voz (Kokoro/Piper/Windows), atalho |

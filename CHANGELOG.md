@@ -18,6 +18,18 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## [Não lançado]
 
+### Melhorias
+- **Ditado por voz**: clique no microfone (ou Ctrl+M), fale e o texto vai aparecendo no campo enquanto você fala;
+  clique de novo (ou Enter) para terminar e revise antes de enviar. Esc cancela. Funciona com o agente trabalhando.
+  Com chave da Groq (plano grátis) ou da OpenAI, transcreve na nuvem, como o ChatGPT e o Claude: rápido em qualquer PC,
+  mesmo fraco. Sem chave, roda neste PC com um modelo leve (~150 MB). Placa NVIDIA e modelos maiores são opcionais em
+  Configurações › Voz. A conversa por voz antiga (fala e ouve a resposta) fica em Ctrl+K.
+- **Equipe mais fluida**: por padrão os ajudantes são cópias do agente principal — mesma API e mesmo modelo, cada um
+  com uma tarefa — trabalhando ao mesmo tempo na mesma pasta. O agente não troca mais sozinho para um modelo local.
+  Na página Equipe dá para escolher "Automático por especialidade", se preferir.
+- **Liberdade por modelo**: modelos de ponta (Claude, GPT-5, Fable, Grok 4, Gemini Pro, DeepSeek) trabalham com mais
+  autonomia e o dobro de passos; modelos locais pequenos trabalham em "modo foco", um passo por vez.
+
 ### Corrigido
 - A barra de digitar não some mais durante trabalhos longos: o painel Ao vivo crescia e empurrava a página para fora
   da janela; agora ele rola por dentro. Respostas com linhas longas também não cortam mais o texto à direita.

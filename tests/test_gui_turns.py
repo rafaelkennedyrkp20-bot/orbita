@@ -132,6 +132,21 @@ def test_select_model_and_add_provider_refuse_a_key(tmp_path, monkeypatch):
     assert "chave de API" in json.loads(gui.Api.addProvider(api, raw))["error"]
 
 
+def test_dictation_engine_prefers_cloud_key_and_falls_back_to_light_local(tmp_path, monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    api = gui.Api.__new__(gui.Api)
+    api.brain = SimpleNamespace(settings=Settings(tmp_path / "s.json"))
+    local = api.stt_engine()
+    assert local["kind"] == "local" and local["size"] == "base"       # leve por padrão
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_teste")
+    cloud = api.stt_engine()
+    assert cloud["kind"] == "cloud" and cloud["model"] == "whisper-large-v3-turbo" and cloud["key"] == "gsk_teste"
+    assert "key" not in api.stt_engine(with_key=False)                # a chave nunca vai para a página
+    api.brain.settings.set("stt_engine", "local", save=False)
+    assert api.stt_engine()["kind"] == "local"
+
+
 def test_send_attaches_mentions_and_plan_note(setup):
     brain, worker, _, ws = setup
     api = gui.Api.__new__(gui.Api)      # sem janela: só o que send usa

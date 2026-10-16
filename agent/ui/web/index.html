@@ -54,11 +54,14 @@
       <footer id="composer">
         <div class="composer" id="composer-box">
           <div id="mention-pop"></div>
+          <div id="dict-bar"><span class="rec-dot"></span><span id="dict-label">Ouvindo…</span><span id="dict-time">0:00</span>
+            <span class="dict-level"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="grow"></span><button class="btn small" id="dict-cancel" title="Cancelar (Esc)">Cancelar</button><button class="btn primary small" id="dict-done" title="Terminar (Enter ou clique no microfone)">Concluir</button></div>
           <div class="attach-row" id="attachments"></div>
           <textarea id="input" rows="1" placeholder="Peça qualquer coisa… (@ cita um arquivo, / comandos, Shift+Enter quebra linha)"></textarea>
           <div class="c-row">
             <button class="icon-btn" data-action="attach" title="Anexar imagens"><svg class="i" data-ic="clip"></svg></button>
-            <button class="icon-btn" id="mic" data-action="voice" title="Falar"><svg class="i" data-ic="mic"></svg></button>
+            <button class="icon-btn" id="mic" data-action="dictate" title="Ditar: clique, fale e clique de novo — o texto aparece no campo"><svg class="i" data-ic="mic"></svg></button>
             <button class="mode-btn" id="plan-btn" title="Modo plano: o agente lê, planeja e espera o seu OK antes de alterar qualquer coisa"><svg class="i" data-ic="map"></svg>Planejar</button>
             <div class="spacer"></div>
             <span class="hint" id="hint">@ arquivo · Esc para parar · Ctrl+K comandos</span>

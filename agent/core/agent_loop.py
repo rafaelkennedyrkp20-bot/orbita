@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-from agent.core import routing
+from agent.core import capabilities, routing
 from agent.core.profiles import Profile
 from agent.core.providers import ChatResult, ProviderError, ToolsUnsupported, get_provider, new_call_id
 from agent.core.settings import resolve_workspace
@@ -287,6 +287,9 @@ class AgentSession:
         brain = self.brain
         mode = self.settings.get("permission_mode", "auto")
         parts = [BASE_PROMPT]
+        freedom = capabilities.prompt_section(self.tier, self.depth)
+        if freedom:
+            parts.append(freedom)
         if getattr(self, "pinned_prompt", "").strip():
             parts.append(f"## Instruções fixas desta conversa\n{self.pinned_prompt.strip()}")
         if self.depth:
@@ -337,6 +340,11 @@ class AgentSession:
             parts.append(PROMPTED_TOOLS_TEMPLATE.format(tools=schemas))
         return "\n\n".join(parts)
 
+    @property
+    def tier(self) -> str:
+        """Nível do modelo atual (capabilities.py): quanta liberdade ele recebe."""
+        return capabilities.tier(self.provider_name, self.model)
+
     def _project_instructions(self) -> Optional[tuple[str, str]]:
         for name in ("AGENTS.md", "CLAUDE.md"):
             path = self.workspace / name
@@ -348,13 +356,19 @@ class AgentSession:
         return None
 
     def _team_text(self) -> str:
+        auto = self.settings.get("team_model", "principal") == "auto"
+        same = f"{self.provider_name}:{self.model}"
         lines = ["## Sua equipe (delegate_task)",
-                 "Delegue partes independentes para rodarem em paralelo; cada agente tem contexto próprio e "
-                 "pode usar outro modelo. Depois revise e integre o que voltar. Sem 'model', o sistema escolhe "
-                 "o melhor modelo disponível para a especialidade (campo 'specialty' ou a do perfil). "
-                 "Relatório sem Status/Verificação, ou com PARTIAL/BLOCKED, não é entrega: não declare pronto. Agentes:"]
+                 "Para acelerar, divida o trabalho em partes independentes e delegue em paralelo: cada subagente tem "
+                 "contexto próprio e trabalha na mesma pasta, numa tarefa diferente. Dê a cada um arquivos "
+                 "diferentes ('files') para não se atropelarem; depois revise e integre o que voltar. "
+                 + ("Sem 'model', o sistema escolhe o modelo pela especialidade. " if auto else
+                    f"Sem 'model', cada subagente usa o SEU mesmo modelo ({same}) — são cópias suas com tarefas "
+                    "diferentes. Só passe 'model' se o usuário pedir outro modelo; nunca troque para um modelo "
+                    "local ou mais fraco por conta própria. ")
+                 + "Relatório sem Status/Verificação, ou com PARTIAL/BLOCKED, não é entrega: não declare pronto. Agentes:"]
         for member in self.brain.profiles.team():
-            model = member.model_ref or self._routed_ref(member) or "mesmo modelo atual"
+            model = member.model_ref or (self._routed_ref(member) if auto else "") or f"mesmo modelo seu ({same})"
             tags = f" [{', '.join(member.skills_tags)}]" if member.skills_tags else ""
             lines.append(f"- {member.id} → {model}{tags}: {member.description}")
         table = self.brain.models_table()
@@ -387,7 +401,7 @@ class AgentSession:
         if getattr(provider, "external_agent", False):
             return self._run_external(provider, text, history_before)
 
-        max_steps = self.profile.max_steps or self.policy.max_steps
+        max_steps = min(200, int((self.profile.max_steps or self.policy.max_steps) * capabilities.step_multiplier(self.tier)))
         final_text = ""
         used_tools = nudged = False
         for step in range(max_steps):
@@ -791,7 +805,11 @@ class AgentSession:
                                   tool_groups=groups, startup_prompt="", auto_startup=False)
             if not profile.workspace:
                 profile = replace(profile, workspace=str(self.workspace))
-            ref = spec.get("model") or profile.model_ref or self._routed_ref(profile, spec.get("specialty", ""))
+            # Padrão: o subagente é uma cópia do principal (mesma API/modelo). Roteamento por especialidade
+            # só se a pessoa escolheu "automático" em Configurações › Modelos.
+            ref = spec.get("model") or profile.model_ref or (
+                self._routed_ref(profile, spec.get("specialty", ""))
+                if self.settings.get("team_model", "principal") == "auto" else "")
             provider, model = self.brain.resolve_model(ref, fallback=(self.provider_name, self.model))
             label = f"{profile.name} #{index + 1}"
             sub = AgentSession(self.brain, profile, provider, model, depth=self.depth + 1,
