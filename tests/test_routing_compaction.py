@@ -202,6 +202,37 @@ def test_compaction_summarizes_old_turns(brain, monkeypatch):
     assert [u["content"][:8] for u in users] == ["pedido 9", "novo ped"]
 
 
+def test_long_turns_get_a_brake_from_the_environment():
+    assert loop._step_note(10, 0) == "" and loop._step_note(10, 1) == ""
+    assert "Aviso do ambiente" in loop._step_note(25, 0) and "Freio do ambiente" in loop._step_note(50, 0)
+    assert "Freio do ambiente" in loop._step_note(30, 1)          # ajudante freia antes
+
+
+def test_old_observations_of_the_current_turn_are_masked(brain):
+    """Um turno longo não reenvia, a cada passo, arquivos inteiros que já foram lidos ou gravados."""
+    session = AgentSession(brain, brain.profiles.get("geral"), "river", "deepseek-v4", approve=lambda r: "yes")
+    session.messages = [{"role": "user", "content": "faça o site"}]
+    big = "x" * 9000
+    for n in range(10):
+        session.messages.append({"role": "assistant", "content": "", "tool_calls": [
+            {"id": f"c{n}", "name": "write_file", "arguments": {"path": f"f{n}.html", "content": big}}]})
+        session.messages.append({"role": "tool", "tool_call_id": f"c{n}", "name": "read_file", "content": big,
+                                 **({"images": ["shot.png"]} if n >= 6 else {})})
+    wire = session._wire_messages([])
+    tools = [m for m in wire if m["role"] == "tool"]
+    calls = [m for m in wire if m["role"] == "assistant"]
+    assert all(len(t["content"]) < 1200 for t in tools[:4])            # antigos: começo + nota
+    assert all(t["content"].startswith(big) for t in tools[-6:])        # 6 mais recentes: inteiros
+    assert "já gravados em f0.html" in calls[0]["tool_calls"][0]["arguments"]["content"]
+    assert calls[-1]["tool_calls"][0]["arguments"]["content"] == big
+    assert sum(1 for t in tools if t.get("images")) == 2                # só as 2 imagens mais recentes
+    assert session.messages[2]["content"] == big                        # o histórico salvo não é alterado
+    full = sum(len(m.get("content") or "") for m in session.messages) + 10 * 9000
+    sent = sum(len(m.get("content") or "") for m in wire) + sum(
+        len(str(c["arguments"])) for m in calls for c in m["tool_calls"])
+    assert sent < full * 0.65
+
+
 def test_manual_compaction_runs_below_the_limit_and_keeps_last_request(brain, monkeypatch):
     fake = install(monkeypatch, [ChatResult(text="## Objetivo\nsite hacker")])
     session = AgentSession(brain, brain.profiles.get("geral"), "fake", "m1", approve=lambda r: "yes")

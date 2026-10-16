@@ -31,6 +31,19 @@ def test_big_build_with_many_parts():
     assert "delegate_task" in hint and "Fase 1" in hint and "contract" in hint
 
 
+def test_medium_tasks_get_no_team_suggestion_unless_asked():
+    text = "refatore o projeto e escreva testes para os módulos de login"
+    assert tw.estimate(text, 6).size == "media"
+    assert tw.turn_hint(text, "frontier", 6) == ""
+    assert tw.turn_hint("use 2 agentes: " + text, "frontier", 6) != ""
+
+
+def test_big_hint_explains_the_measured_cost():
+    hint = tw.turn_hint("crie um sistema completo do zero: API, painel admin, app, testes, documentação e deploy",
+                        "frontier", 6)
+    assert "1,2 milhão" in hint and "faça sozinho" in hint
+
+
 def test_listed_parts_drive_the_count():
     text = "Monte o projeto:\n1. API de usuários\n2. tela de login\n3. painel\n4. testes\n5. documentação"
     assert tw.estimate(text, 6).helpers == 5

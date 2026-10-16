@@ -93,6 +93,8 @@ def turn_hint(text: str, tier: str, cap: int) -> str:
     e = estimate(text, cap)
     if e.size == "pequena" or e.helpers < 2:
         return ""
+    if e.size == "media" and not e.asked:
+        return ""   # medido: em tarefa média a equipe custa ~10x mais tokens e não termina antes
     if tier == "compact" and not e.asked:
         return ""   # modelo local pequeno se perde coordenando equipe; só se a pessoa pedir
     waves = "" if e.helpers <= cap else f" Eles rodam {cap} por vez; os demais entram na fila automaticamente."
@@ -103,6 +105,11 @@ def turn_hint(text: str, tier: str, cap: int) -> str:
             "esqueleto.\n"
             "2. Fase 2 — equipe: uma chamada delegate_task com as partes independentes e o mesmo `contract`; cada "
             "parte com seus `files` e critérios de aceite.\n"
-            "3. Fase 3 — você: integre, rode a verificação e corrija o que a checagem de integração apontar.\n"
-            "Se as partes dependem muito umas das outras, faça sozinho: dividir só vale com partes de verdade "
-            "independentes." + (" O usuário pediu trabalho em equipe." if e.asked else ""))
+            "3. Fase 3 — você: integre, corrija o que a checagem de integração apontar e faça UMA verificação "
+            "proporcional (sites: check_web_page com width=390 para o celular). Corrija erros reais (JS, links, "
+            "vazamento) e encerre; não persiga detalhe de pixel nem instale ferramentas de teste.\n"
+            "Custo medido no Órbita: num site de 4 páginas, um agente sozinho levou ~1 min e ~80 mil tokens; com 4 "
+            "ajudantes, ~9 min e ~1,2 milhão (resultado mais caprichado). Dividir compensa quando cada parte é "
+            "grande e independente (backend + frontend + testes, vários módulos, muitas telas); para arquivos "
+            "pequenos ou partes que dependem umas das outras, faça sozinho."
+            + (" O usuário pediu trabalho em equipe: atenda." if e.asked else ""))

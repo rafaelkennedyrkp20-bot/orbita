@@ -461,7 +461,9 @@ def _register_shell(r: ToolRegistry) -> None:
           "screenshot. Use this to verify sites instead of screenshot/mouse tools or starting servers.",
           {"path": {"type": "string", "description": "Path to the .html file (relative to the workspace) or URL"},
            "script": {"type": "string", "description": "Optional JS body; may use await; return a value"},
-           "screenshot": {"type": "boolean", "description": "Also return a small screenshot (desktop)"}},
+           "screenshot": {"type": "boolean", "description": "Also return a small screenshot"},
+           "width": {"type": "integer", "description": "Viewport width for script and screenshot, e.g. 390 for "
+                                                       "phone (default 1366). Overflow is always checked at both."}},
           ["path"], risk="exec", group="shell")
     def check_web_page(args, ctx: ToolContext):
         import json as _json
@@ -479,7 +481,8 @@ def _register_shell(r: ToolRegistry) -> None:
         env = {**os.environ, "QT_QPA_PLATFORM": "offscreen", "PYTHONIOENCODING": "utf-8"}
         try:
             proc = subprocess.run([sys.executable, "-m", "agent.actions.web_check", target,
-                                   "--script", args.get("script") or "", "--shot", shot],
+                                   "--script", args.get("script") or "", "--shot", shot,
+                                   "--width", str(int(args.get("width") or 0))],
                                   cwd=str(root), env=env, capture_output=True, timeout=90,
                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             data = _json.loads(proc.stdout.decode("utf-8", "replace").strip().splitlines()[-1])

@@ -42,6 +42,57 @@ EventFn = Callable[[str, dict], None]
 ApproveFn = Callable[[dict], str]   # devolve "yes" | "always" | "no"
 
 MAX_DEPTH = 2
+KEEP_RECENT_RESULTS = 6      # resultados de ferramenta mais recentes do turno que vão inteiros ao modelo
+MASK_OVER_CHARS = 2000       # acima disso, resultado antigo do turno vira começo + nota
+MASK_KEEP_CHARS = 900
+KEEP_RECENT_IMAGES = 2
+WRITE_ARGS = ("content", "new_string", "old_string")
+
+
+STEP_NOTES = {0: (25, 50), 1: (15, 30)}   # (aviso, freio) por profundidade: principal, ajudante
+
+
+def _step_note(step: int, depth: int) -> str:
+    """Freio do ambiente: medido em teste real, o que mais gasta é o agente que não para de verificar detalhes."""
+    warn, stop = STEP_NOTES[min(depth, 1)]
+    if step >= stop:
+        return (f"## Freio do ambiente\nVocê já deu {step} passos neste pedido. Pare de verificar detalhes: corrija "
+                "só erros reais que ainda existirem e ENCERRE agora, com um resumo do que está pronto e do que falta.")
+    if step >= warn:
+        return (f"## Aviso do ambiente\nJá são {step} passos neste pedido. Caminhe para fechar: termine o essencial, "
+                "faça uma verificação final proporcional (erros reais, não detalhes de pixel) e responda.")
+    return ""
+
+
+def _mask_old_observations(history: list[dict], start: int) -> None:
+    """Mascara observações antigas do turno atual (técnica de 'observation masking'): o modelo continua sabendo
+    o que fez, mas não recebe de novo, a cada passo, arquivos inteiros que já leu ou gravou."""
+    tool_idx = [i for i in range(start, len(history)) if history[i]["role"] == "tool"]
+    old_tools = set(tool_idx[:-KEEP_RECENT_RESULTS]) if len(tool_idx) > KEEP_RECENT_RESULTS else set()
+    for i in old_tools:
+        content = history[i].get("content") or ""
+        if len(content) > MASK_OVER_CHARS:
+            history[i]["content"] = (content[:MASK_KEEP_CHARS] + f"\n[... resultado antigo deste turno encurtado "
+                                     f"({len(content)} caracteres); rode a ferramenta de novo se precisar dele inteiro]")
+    image_idx = [i for i in tool_idx if history[i].get("images")]
+    for i in image_idx[:-KEEP_RECENT_IMAGES]:
+        history[i].pop("images", None)
+        history[i]["content"] = (history[i].get("content") or "") + "\n[imagem antiga removida para economizar contexto]"
+    # Argumentos gigantes de write_file/edit_file em passos antigos: o arquivo já está no disco.
+    cutoff = tool_idx[-KEEP_RECENT_RESULTS] if len(tool_idx) > KEEP_RECENT_RESULTS else len(history)
+    for i in range(start, cutoff):
+        msg = history[i]
+        if msg["role"] != "assistant":
+            continue
+        for call in msg.get("tool_calls") or []:
+            args = call.get("arguments")
+            if not isinstance(args, dict):
+                continue
+            for key in WRITE_ARGS:
+                value = args.get(key)
+                if isinstance(value, str) and len(value) > 400:
+                    args[key] = (f"[{len(value)} caracteres já gravados em {args.get('path', 'arquivo')}; "
+                                 "use read_file para ver a versão atual]")
 COMPACT_AT = 0.85   # compacta quando o histórico passa de 85% do orçamento de contexto
 
 SUMMARY_PROMPT = """Você compacta conversas de um agente de IA. Escreva um resumo denso, em português, que permita \
@@ -341,6 +392,8 @@ class AgentSession:
             parts.append(PROMPTED_TOOLS_TEMPLATE.format(tools=schemas))
         if not self.depth and getattr(self, "_turn_hint", ""):
             parts.append(self._turn_hint)   # por último: só este turno muda, o resto do prompt continua em cache
+        if getattr(self, "_step_note", ""):
+            parts.append(self._step_note)
         return "\n\n".join(parts)
 
     @property
@@ -429,6 +482,7 @@ class AgentSession:
         for step in range(max_steps):
             if self.cancel.is_set():
                 return final_text or "(interrompido)"
+            self._step_note = _step_note(step, self.depth)
             if not self._check_budget():
                 return final_text + "\n\n[Pausado pelo limite de tokens. Peça para continuar quando quiser.]"
             helper_cap = int(self.settings.get("helper_token_cap") or 300_000)
@@ -628,6 +682,10 @@ class AgentSession:
                 history[i].pop("images", None)
             if msg["role"] == "tool" and i < recent_start and msg.get("images"):
                 history[i].pop("images", None)
+
+        # 1b) Dentro do turno atual (onde tarefas longas e ajudantes gastam quase tudo): só os passos recentes vão
+        #     inteiros. Resultados antigos ficam com o começo; conteúdo já gravado em arquivo vira uma nota.
+        _mask_old_observations(history, recent_start)
 
         # 2) Ferramentas por prompt: converte para mensagens de texto.
         if self.prompted_tools:

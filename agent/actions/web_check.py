@@ -16,18 +16,26 @@ import sys
 from pathlib import Path
 
 PROBE = """(() => {
-  const broken = [...document.querySelectorAll('link[rel=stylesheet]')].filter(l => !l.sheet).map(l => l.getAttribute('href'))
-    .concat([...document.querySelectorAll('img')].filter(i => i.complete && i.naturalWidth === 0 && i.getAttribute('src')).map(i => i.getAttribute('src')));
-  const links = [...document.querySelectorAll('a[href]')].map(a => a.getAttribute('href'))
-    .filter(h => h && !/^(https?:|mailto:|tel:|#|javascript:)/i.test(h));
+  const local = h => h && !/^(https?:|data:|blob:|mailto:|tel:|#|javascript:|\\/\\/)/i.test(h);
+  // Imagens remotas quebradas o navegador consegue dizer; arquivos locais são conferidos no disco (file:// engana).
+  const broken = [...document.querySelectorAll('img')].filter(i => i.complete && i.naturalWidth === 0 && !local(i.getAttribute('src')))
+    .map(i => i.getAttribute('src'));
+  const resources = [...document.querySelectorAll('link[rel=stylesheet][href], script[src], img[src]')]
+    .map(e => e.getAttribute('href') || e.getAttribute('src')).filter(local);
+  const links = [...document.querySelectorAll('a[href]')].map(a => a.getAttribute('href')).filter(local);
   return JSON.stringify({title: document.title, overflowX: Math.max(0, document.documentElement.scrollWidth - innerWidth),
-    brokenResources: broken, localLinks: [...new Set(links)].slice(0, 60),
+    brokenResources: broken, localResources: [...new Set(resources)].slice(0, 80), localLinks: [...new Set(links)].slice(0, 60),
     textChars: document.body ? document.body.innerText.length : 0,
     buttons: document.querySelectorAll('button, .btn, [role=button]').length});
 })()"""
 
 
-def run(target: str, script: str = "", shot: str = "", widths=(1366, 390)) -> dict:
+def run(target: str, script: str = "", shot: str = "", widths=(1366, 390), width: int = 0) -> dict:
+    """`width`: largura em que o script roda e a captura é tirada (ex.: 390 = celular); padrão, desktop."""
+    if width and width not in widths:
+        widths = (width,) + tuple(widths)
+    elif width:
+        widths = (width,) + tuple(w for w in widths if w != width)
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
     from PyQt6.QtCore import QTimer, QUrl
@@ -105,12 +113,18 @@ def run(target: str, script: str = "", shot: str = "", widths=(1366, 390)) -> di
     QTimer.singleShot(20000, app.quit)   # trava de segurança
     QTimer.singleShot(10, next_view)
     app.exec()
+    result["console_errors"] = list(dict.fromkeys(result["console_errors"]))   # a página carrega 2x (desktop/celular)
     if base is not None:
-        links = set()
+        def missing(items):
+            return sorted(h for h in items if h.split("#")[0].split("?")[0]
+                          and not (base / h.split("#")[0].split("?")[0]).exists())
+        links, resources = set(), set()
         for data in result["views"].values():
             links.update(data.get("localLinks") or [])
-        result["broken_links"] = sorted(h for h in links
-                                        if not (base / h.split("#")[0].split("?")[0]).exists())
+            resources.update(data.get("localResources") or [])
+        result["broken_links"] = missing(links)
+        for data in result["views"].values():
+            data["brokenResources"] = sorted(set(data.get("brokenResources") or []) | set(missing(resources)))
     return result
 
 
@@ -120,8 +134,9 @@ def main() -> int:
     parser.add_argument("target")
     parser.add_argument("--script", default="")
     parser.add_argument("--shot", default="")
+    parser.add_argument("--width", type=int, default=0)
     args = parser.parse_args()
-    print(json.dumps(run(args.target, args.script, args.shot), ensure_ascii=False))
+    print(json.dumps(run(args.target, args.script, args.shot, width=args.width), ensure_ascii=False))
     return 0
 
 
