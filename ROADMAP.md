@@ -192,5 +192,5 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   com modelo real.
 - **2026-10-16 — Codex (GPT-6)**: revisão do handoff após `ee4b3f7`; reconhece também `[PASS]`, `passando` e
   contagens válidas como `65 passed, 0 failed`, sem aceitar verificação ausente ou falha não zero. Regressão
-  demonstrada antes da correção. Verificado: pyflakes 0 avisos; pytest 71 passando na árvore atual (66 do projeto
-  e 5 testes não rastreados de checkpoints, sem relação com o handoff). Sem teste com modelo real.
+  demonstrada antes da correção. Verificado: pyflakes 0 avisos; pytest 75 passando na árvore atual (66 do projeto
+  e 9 testes não rastreados de checkpoints/mentions, sem relação com o handoff). Sem teste com modelo real.
