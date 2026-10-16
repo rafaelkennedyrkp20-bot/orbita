@@ -36,6 +36,16 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 - Fechar um pedido de permissão com `Esc`, ou clicar em Parar, agora responde "não" em vez de deixar o agente travado
   esperando.
 
+### Corrigido
+- Cancelar uma resposta enquanto o modelo já preparava chamadas de ferramenta não deixa mais chamadas incompletas no
+  histórico da conversa (o que impedia continuar a mesma conversa nas APIs na nuvem).
+- No modo de ferramentas por texto (`<tool_call>`), o filtro de streaming não engole mais os últimos caracteres da
+  resposta quando há o símbolo `<` perto do fim (ex.: `2 < 3`).
+- Links `file://` gerados em Markdown deixam de ser clicáveis, evitando abrir arquivos ou programas locais sem passar
+  pelas permissões de execução.
+- O aviso interno de limite de passos atingido agora é salvo com o marcador `(Sistema: ...)` para não reaparecer como
+  mensagem do usuário ao reabrir a conversa.
+
 ## [0.1.0-alpha] — 2026-10-16
 
 Primeira versão alfa pública.

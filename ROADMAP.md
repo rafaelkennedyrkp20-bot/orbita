@@ -98,6 +98,8 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] `@arquivo` no campo de mensagem: autocompletar com arquivos do projeto e conteúdo citado anexado à mensagem (economiza uma rodada de ferramenta) (`agent/core/mentions.py`)
 - [x] Modo plano (Plan/Act): botão Planejar; ferramentas que alteram ficam bloqueadas no turno; botões Executar plano / Ajustar
 - [x] Dica de conversa longa: sugere conversa nova para assunto novo (menos deriva e menos tokens)
+- [x] ⭐ Desbloquear confirmação pendente (`AgentWorker.approve`) ao fechar o modal com `Esc` ou clicar em `Parar` (`agent/gui.py`, `agent/ui/web/app.js`)
+- [ ] ⭐ Painel na interface para listar, editar e apagar memórias salvas por `remember` (`agent/memory/memory_manager.py`, `agent/ui/web`)
 
 ## Fase 6 — Economia de tokens
 
@@ -120,6 +122,8 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Código morto removido (`llm_interface.py`, `file_ops.py`, roteador por palavras-chave, métodos sem uso)
 - [x] 60 testes automatizados (`tests/`), incluindo servidor MCP real, agente externo, roteamento, compactação, contratos de entrega, `verify_project`, projetos e API manual
 - [x] Log diário só em JSONL (uma linha por interação, sem reescrever o arquivo); lê o JSON antigo do dia se existir
+- [x] Cancelamento em meio a chamada de ferramenta não grava `tool_calls` órfãos no histórico; `_TagFilter` faz `flush()` de `<` residual no fim do stream; links `file:` vindos de Markdown externo bloqueados (`agent/core/agent_loop.py`, `agent/ui/render.py`)
+- [ ] ⭐ Mover memória e logs diários de `agent/memory/{daily_logs,long_term}` para `data/` (migrando arquivos existentes) e remover o `USER_PROFILE` morto (`agent/memory/memory_manager.py`, `agent/core/config.py`)
 - [ ] Sandbox opcional para o shell; lista de comandos proibidos
 - [ ] Empacotar como `.exe` (PyInstaller) com instalador
 - [ ] Avaliar casca Tauri (Rust) reaproveitando `agent/ui/web`, para distribuir um `.exe` leve (baixa prioridade; o motor continua em Python)
@@ -199,6 +203,16 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   contagens válidas como `65 passed, 0 failed`, sem aceitar verificação ausente ou falha não zero. Regressão
   demonstrada antes da correção. Verificado: pyflakes 0 avisos; pytest 75 passando na árvore atual (66 do projeto
   e 9 testes não rastreados de checkpoints/mentions, sem relação com o handoff). Sem teste com modelo real.
+- **2026-10-16 — Gemini 4 Argon**: revisão geral dos 5 problemas de maior impacto real. Corrigidos os 3 pequenos e
+  seguros: (1) cancelar turno após `tool_calls` não grava mais chamadas órfãs sem `role: "tool"` no histórico (que
+  quebravam os turnos seguintes com HTTP 400 nas APIs) e aviso de limite de passos usa o prefixo `(Sistema:` para
+  não virar bolha falsa ao reabrir conversa (`agent/core/agent_loop.py`); (2) `_TagFilter.flush()` emite o sufixo
+  retido quando há `<` nos últimos 11 caracteres em modo `prompted_tools` (`agent/core/agent_loop.py`); (3) bloqueio
+  de esquema `file:` em `render.markdown_html` para impedir abertura de executáveis locais via clique em link
+  Markdown sem permissão `exec` (`agent/ui/render.py`). Os outros 2 (deadlock em `AgentWorker.approve` ao fechar
+  modal com `Esc` ou clicar em `Parar`, e painel para gerenciar memórias + migrar `agent/memory/` para `data/` e
+  remover `USER_PROFILE` morto) entraram como `⭐ [ ]` no ROADMAP. Verificado: pyflakes 0 avisos; pytest 81 passando
+  (69 do projeto, incluindo 3 novos de regressão, + 12 da árvore em andamento).
 - **2026-10-16 — Claude Opus 5.5**: usabilidade a partir de pesquisa do que usuários mais elogiam em agentes de código
   (checkpoints do Cline, /undo do Aider, Plan/Act, apontar arquivos em vez de deixar o modelo procurar, evitar deriva em
   conversas longas). Novo: pontos de restauração por resposta com diff/desfazer/refazer, `@arquivo` com autocompletar e

@@ -19,7 +19,7 @@ from pygments.util import ClassNotFound
 
 _FENCE = re.compile(r"```([\w+#.-]*)[^\n]*\n(.*?)(?:```|\Z)", re.DOTALL)
 _FORMATTER = HtmlFormatter(nowrap=True, classnames="hl")
-_UNSAFE_HREF = re.compile(r'(href|src)="\s*(javascript|vbscript|data):[^"]*"', re.IGNORECASE)
+_UNSAFE_HREF = re.compile(r'(href|src)="\s*(javascript|vbscript|data|file):[^"]*"', re.IGNORECASE)
 
 
 def pygments_css() -> str:

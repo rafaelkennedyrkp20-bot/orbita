@@ -201,6 +201,13 @@ class _TagFilter:
                     self.sink(self.buffer[:start])
                 self.buffer, self.hidden = self.buffer[start + 11:], True
 
+    def flush(self) -> None:
+        if not self.hidden and self.buffer:
+            out = _TOOL_CALL_RE.sub("", self.buffer)
+            self.buffer = ""
+            if out:
+                self.sink(out)
+
 
 class AgentSession:
     """Uma conversa com um agente (o principal ou um subagente)."""
@@ -385,6 +392,12 @@ class AgentSession:
                 self.events("error", {"message": str(error), "agent": self.label})
                 return f"⚠️ {error}"
 
+            final_text = self._visible_text(result.text)
+            if result.stop_reason == "cancelled":
+                if final_text:
+                    self.messages.append({"role": "assistant", "content": final_text})
+                return final_text or "(interrompido)"
+
             assistant = {"role": "assistant", "content": result.text}
             if result.reasoning:
                 assistant["reasoning"] = result.reasoning
@@ -393,10 +406,7 @@ class AgentSession:
             if result.native:
                 assistant["_native"] = result.native
             self.messages.append(assistant)
-            final_text = self._visible_text(result.text)
 
-            if result.stop_reason == "cancelled":
-                return final_text or "(interrompido)"
             if not result.tool_calls:
                 if not nudged and used_tools and _ANNOUNCED_ACTION.search(final_text[-300:]) \
                         and not final_text.rstrip().endswith("?"):
@@ -411,7 +421,7 @@ class AgentSession:
             self._execute(result.tool_calls)
 
         note = f"\n\n[Parei após {max_steps} passos. Diga 'continue' para eu seguir.]"
-        self.messages.append({"role": "user", "content": "(Limite de passos atingido. Resuma o progresso.)"})
+        self.messages.append({"role": "user", "content": "(Sistema: limite de passos atingido. Resuma o progresso.)"})
         try:
             summary = self._call_model([])
             self.messages.append({"role": "assistant", "content": summary.text})
@@ -508,7 +518,8 @@ class AgentSession:
             if self.depth == 0:
                 self.events("text", {"text": chunk})
 
-        sink = _TagFilter(on_text).feed if self.prompted_tools else on_text
+        tag_filter = _TagFilter(on_text) if self.prompted_tools else None
+        sink = tag_filter.feed if tag_filter else on_text
 
         def on_reasoning(chunk: str):
             if self.depth == 0 and self.settings.get("show_reasoning", True):
@@ -527,6 +538,8 @@ class AgentSession:
             self.prompted_tools = True
             self.events("status", {"text": "Modelo sem ferramentas nativas: usando modo por prompt"})
             return self._call_model(tools)
+        if tag_filter:
+            tag_filter.flush()
 
         if self.prompted_tools and tools:
             result.tool_calls = parse_prompted_tool_calls(result.text)

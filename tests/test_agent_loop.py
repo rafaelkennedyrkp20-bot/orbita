@@ -178,13 +178,33 @@ def test_parse_prompted_tool_calls_variants():
     assert calls[0]["arguments"] == {"k": 1} and calls[1]["arguments"] == {"z": 2}
 
 
-def test_tag_filter_hides_tool_calls_while_streaming():
+def test_tag_filter_hides_tool_calls_and_flushes_trailing_angle_bracket():
     out = []
     f = _TagFilter(out.append)
-    for chunk in ["Olá <tool", '_call>{"name":"x"}</tool_', "call> fim"]:
+    for chunk in ["Olá <tool", '_call>{"name":"x"}</tool_', "call> 2 < 3"]:
         f.feed(chunk)
-    f.feed("")
-    assert "".join(out) == "Olá  fim"
+    f.flush()
+    assert "".join(out) == "Olá  2 < 3"
+
+
+def test_cancelled_turn_does_not_leave_orphan_tool_calls(brain, provider):
+    fake = provider([
+        ChatResult(text="Parcial", tool_calls=[call("list_dir")], stop_reason="cancelled"),
+        ChatResult(text="Turno seguinte ok."),
+    ])
+    s = session(brain)
+    assert s.run("pare") == "Parcial"
+    assert all("tool_calls" not in m for m in s.messages)
+    assert s.run("continue") == "Turno seguinte ok."
+    assert all("tool_calls" not in m for m in fake.calls[1]["messages"])
+
+
+def test_markdown_render_blocks_local_file_links():
+    from agent.ui import render
+
+    html = render.markdown_html("[Abrir](file:///C:/Windows/System32/calc.exe) e [Site](https://example.com)")
+    assert "file:" not in html and "calc.exe" not in html
+    assert 'href="https://example.com"' in html
 
 
 def test_mcp_tools_run_in_order_not_parallel(brain, provider):
