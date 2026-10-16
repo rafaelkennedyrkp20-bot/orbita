@@ -79,7 +79,27 @@ Você pode emitir vários blocos. Depois de emitir, PARE e aguarde: os resultado
 Ferramentas disponíveis (JSON Schema):
 {tools}"""
 
-_STATUS_RE = re.compile(r"Status\s*:\s*(DONE|PARTIAL|PARCIAL|BLOCKED|BLOQUEADO)", re.IGNORECASE)
+_STATUS_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?\*{0,2}Status\*{0,2}\s*:\s*"
+    r"(DONE|PARTIAL|PARCIAL|BLOCKED|BLOQUEADO)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+_VERIFICATION_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?\*{0,2}Verificação\*{0,2}\s*:\s*(.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_VERIFICATION_FAILURE_RE = re.compile(
+    r"\b(?:failed|failure|falhou|falharam|não\s+(?:passou|rodou|foi\s+executado|executada)|"
+    r"not\s+(?:run|executed)|[1-9]\d*\s+(?:errors?|erros?|failures?|falhas?))\b",
+    re.IGNORECASE,
+)
+_VERIFICATION_SUCCESS_RE = re.compile(
+    r"\b(?:passed?|passou|passaram|ok|sucesso|succeeded|aprovad[oa]s?|conclu[ií]d[oa]s?|"
+    r"0\s+(?:errors?|erros?|failures?|falhas?|warnings?|avisos?)|"
+    r"exit(?:\s+code)?\s*[:=]?\s*0|código\s+(?:de\s+)?saída\s+0|"
+    r"nenhum(?:a)?\s+(?:erro|falha|problema)|não\s+aplicável|not\s+applicable)\b",
+    re.IGNORECASE,
+)
 _TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", re.DOTALL)
 _ANNOUNCED_ACTION = re.compile(
     r"\b(vou|irei|agora vou|vamos|let me|i will|i'll)\b[^.\n]{0,60}\b(verificar|continuar|checar|analisar|"
@@ -87,7 +107,7 @@ _ANNOUNCED_ACTION = re.compile(
 
 
 def handoff_note(report: str) -> str:
-    """Nota de máquina: relatório sem Status/Verificação, ou PARTIAL/BLOCKED, não é entrega."""
+    """Nota de máquina: DONE requer campos estruturados e resultado de verificação aprovado."""
     text = report or ""
     match = _STATUS_RE.search(text)
     if match is None:
@@ -97,8 +117,14 @@ def handoff_note(report: str) -> str:
         return "\n\n[Handoff: BLOCKED. Não declare a tarefa pronta.]"
     if status in ("PARTIAL", "PARCIAL"):
         return "\n\n[Handoff: PARTIAL. Só o que foi verificado está feito; o resto está em Pendências.]"
-    if not re.search(r"verifica", text, re.IGNORECASE):
+    verification = _VERIFICATION_RE.search(text)
+    if verification is None:
         return "\n\n[Handoff incompleto: falta Verificação. Não trate como pronto.]"
+    result = verification.group(1).strip()
+    if (_VERIFICATION_FAILURE_RE.search(result)
+            or not _VERIFICATION_SUCCESS_RE.search(result)):
+        return ("\n\n[Handoff incompleto: Verificação sem resultado aprovado. "
+                "Não trate como pronto.]" )
     return ""
 
 

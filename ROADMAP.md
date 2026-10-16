@@ -73,7 +73,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Lista da equipe e dos modelos com acesso vai no prompt do agente principal
 - [x] Subagentes compartilham botão Parar e orçamento de tokens; profundidade máxima 2
 - [x] Roteamento automático por especialidade (`core/routing.py` + `data/model_catalog.json`): notas por especialidade e custo; escolha muda com o modo de economia e só usa modelos com acesso; tabela de capacidades vai no prompt do principal; `generate_image` escolhe o modelo de imagem sozinho
-- [x] Roteador de skills (`when` no frontmatter), handoff com nota de máquina (incompleto/PARTIAL/BLOCKED não é entrega) e subagente que não redelega
+- [x] Roteador de skills (`when` no frontmatter), handoff que exige Status DONE e resultado aprovado na Verificação (PARTIAL/BLOCKED não é entrega) e subagente que não redelega
 - [~] ⭐ "Descobrir o melhor agente": o Pesquisador consulta a web/benchmarks e sugere o modelo/servidor MCP ideal para uma tarefa, oferecendo configurar. Feito: skill `descobrir-agente` carregada sob demanda (tabela de modelos só ao carregar; não configura). Falta: configurar após confirmação (item abaixo)
 - [ ] Configurar modelo/servidor MCP sugerido após confirmação explícita do usuário (exige decisão: muda configuração e MCP executa código)
 - [ ] Revisão cruzada automática: ao terminar código, um segundo modelo revisa antes de entregar (opcional por perfil)

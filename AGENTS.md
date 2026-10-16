@@ -45,4 +45,4 @@ O campo `when` é o roteador injetado no prompt. Não copie o corpo para cá.
 ## 6. Equipe
 Delegue só com paralelismo real, contexto pesado isolado ou revisão independente. Cada subtarefa leva objetivo, `files` e `acceptance_criteria`.
 O subagente não redelega. Entrega: **Status** (DONE | PARTIAL | BLOCKED), **Arquivos alterados**, **Verificação**, **Pendências**.
-Sem Status/Verificação, ou com PARTIAL/BLOCKED, **não é entrega** — o loop marca isso; não declare pronto.
+DONE exige resultado aprovado na Verificação; sem isso, ou com PARTIAL/BLOCKED, **não é entrega** — não declare pronto.

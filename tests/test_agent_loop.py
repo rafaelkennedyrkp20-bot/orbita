@@ -339,6 +339,12 @@ def test_handoff_note_rejects_incomplete_partial_and_blocked():
     assert "PARTIAL" in loop.handoff_note("Status: parcial\nVerificação: pytest ok")
 
 
+def test_handoff_done_requires_a_successful_verification_result():
+    assert "Verificação" in loop.handoff_note("Status: DONE\nVerificação: pytest tests -q")
+    assert "Verificação" in loop.handoff_note("Status: DONE\nVerificação: pytest tests -q — 2 failed")
+    assert loop.handoff_note("**Status**: DONE\n**Verificação**: pytest tests -q — 65 passed") == ""
+
+
 def test_general_profile_has_no_discovery_protocol(brain, provider, monkeypatch):
     _project_skills(brain, monkeypatch)
     fake = provider([ChatResult(text="ok")])
