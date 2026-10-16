@@ -1,6 +1,7 @@
 ---
 name: spec-plan-tdd
 description: Fluxo estruturado de especificação enxuta, decomposição de tarefas com critérios de aceite e implementação incremental guiada por testes (TDD) e gates de verificação.
+when: mudança em mais de um arquivo, contrato, ferramenta nova ou feature
 ---
 
 # Spec, Plan & Incremental TDD (`spec-plan-tdd`)
@@ -33,7 +34,7 @@ Divida em até 3-5 passos ordenados por dependência:
 ### 3. BUILD (Implementação Cirúrgica)
 - Use `edit_file` com contexto suficiente para substituição única.
 - Evite adicionar dependências externas, classes wrapper desnecessárias ou flags de configuração não pedidas.
-- Se a subtarefa for independente e paralelizável em módulos distintos, use `delegate_task` passando `files`, `acceptance_criteria` e `verify_cmd`.
+- Se a subtarefa for independente e paralelizável em módulos distintos, use `delegate_task` passando `files`, `acceptance_criteria` e `verify=true` (roda `verify_project` uma vez, depois de todos, e pede permissão).
 
 ### 4. VERIFY (Gate Obrigatório)
 Chame `verify_project` (ou `run_shell` com `pytest` e `pyflakes`):

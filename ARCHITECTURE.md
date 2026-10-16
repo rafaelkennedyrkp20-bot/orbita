@@ -33,7 +33,7 @@ Você ──► GUI (agent/gui.py) / terminal / voz
 | `agent/core/tools.py` | `Tool`, `ToolRegistry`, `ToolResult`, decorador `tool()`; busca de ferramentas adiadas |
 | `agent/core/profiles.py` | Perfis/equipe (`data/profiles/*.json`): prompt de sistema, prompt inicial, modelo, ferramentas |
 | `agent/core/mcp_hub.py` | Cliente MCP (stdio/HTTP) numa thread asyncio; importação de configs do Claude/Cursor |
-| `agent/core/skills.py` | Skills no padrão `SKILL.md` + plugins (`plugins/<nome>/skills`, `.mcp.json`) |
+| `agent/core/skills.py` | Skills `SKILL.md` + plugins. `when` vira roteador no prompt; `context: models` anexa a tabela só ao carregar |
 | `agent/core/usage.py` | Medidor de tokens (`data/usage.json`) e políticas de economia |
 | `agent/core/brain.py` | Fachada: liga tudo, seleção de perfil/modelo, modos texto/voz |
 | `agent/gui.py` | Janela (QWebEngine), ponte `Api` (QWebChannel) com a página, worker do agente, bandeja e notificações |

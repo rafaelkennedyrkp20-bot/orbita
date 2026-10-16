@@ -15,6 +15,7 @@ Grupos (perfis liberam grupos inteiros):
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 import re
 import shutil
@@ -23,6 +24,8 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from agent.core.config import DATA_DIR
 from agent.core.tools import ToolContext, ToolRegistry, ToolResult, tool
@@ -537,9 +540,23 @@ def _register_skills(r: ToolRegistry, services) -> None:
         if loaded is not None and key in loaded:
             return f"A skill '{args['name']}' já foi carregada nesta conversa; siga as instruções que estão acima."
         result = services.skills.load(args["name"], args.get("file"))
-        if loaded is not None and not result.startswith("Skill '"):
+        if result.startswith("Skill '"):
+            return result
+        if loaded is not None:
             loaded.add(key)
-        return result
+        table = ""
+        models_table = getattr(services, "models_table", None)
+        if callable(models_table):
+            try:
+                table = models_table() or ""
+            except Exception:
+                logger.warning("Tabela de modelos indisponível ao carregar a skill %s", args.get("name"))
+                table = ""
+        suffix = ""
+        context_suffix = getattr(services.skills, "context_suffix", None)
+        if callable(context_suffix):
+            suffix = context_suffix(args["name"], table)
+        return result + suffix
 
 
 def _register_agents(r: ToolRegistry) -> None:

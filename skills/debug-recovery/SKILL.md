@@ -1,6 +1,7 @@
 ---
 name: debug-recovery
 description: Diagnóstico sistemático de erros, análise de stack traces/logs, isolamento de causa-raiz e recuperação de loops de ferramentas.
+when: teste falho, exceção, ou a mesma ferramenta falhou duas vezes
 ---
 
 # Debugging & Error Recovery (`debug-recovery`)

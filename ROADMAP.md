@@ -73,7 +73,8 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Lista da equipe e dos modelos com acesso vai no prompt do agente principal
 - [x] Subagentes compartilham botão Parar e orçamento de tokens; profundidade máxima 2
 - [x] Roteamento automático por especialidade (`core/routing.py` + `data/model_catalog.json`): notas por especialidade e custo; escolha muda com o modo de economia e só usa modelos com acesso; tabela de capacidades vai no prompt do principal; `generate_image` escolhe o modelo de imagem sozinho
-- [~] ⭐ "Descobrir o melhor agente": o Pesquisador consulta a web/benchmarks e sugere o modelo/servidor MCP ideal para uma tarefa, oferecendo configurar. Feito: protocolo e tabela de modelos com acesso no prompt de agentes de pesquisa (`DISCOVERY_PROMPT` em `core/agent_loop.py`), recomendação sem configurar nada. Falta: configurar após confirmação (item abaixo)
+- [x] Roteador de skills (`when` no frontmatter), handoff com nota de máquina (incompleto/PARTIAL/BLOCKED não é entrega) e subagente que não redelega
+- [~] ⭐ "Descobrir o melhor agente": o Pesquisador consulta a web/benchmarks e sugere o modelo/servidor MCP ideal para uma tarefa, oferecendo configurar. Feito: skill `descobrir-agente` carregada sob demanda (tabela de modelos só ao carregar; não configura). Falta: configurar após confirmação (item abaixo)
 - [ ] Configurar modelo/servidor MCP sugerido após confirmação explícita do usuário (exige decisão: muda configuração e MCP executa código)
 - [ ] Revisão cruzada automática: ao terminar código, um segundo modelo revisa antes de entregar (opcional por perfil)
 - [ ] Tarefas agendadas e fila em segundo plano com notificação na bandeja
@@ -180,3 +181,11 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - **2026-10-16 — Claude (Opus 5.5)**: conjunto de ícones próprio para os agentes (SVG em degradê, mesmo estilo do
   logo) substituindo os emojis em cartões, topo, menus, painel da equipe e editor (com seletor). Emojis de perfis
   já salvos são convertidos na exibição. Verificado na janela (capturas da equipe, menu e editor); 60 testes.
+- **2026-10-16 — Claude (Haiku 5.5)**: refinamento de orquestração, sem feature nova. Roteador de skills pelo
+  campo `when` (o corpo não entra mais no prompt fixo); `DISCOVERY_PROMPT` saiu do prompt de todo turno de pesquisa
+  e virou a skill `descobrir-agente` (tabela de modelos só ao carregar; pesquisa não herda o índice inteiro).
+  Handoff sem Status/Verificação, ou PARTIAL/BLOCKED, ganha nota de máquina e não conta como entrega. Subagente
+  não redelega. Skill `spec-plan-tdd` citava `verify_cmd`, parâmetro que não existe. Vídeo da skill criativa só
+  se `ffmpeg` estiver no PATH. AGENTS.md enxugado (59 → 48 linhas) com essas fronteiras. Verificado: pyflakes
+  0 avisos; pytest 65 passando (62 anteriores + 3: roteador, tabela só na skill, nota de handoff). Não testado
+  com modelo real.

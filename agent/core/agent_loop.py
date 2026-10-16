@@ -66,18 +66,7 @@ e a uma equipe de outros agentes. Responda sempre em português do Brasil, de fo
 
 ## Economia de Contexto
 - Use `grep`/`glob_files` e `offset`/`limit` em `read_file` em vez de ler arquivos inteiros enormes; não releia o que já está no contexto.
-- Use `use_skill` quando a tarefa casar com uma skill disponível. Delegue subtarefas independentes ou pesadas via `delegate_task` com contrato claro."""
-
-DISCOVERY_PROMPT = """## Descobrir o melhor agente (quando pedirem o melhor modelo, IA ou ferramenta para uma tarefa)
-1. Entenda a tarefa e os critérios do usuário (qualidade, custo, privacidade, local × nuvem).
-2. Pesquise fontes atuais com `web_search` (read_pages=true) e `fetch_url`: benchmarks, comparativos, documentação
-   e repositórios oficiais. Cite título, URL e data. Separe fatos de palpites e diga quando as fontes forem fracas ou antigas.
-3. Compare com os modelos com acesso listados abaixo. Recomende primeiro o melhor que já está disponível, depois
-   uma alternativa, com custo e o que falta para usá-lo.
-4. Para servidores MCP: prefira repositórios oficiais ou de autores conhecidos; informe comando, variáveis de ambiente
-   e o risco (servidores MCP executam código no computador).
-5. NÃO configure nem instale nada. Termine oferecendo a configuração e mostre o passo exato: chave no `.env`,
-   trecho para `data/mcp.json` ou troca em Configurações › Modelos. O usuário decide."""
+- Siga o roteador de skills: `use_skill` no primeiro passo, antes de editar ou gerar. Delegue só com paralelismo real, contexto pesado isolado ou revisão independente."""
 
 PROMPTED_TOOLS_TEMPLATE = """## Ferramentas (modo texto)
 Este modelo chama ferramentas escrevendo blocos exatamente neste formato:
@@ -90,10 +79,27 @@ Você pode emitir vários blocos. Depois de emitir, PARE e aguarde: os resultado
 Ferramentas disponíveis (JSON Schema):
 {tools}"""
 
+_STATUS_RE = re.compile(r"Status\s*:\s*(DONE|PARTIAL|PARCIAL|BLOCKED|BLOQUEADO)", re.IGNORECASE)
 _TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", re.DOTALL)
 _ANNOUNCED_ACTION = re.compile(
     r"\b(vou|irei|agora vou|vamos|let me|i will|i'll)\b[^.\n]{0,60}\b(verificar|continuar|checar|analisar|"
     r"executar|ler|rodar|criar|abrir|testar|buscar|procurar|check|run|read|open|verify|continue)", re.IGNORECASE)
+
+
+def handoff_note(report: str) -> str:
+    """Nota de máquina: relatório sem Status/Verificação, ou PARTIAL/BLOCKED, não é entrega."""
+    text = report or ""
+    match = _STATUS_RE.search(text)
+    if match is None:
+        return "\n\n[Handoff incompleto: falta Status. Não trate como pronto.]"
+    status = match.group(1).upper()
+    if status in ("BLOCKED", "BLOQUEADO"):
+        return "\n\n[Handoff: BLOCKED. Não declare a tarefa pronta.]"
+    if status in ("PARTIAL", "PARCIAL"):
+        return "\n\n[Handoff: PARTIAL. Só o que foi verificado está feito; o resto está em Pendências.]"
+    if not re.search(r"verifica", text, re.IGNORECASE):
+        return "\n\n[Handoff incompleto: falta Verificação. Não trate como pronto.]"
+    return ""
 
 
 def parse_prompted_tool_calls(text: str) -> list[dict]:
@@ -210,10 +216,16 @@ class AgentSession:
     def workspace(self) -> Path:
         return resolve_workspace(self.profile.workspace, self.settings.get("default_workspace") or "")
 
+    def _discovery_only(self) -> bool:
+        """Pesquisa sem o grupo skills: ganha só a skill de descoberta, não o índice inteiro."""
+        return routing.specialty_for(self.profile) == "pesquisa" and "skills" not in self.profile.tool_groups
+
     def tool_groups(self) -> set[str]:
         groups = set(self.profile.tool_groups)
         if self.depth >= MAX_DEPTH:
             groups.discard("agentes")
+        if self._discovery_only():
+            groups.add("skills")
         return groups
 
     def mcp_servers(self) -> Optional[set[str]]:
@@ -234,8 +246,8 @@ class AgentSession:
         if self.depth:
             parts.append(
                 f"## Você é um subagente ({self.label})\n"
-                "Você recebeu uma subtarefa delegada pelo agente principal. Execute-a de ponta a ponta, "
-                "verifique o resultado e termine com um **Relatório de Handoff** conciso contendo:\n"
+                "Você recebeu uma subtarefa delegada pelo agente principal. Não delegue: você é o executor. "
+                "Execute de ponta a ponta, não invente verificação e termine com um **Relatório de Handoff** contendo:\n"
                 "- **Status**: DONE | PARTIAL | BLOCKED\n"
                 "- **Arquivos Alterados**: lista de caminhos (ou 'nenhum')\n"
                 "- **Verificação**: testes/comandos rodados e resultado\n"
@@ -243,9 +255,6 @@ class AgentSession:
             )
         if self.profile.system_prompt.strip():
             parts.append(f"## Perfil: {self.profile.name}\n{self.profile.system_prompt.strip()}")
-        if "web" in self.tool_groups() and routing.specialty_for(self.profile) == "pesquisa":
-            table = brain.models_table()
-            parts.append(DISCOVERY_PROMPT + (f"\n\nModelos com acesso configurado:\n{table}" if table else ""))
         parts.append(
             "## Ambiente\n"
             f"- Sistema: {platform.system()} {platform.release()} | Data: {datetime.now():%d/%m/%Y (%A)}\n"
@@ -260,8 +269,13 @@ class AgentSession:
             parts.append(f"## Instruções do projeto ({project[0]})\n{project[1]}")
         groups = self.tool_groups()
         if "skills" in groups and brain.skills.skills:
-            parts.append("## Skills disponíveis (carregue com use_skill antes de usar)\n"
-                         + brain.skills.index_text(self.policy.skills_index_chars))
+            only = {"descobrir-agente"} if self._discovery_only() else None
+            index = brain.skills.index_text(self.policy.skills_index_chars, only)
+            router = brain.skills.router_text(only)
+            if index:
+                parts.append("## Skills disponíveis (carregue com use_skill antes de usar)\n" + index)
+            if router:
+                parts.append(router)
         if "mcp" in groups:
             servers = brain.mcp.describe_for_prompt(self.mcp_servers())
             if servers:
@@ -291,7 +305,8 @@ class AgentSession:
         lines = ["## Sua equipe (delegate_task)",
                  "Delegue partes independentes para rodarem em paralelo; cada agente tem contexto próprio e "
                  "pode usar outro modelo. Depois revise e integre o que voltar. Sem 'model', o sistema escolhe "
-                 "o melhor modelo disponível para a especialidade (campo 'specialty' ou a do perfil). Agentes:"]
+                 "o melhor modelo disponível para a especialidade (campo 'specialty' ou a do perfil). "
+                 "Relatório sem Status/Verificação, ou com PARTIAL/BLOCKED, não é entrega: não declare pronto. Agentes:"]
         for member in self.brain.profiles.team():
             model = member.model_ref or self._routed_ref(member) or "mesmo modelo atual"
             tags = f" [{', '.join(member.skills_tags)}]" if member.skills_tags else ""
@@ -743,7 +758,7 @@ class AgentSession:
             with self._lock:
                 self.turn_tokens += sub.turn_tokens
             self.events("subagent_end", {"agent": label, "tokens": sub.turn_tokens, "report": report[:2000]})
-            return f"## {label} ({provider}:{model} | {sub.turn_tokens} tok)\n{report[:8000]}"
+            return f"## {label} ({provider}:{model} | {sub.turn_tokens} tok)\n{report[:8000]}{handoff_note(report)}"
 
         workers = min(4, len(tasks))
         with ThreadPoolExecutor(max_workers=workers) as pool:

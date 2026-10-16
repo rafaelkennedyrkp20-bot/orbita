@@ -1,6 +1,7 @@
 ---
 name: creative-pipeline
 description: Pipeline estruturado para criação visual e multimídia (imagens, ícones, UI assets, storyboards e vídeos) com shot lists, keyframes e consistência de estilo.
+when: imagem, série visual, storyboard ou vídeo
 ---
 
 # Creative Pipeline: Image, Video & Composite Workflows (`creative-pipeline`)
@@ -38,7 +39,7 @@ Ao chamar `generate_image`:
 
 ### 4. Composição e Pós-Processamento (Código + Mídia)
 - **Ativos de Software (Ícones/SVG/UI)**: Se o ativo exigir precisão geométrica (ex.: `.ico` multi-tamanho, gráficos vetoriais), combine geração ou código Python (`Pillow` / SVG) e valide dimensões e transparência.
-- **Montagem de Vídeo / Slideshow**: Quando o usuário pedir vídeo a partir dos keyframes, use `run_shell` com `ffmpeg` (ou script Python) para compor os keyframes gerados com transições suaves, zoom (Ken Burns) ou áudio TTS, salvando o `.mp4` final e exibindo no painel com `show_file`.
+- **Montagem de Vídeo / Slideshow**: Só componha vídeo se `ffmpeg` estiver no PATH (`run_shell` com `ffmpeg -version` retorna 0). Se não estiver, entregue a shot list, os keyframes e o comando exato; não diga que o `.mp4` existe. Com ffmpeg, componha transições ou zoom e mostre o arquivo com `show_file`.
 
 ## Common Rationalizations to Reject
 - *"Vou mandar um prompt curto como 'um gato bonito'"* → Prompts vagos produzem resultados genéricos e inconsistentes. Especifique sujeito, composição, luz, paleta e estilo.

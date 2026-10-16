@@ -43,11 +43,32 @@ def test_safe_tool_names():
 
 def test_project_core_skills_are_valid():
     manager = SkillManager()
-    expected = {"spec-plan-tdd", "code-review-simplify", "debug-recovery", "creative-pipeline"}
+    expected = {"spec-plan-tdd", "code-review-simplify", "debug-recovery", "creative-pipeline",
+                "descobrir-agente"}
     assert expected.issubset(set(manager.skills.keys()))
     for name in expected:
         body = manager.load(name)
         assert "## When to Use" in body and "## Verification" in body
+        assert manager.skills[name].when, name
+    assert "verify_cmd" not in manager.load("spec-plan-tdd")
+
+
+def test_router_uses_when_and_index_does_not_duplicate(tmp_path, monkeypatch):
+    import agent.core.skills as skills_module
+    monkeypatch.setattr(skills_module, "USER_SKILL_DIRS", [])
+    monkeypatch.setattr(skills_module, "PROJECT_SKILLS", tmp_path)
+    for name, when in (("com-when", "quando o pedido for X"), ("sem-when", "")):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: Descrição de {name}.\nwhen: {when}\n---\nCorpo.\n",
+            encoding="utf-8")
+    manager = SkillManager()
+    router = manager.router_text()
+    index = manager.index_text()
+    assert "com-when: quando o pedido for X" in router
+    assert "sem-when" not in router
+    assert "sem-when" in index and "com-when" not in index
 
 
 SERVER = textwrap.dedent("""

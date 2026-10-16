@@ -1,6 +1,7 @@
 ---
 name: code-review-simplify
 description: Revisão adversarial de código focada em bugs reais, segurança, concorrência, eliminação de bloat/código morto e simplificação estrutural.
+when: revisar diff, simplificar, ou integrar resultado de subagente
 ---
 
 # Code Review & Simplification (`code-review-simplify`)
@@ -46,6 +47,7 @@ Classifique cada achado com evidência (`arquivo:linha` + cenário exato de falh
 
 ## Red Flags
 - Relatórios de revisão genéricos ("o código está bem estruturado") sem apontar linhas e fluxos reais.
+- Aceitar handoff de subagente sem Status e Verificação, ou com PARTIAL/BLOCKED, como se estivesse pronto.
 - Manter código antigo comentado ou funções depreciadas sem chamadores.
 - Aumentar o número total de linhas em uma tarefa de refatoração/simplificação sem justificativa forte.
 

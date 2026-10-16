@@ -146,6 +146,7 @@ def test_delegate_runs_subagents_in_parallel(brain, provider):
     assert "modelo-x" in models  # cada subagente pode usar outro modelo
     sub_system = next(c for c in fake.calls if c["model"] == "modelo-x")["messages"][0]["content"]
     assert "subagente" in sub_system and "Programador" in sub_system
+    assert "Não delegue" in sub_system
 
 
 def test_budget_brake_pauses(brain, provider):
@@ -297,20 +298,54 @@ def test_reasoning_kept_in_current_turn_and_pruned_in_old(brain, provider):
 
 
 
-def test_research_profile_gets_discovery_protocol_and_models(brain, provider, monkeypatch):
+def _project_skills(brain, monkeypatch):
+    """Catálogo do projeto, sem skills do usuário (o teste não pode depender da máquina)."""
+    import agent.core.skills as skills_module
+    from agent.core.skills import SkillManager
+    monkeypatch.setattr(skills_module, "USER_SKILL_DIRS", [])
+    brain.skills = SkillManager()
+
+
+def test_research_profile_routes_discovery_without_dumping_it(brain, provider, monkeypatch):
+    _project_skills(brain, monkeypatch)
     monkeypatch.setattr(brain, "models_table", lambda: "- openai:gpt-5 ($$): forte em código")
     fake = provider([ChatResult(text="ok")])
     session(brain, profile="pesquisador").run("qual o melhor modelo para código?")
     system = fake.calls[0]["messages"][0]["content"]
-    assert "Descobrir o melhor agente" in system
-    assert "openai:gpt-5" in system
-    assert "NÃO configure" in system
+    assert "descobrir-agente:" in system
+    assert "spec-plan-tdd:" not in system          # pesquisa não herda o índice inteiro
+    assert "openai:gpt-5" not in system            # tabela só entra ao carregar a skill
+    assert "NÃO configure" not in system
+    assert any(t["name"] == "use_skill" for t in fake.calls[0]["tools"])
 
 
-def test_general_profile_has_no_discovery_protocol(brain, provider):
+def test_discovery_skill_receives_models_only_when_loaded(brain, monkeypatch):
+    from agent.core.skills import SkillManager
+    from agent.core.tools import ToolContext
+    brain.skills = SkillManager()  # o fixture zera as skills de propósito
+    monkeypatch.setattr(brain, "models_table", lambda: "- ollama:qwen (local/grátis): bom em código")
+    ctx = ToolContext(workspace=brain.settings.path.parent, session=type("S", (), {"loaded_skills": set()})())
+    loaded = brain.registry.get("use_skill").run({"name": "descobrir-agente"}, ctx)
+    assert "ollama:qwen" in loaded.text and "NÃO configure" in loaded.text
+    other = brain.registry.get("use_skill").run({"name": "spec-plan-tdd"}, ctx)
+    assert "ollama:qwen" not in other.text
+
+
+def test_handoff_note_rejects_incomplete_partial_and_blocked():
+    assert "incompleto" in loop.handoff_note("fiz tudo")
+    assert "Verificação" in loop.handoff_note("Status: DONE")
+    assert loop.handoff_note("Status: DONE\nVerificação: pytest 62 passed") == ""
+    assert "BLOCKED" in loop.handoff_note("Status: BLOCKED\nVerificação: não rodou")
+    assert "PARTIAL" in loop.handoff_note("Status: parcial\nVerificação: pytest ok")
+
+
+def test_general_profile_has_no_discovery_protocol(brain, provider, monkeypatch):
+    _project_skills(brain, monkeypatch)
     fake = provider([ChatResult(text="ok")])
     session(brain).run("oi")
-    assert "Descobrir o melhor agente" not in fake.calls[0]["messages"][0]["content"]
+    system = fake.calls[0]["messages"][0]["content"]
+    assert "NÃO configure" not in system
+    assert "descobrir-agente:" in system          # o roteador aponta; o protocolo não vem junto
 
 
 def test_team_verification_runs_once_and_respects_permission(brain, provider):

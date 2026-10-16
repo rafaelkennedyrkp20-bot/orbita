@@ -16,6 +16,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from agent.core.config import PROJECT_ROOT
 
@@ -35,6 +36,8 @@ class Skill:
     description: str
     path: Path          # SKILL.md
     origin: str         # projeto | plugin:<nome> | usuário
+    when: str = ""      # gatilho curto: entra no roteador do prompt, não no índice
+    context: str = ""   # "models" anexa a tabela de modelos só quando a skill é carregada
 
     @property
     def folder(self) -> Path:
@@ -90,20 +93,45 @@ class SkillManager:
                 description = " ".join(str(meta.get("description") or "").split())
                 if not description or name in found:  # a primeira origem vence (projeto > plugin > usuário)
                     continue
-                found[name] = Skill(name, description[:1024], skill_file, origin)
+                when = " ".join(str(meta.get("when") or "").split())
+                found[name] = Skill(name, description[:1024], skill_file, origin,
+                                    when=when[:240], context=str(meta.get("context") or "").strip()[:32])
         self.skills = found
         logger.info("Skills carregadas: %d", len(found))
 
-    def index_text(self, max_chars: int = 6000) -> str:
+    def _selected(self, only: Optional[set[str]] = None) -> list[Skill]:
+        skills = [s for s in self.skills.values() if only is None or s.name in only]
+        return sorted(skills, key=lambda s: s.name)
+
+    def index_text(self, max_chars: int = 6000, only: Optional[set[str]] = None) -> str:
+        """Índice das skills sem gatilho `when` (as que têm vão no roteador, para não duplicar)."""
+        pending = [s for s in self._selected(only) if not s.when]
         lines, used = [], 0
-        for skill in sorted(self.skills.values(), key=lambda s: s.name):
+        for skill in pending:
             line = f"- {skill.name}: {skill.description[:300]}"
             used += len(line)
             if used > max_chars:
-                lines.append(f"- ... e mais {len(self.skills) - len(lines)} skills (use_skill com o nome exato)")
+                lines.append(f"- ... e mais {len(pending) - len(lines)} skills (use_skill com o nome exato)")
                 break
             lines.append(line)
         return "\n".join(lines)
+
+    def router_text(self, only: Optional[set[str]] = None) -> str:
+        """Gatilhos curtos. O corpo da skill só entra quando o modelo chama use_skill."""
+        lines = [f"- {s.name}: {s.when}" for s in self._selected(only) if s.when]
+        if not lines:
+            return ""
+        return ("## Roteador de skills (use_skill no primeiro passo, antes de editar ou gerar)\n"
+                + "\n".join(lines))
+
+    def context_suffix(self, name: str, models_table: str = "") -> str:
+        """Contexto que a skill não consegue inferir, anexado só na hora em que ela é carregada."""
+        skill = self.skills.get(name) or next(
+            (s for s in self.skills.values() if s.name.lower() == name.lower()), None)
+        if skill is None or skill.context != "models" or not (models_table or "").strip():
+            return ""
+        return ("\n\n## Modelos com acesso configurado (recomende como disponível só o que está aqui)\n"
+                + models_table.strip())
 
     def load(self, name: str, file: str | None = None) -> str:
         skill = self.skills.get(name) or next(

@@ -22,9 +22,10 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 - Ícones próprios para os agentes, no lugar dos emojis do Windows: cada perfil tem símbolo e cor exclusivos
   (estrela em órbita, código, revisão, pesquisa, criação, DNA, raio, automação, liderança, robô). O editor de
   perfil ganhou um seletor de ícone; perfis antigos com emoji passam a usar o ícone correspondente sozinhos.
-- Agentes de pesquisa (perfil com especialidade "pesquisa" e acesso à web, como o Pesquisador) passam a receber o
-  protocolo "Descobrir o melhor agente" e a lista dos modelos com acesso: pesquisam fontes atuais, recomendam o
-  melhor modelo disponível e uma alternativa, e oferecem a configuração sem alterar nada sozinhos.
+- Agentes de pesquisa recomendam modelo ou servidor MCP pela skill `descobrir-agente`, carregada só quando o
+  pedido é esse. A tabela de modelos com acesso entra nesse momento, não em todo turno. A skill não configura nada.
+- O prompt deixa de despejar o corpo das skills: o campo `when` vira um roteador curto, e o corpo só entra com
+  `use_skill`. Relatório de subagente sem Status/Verificação, ou com PARTIAL/BLOCKED, é marcado e não conta como entrega.
 
 ## [0.1.0-alpha] — 2026-10-16
 
