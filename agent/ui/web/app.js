@@ -805,6 +805,8 @@ const TOOL_INFO = {
   close_app: ["x", "Fechando programa"], set_volume: ["wave", "Ajustando volume"], remember: ["brain", "Memorizando"],
   recall: ["brain", "Lembrando"], use_skill: ["book", "Carregando skill"], delegate_task: ["users", "Delegando à equipe"],
   find_tools: ["plug", "Buscando ferramentas"], generate_image: ["image", "Gerando imagem"], show_file: ["eye", "Mostrando arquivo"],
+  toolbox_install: ["download", "Instalar programa de criação"], toolbox_list: ["layers", "Ferramentas de criação"],
+  check_web_page: ["globe", "Testando página"],
 };
 function toolInfo(name) {
   if (name.startsWith("mcp__")) { const [, srv, tool] = name.split("__"); return ["plug", `${srv} › ${(tool || "").replace(/_/g, " ")}`]; }
@@ -973,6 +975,7 @@ function onEvent(e) {
     case "voice_text": if ($(".welcome")) $("#messages").innerHTML = ""; addUser(e.text); break;
     case "listening": $("#mic").classList.add("rec"); setLive(true, "Ouvindo…"); break;
     case "dictation": onDictation(e); break;
+    case "toolbox": onToolbox(e); break;
     case "voice_gpu":
       if (e.state === "done") { toast("success", "Ditado", "Pronto: o ditado agora usa a placa de vídeo."); renderVoiceGpu({ cuda: true, libs: true }); }
       else if (e.state === "error") { toast("error", "Placa de vídeo", "A instalação falhou: " + (e.message || ""), 10000); renderVoiceGpu({ cuda: true, libs: false }); }
@@ -1041,7 +1044,7 @@ function approval(e) {
   } else {
     const [ic, label] = toolInfo(r.tool);
     const args = r.args || {};
-    const main = args.command || args.path || args.name || args.text || args.url || "";
+    const main = r.detail || args.command || args.path || args.name || args.text || args.url || "";
     body = `<div class="row" style="margin-bottom:10px"><span class="risk ${r.risk}">${icon("shield")} ${r.risk === "exec" ? "Executar / controlar o PC" : "Alterar arquivos"}</span><span class="tag">${esc(r.agent)}</span></div>
       <h2>${icon(ic)} ${esc(label)}</h2><p class="sub">O agente quer usar <b>${esc(r.tool)}</b>.</p>
       ${main ? `<pre>${esc(String(main)).slice(0, 2000)}</pre>` : ""}
@@ -1217,7 +1220,9 @@ function profileEditor(p) {
 // ── Página: Conexões (MCP + skills) ────────────────────────────────────────────
 function renderConnections() {
   const servers = S.mcp || [];
-  $("#conn-body").innerHTML = `<h1>Conexões</h1><p class="lead">Servidores MCP ligam o agente a programas (REA, navegador, Windows, Photoshop…). Servidores grandes carregam ferramentas sob demanda para economizar tokens.</p>
+  $("#conn-body").innerHTML = `<h1>Ferramentas de criação</h1><p class="lead">Programas que a IA sabe usar para editar imagens, modelar em 3D, fazer jogos e mexer em vídeo. Nada vem instalado: baixe só o que quiser (versão fixa, do site oficial, com conferência de integridade). O agente também pode pedir para instalar — sempre com a sua permissão.</p>
+    <div class="grid" id="tb-grid"></div>
+    <h1 style="margin-top:34px">Conexões</h1><p class="lead">Servidores MCP ligam o agente a programas (REA, navegador, Windows, Photoshop…). Servidores grandes carregam ferramentas sob demanda para economizar tokens.</p>
     <div class="row" style="margin-bottom:18px"><button class="btn" id="mc-reload">${icon("refresh")} Reconectar</button><button class="btn" id="mc-import">${icon("download")} Importar do Claude/Cursor</button><button class="btn" id="mc-edit">${icon("code")} Editar mcp.json</button></div>
     <div class="grid">${servers.map(s => `<div class="tile"><div class="top"><div class="em">${icon("plug")}</div><div style="flex:1"><h3>${esc(s.name)}</h3><span class="status ${s.status}"><i></i>${esc(s.status)}${s.status === "conectado" ? ` · ${s.tools} ferramentas${s.deferred ? " (sob demanda)" : ""}` : ""}</span></div>
       <label class="toggle"><input type="checkbox" data-mcp="${esc(s.name)}" ${s.enabled ? "checked" : ""}><span></span></label></div>
@@ -1228,6 +1233,55 @@ function renderConnections() {
   $("#mc-reload").onclick = () => { call("mcpReload"); toast("info", "MCP", "Reconectando servidores…"); };
   $("#mc-import").onclick = async () => { const r = await call("mcpImport"); toast(r.length ? "success" : "info", "Importação MCP", r.length ? `Importados (desligados): ${r.join(", ")}` : "Nenhum servidor novo encontrado."); };
   $("#mc-edit").onclick = () => call("openPath", "mcp");
+  renderToolbox();
+}
+
+// ── Caixa de ferramentas (programas opcionais) ─────────────────────────────────
+const TB_ICONS = { imagemagick: "image", openscad: "layers", blender: "layers", godot: "bolt", ffmpeg: "wave" };
+function renderToolbox() {
+  const grid = $("#tb-grid");
+  if (!grid) return;
+  grid.innerHTML = (S.toolbox || []).map(t => {
+    const busy = t.state === "downloading" || t.state === "extracting";
+    const status = busy ? `<span class="status conectando"><i></i>${t.state === "extracting" ? "Extraindo…" : `Baixando ${t.pct || 0}%`}</span>`
+      : t.installed ? `<span class="status conectado"><i></i>Instalado · v${esc(t.version)}</span>`
+      : t.system_exe ? `<span class="status conectado"><i></i>Já está no sistema</span>`
+      : t.available ? `<span class="status"><i></i>Não instalado · ${esc(t.size_label)}</span>`
+      : `<span class="status"><i></i>Instale pelo sistema</span>`;
+    const action = busy ? "" : t.installed ? `<button class="btn small danger" data-tb-remove="${esc(t.id)}">${icon("trash")} Remover</button>`
+      : t.available && !t.system_exe ? `<button class="btn small primary" data-tb-install="${esc(t.id)}">${icon("download")} Instalar (${esc(t.size_label)})</button>` : "";
+    const cmds = Object.entries(t.package_commands || {}).map(([k, v]) => `<code>${esc(v)}</code>`).join("<br>");
+    return `<div class="tile tb-tile"><div class="top"><div class="em">${icon(TB_ICONS[t.id] || "plug")}</div><div style="flex:1"><h3>${esc(t.name)}</h3>${status}</div></div>
+      <div class="desc">${esc(t.purpose)}</div>
+      ${busy ? `<div class="progress"><i style="width:${t.state === "extracting" ? 100 : t.pct || 0}%"></i></div>` : ""}
+      ${t.installed ? `<div class="tb-path" title="${esc(t.exe)}">${esc(t.test_line || t.exe)}</div>` : ""}
+      ${!t.available && cmds ? `<div class="tb-path">${cmds}</div>` : ""}
+      <div class="foot"><span class="mono">${t.source ? `de ${esc(t.source)}` : ""}</span>${action}</div></div>`;
+  }).join("") || `<div class="empty">Catálogo vazio.</div>`;
+  $$("[data-tb-install]", grid).forEach(b => b.addEventListener("click", async () => {
+    const t = S.toolbox.find(x => x.id === b.dataset.tbInstall);
+    if (!(await confirmBox(`Instalar ${t.name}?`, `Versão ${t.version} · ${t.size_label}, baixado de ${t.source} e conferido pelo SHA-256 antes de instalar. Fica em models/tools e pode ser removido quando quiser.`, "Baixar e instalar"))) return;
+    call("toolboxInstall", t.id); onToolbox({ id: t.id, state: "downloading", pct: 0 });
+  }));
+  $$("[data-tb-remove]", grid).forEach(b => b.addEventListener("click", async () => {
+    const t = S.toolbox.find(x => x.id === b.dataset.tbRemove);
+    if (!(await confirmBox(`Remover ${t.name}?`, "O programa sai da caixa de ferramentas. Dá para instalar de novo depois.", "Remover"))) return;
+    call("toolboxRemove", t.id);
+  }));
+}
+async function onToolbox(e) {
+  const t = (S.toolbox || []).find(x => x.id === e.id);
+  if (!t) return;
+  if (e.state === "downloading" || e.state === "extracting") { t.state = e.state; t.pct = e.pct; }
+  else if (["done", "removed", "tested", "error"].includes(e.state)) {
+    const fresh = await call("toolboxList");
+    if (fresh) S.toolbox = fresh;
+    const now = S.toolbox.find(x => x.id === e.id);
+    if (e.state === "tested") { if (now) now.test_line = e.test; toast("success", t.name, `Instalado e testado: ${e.test}`, 7000); }
+    if (e.state === "removed") toast("info", t.name, "Removido.");
+    if (e.state === "error") toast("error", t.name, e.error || "A instalação falhou.", 9000);
+  }
+  if ($("#page-connections").classList.contains("active")) renderToolbox();
 }
 
 // ── Página: Configurações ──────────────────────────────────────────────────────

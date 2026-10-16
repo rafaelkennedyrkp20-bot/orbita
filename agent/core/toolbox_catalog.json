@@ -1,0 +1,132 @@
+{
+  "about": "Programas opcionais que a IA sabe usar. Versões fixas, URLs oficiais e SHA-256 conferidos em 2026-10-16. Nada daqui é baixado sem pedido.",
+  "tools": [
+    {
+      "id": "imagemagick",
+      "name": "ImageMagick",
+      "purpose": "Edição de imagem por linha de comando: redimensionar, recortar, converter, remover fundo, montar sprites.",
+      "version": "7.1.2-34",
+      "homepage": "https://imagemagick.org",
+      "test": ["-version"],
+      "packages": {
+        "windows": {
+          "url": "https://github.com/ImageMagick/ImageMagick/releases/download/7.1.2-34/ImageMagick-7.1.2-34-portable-Q16-HDRI-x64.7z",
+          "sha256": "8dcfd3644b7fc20a92aeedeb4798024e5947f25f4d7c0c313c883fbca3d723e6",
+          "size": 12019095,
+          "format": "7z",
+          "exe": "magick.exe",
+          "sha256_source": "digest do asset na release oficial do GitHub (ImageMagick/ImageMagick)"
+        },
+        "linux": {
+          "url": "https://github.com/ImageMagick/ImageMagick/releases/download/7.1.2-34/ImageMagick-7.1.2-34-gcc-x86_64.AppImage",
+          "sha256": "6e9edfd35d5f30b57c27533afe003d6085faaf8607b207426f398d11751acf93",
+          "size": 33323512,
+          "format": "raw",
+          "exe": "magick",
+          "sha256_source": "digest do asset na release oficial do GitHub (ImageMagick/ImageMagick)"
+        }
+      },
+      "linux_packages": {"apt": "sudo apt install imagemagick", "dnf": "sudo dnf install ImageMagick", "pacman": "sudo pacman -S imagemagick"}
+    },
+    {
+      "id": "openscad",
+      "name": "OpenSCAD",
+      "purpose": "Modelagem 3D por código (peças, objetos para impressão 3D). Exporta STL e gera prévia PNG.",
+      "version": "2021.01",
+      "homepage": "https://openscad.org",
+      "test": ["--version"],
+      "packages": {
+        "windows": {
+          "url": "https://files.openscad.org/OpenSCAD-2021.01-x86-64.zip",
+          "sha256": "fb0caabf5bbc89f8f2f80c10b79ae64d697aaff6efd58b2756f5d6270edb7ba7",
+          "size": 21884613,
+          "format": "zip",
+          "exe": "openscad.com",
+          "sha256_source": "https://files.openscad.org/OpenSCAD-2021.01-x86-64.zip.sha256"
+        },
+        "linux": {
+          "url": "https://files.openscad.org/OpenSCAD-2021.01-x86_64.AppImage",
+          "sha256": "f758528f2cd213f773c7a105fb63bf3b45bf754b0f586fbb7c9cd653ffcd0882",
+          "size": 40759336,
+          "format": "raw",
+          "exe": "openscad",
+          "sha256_source": "https://files.openscad.org/OpenSCAD-2021.01-x86_64.AppImage.sha256"
+        }
+      },
+      "linux_packages": {"apt": "sudo apt install openscad", "dnf": "sudo dnf install openscad", "pacman": "sudo pacman -S openscad"}
+    },
+    {
+      "id": "blender",
+      "name": "Blender",
+      "purpose": "3D completo sem janela (blender -b -P script.py): cenas, materiais, render PNG, exportar GLB/FBX.",
+      "version": "4.5.9",
+      "homepage": "https://www.blender.org",
+      "test": ["-b", "--version"],
+      "packages": {
+        "windows": {
+          "url": "https://download.blender.org/release/Blender4.5/blender-4.5.9-windows-x64.zip",
+          "sha256": "41da973b9bf95bb312cbeff4d1982feb13259b43c821686b9bafea4dfe5477cf",
+          "size": 399051129,
+          "format": "zip",
+          "exe": "blender.exe",
+          "sha256_source": "https://download.blender.org/release/Blender4.5/blender-4.5.9.sha256"
+        },
+        "linux": {
+          "url": "https://download.blender.org/release/Blender4.5/blender-4.5.9-linux-x64.tar.xz",
+          "sha256": "dcdc3eca6c9825bb35a8033b689c053f3cb5a9b0cd2a61b2eac2a49436b4ad3d",
+          "size": 377929956,
+          "format": "tar.xz",
+          "exe": "blender",
+          "sha256_source": "https://download.blender.org/release/Blender4.5/blender-4.5.9.sha256"
+        }
+      },
+      "linux_packages": {"apt": "sudo apt install blender", "dnf": "sudo dnf install blender", "pacman": "sudo pacman -S blender"}
+    },
+    {
+      "id": "godot",
+      "name": "Godot",
+      "purpose": "Motor de jogos 2D/3D em um executável só. Cria, valida e exporta projetos pela linha de comando.",
+      "version": "4.7.2-stable",
+      "homepage": "https://godotengine.org",
+      "test": ["--version"],
+      "packages": {
+        "windows": {
+          "url": "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_win64.exe.zip",
+          "sha256": "731980f9608d61333e5baf54a2ef17210acc7a538446c0cb9969f002aca1e953",
+          "size": 86013866,
+          "format": "zip",
+          "exe": "Godot_v4.7.2-stable_win64_console.exe",
+          "sha256_source": "digest do asset na release oficial do GitHub (godotengine/godot)"
+        },
+        "linux": {
+          "url": "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip",
+          "sha256": "cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4",
+          "size": 77860424,
+          "format": "zip",
+          "exe": "Godot_v4.7.2-stable_linux.x86_64",
+          "sha256_source": "digest do asset na release oficial do GitHub (godotengine/godot)"
+        }
+      },
+      "linux_packages": {"flatpak": "flatpak install flathub org.godotengine.Godot", "dnf": "sudo dnf install godot", "pacman": "sudo pacman -S godot"}
+    },
+    {
+      "id": "ffmpeg",
+      "name": "FFmpeg",
+      "purpose": "Vídeo e áudio: cortar, juntar, converter, extrair áudio, fazer GIF.",
+      "version": "9.0.2",
+      "homepage": "https://ffmpeg.org/download.html",
+      "test": ["-version"],
+      "packages": {
+        "windows": {
+          "url": "https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.7z",
+          "sha256": "4705843ccaaf54257c16ad90f3e952ece33c17df964ecf7bfdbb0f49c7171077",
+          "size": 35430500,
+          "format": "7z",
+          "exe": "ffmpeg.exe",
+          "sha256_source": "digest do asset na release do GitHub da gyan.dev (build Windows indicado em ffmpeg.org/download.html)"
+        }
+      },
+      "linux_packages": {"apt": "sudo apt install ffmpeg", "dnf": "sudo dnf install ffmpeg", "pacman": "sudo pacman -S ffmpeg"}
+    }
+  ]
+}

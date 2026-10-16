@@ -110,6 +110,24 @@ O agente de programação da xAI (o mesmo do Grok Build Desktop) roda com a **su
 próprias ferramentas na pasta de trabalho do perfil, e a conversa continua entre mensagens.
 Cada turno do Grok Build tem um custo-base de cerca de 16 mil tokens (o prompt dele é grande); o custo aparece no rodapé.
 
+## Ferramentas de criação (imagem, 3D, jogos, vídeo)
+
+Na página **Conexões**, a seção *Ferramentas de criação* oferece programas que a IA sabe usar. **Nada vem instalado**:
+você baixa só o que quiser, ou o agente pede permissão mostrando nome, tamanho e origem.
+
+| Programa | Para quê | Tamanho |
+|---|---|---|
+| ImageMagick | editar imagens: redimensionar, recortar, converter, sprites | ~12 MB |
+| OpenSCAD | 3D por código: peças, objetos para impressão 3D (STL + prévia) | ~22 MB |
+| Godot | jogos 2D/3D, validados pela linha de comando | ~86 MB |
+| FFmpeg | vídeo e áudio: cortar, juntar, converter, GIF | ~35 MB |
+| Blender | 3D completo sem janela: cenas, materiais, render, GLB/FBX | ~400 MB |
+
+Cada programa tem versão fixa, vem do site ou GitHub oficial e só é instalado se o SHA-256 conferir. Fica em
+`models\tools\` (fora do git) e pode ser removido pela mesma tela. Junto vêm as skills `editar-imagem`, `modelagem-3d`,
+`jogos-godot`, `jogos-web` (jogos no navegador, sem instalar nada) e `video-ffmpeg`. No Linux, quando não houver pacote
+portátil, a tela mostra o comando do gerenciador de pacotes.
+
 ## Conectando programas (MCP)
 
 Edite `data/mcp.json` (botão `{ }`) e adicione servidores:

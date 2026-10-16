@@ -161,12 +161,12 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 > maior lacuna; local-first com permissões por escopo é o mais elogiado) e de quem faz jogos com IA (Blender gera os
 > assets 3D, Godot monta o jogo; ImageMagick é o padrão de edição de imagem por linha de comando).
 
-- [ ] ⭐ **Caixa de ferramentas opcional** (Opus/Antigravity): catálogo de programas que a IA sabe usar, baixados
+- [x] ⭐ **Caixa de ferramentas opcional** (Opus/Antigravity + Claude): catálogo de programas que a IA sabe usar, baixados
   só quando a pessoa (ou o agente, com permissão) quiser, de URL oficial fixa com SHA-256, para `models/tools/`:
   ImageMagick (imagem), Blender (3D, modo sem janela por script Python), OpenSCAD (3D por código, leve), Godot (jogos),
   FFmpeg (vídeo/áudio). Página na interface com tamanho, status e instalar/remover; ferramenta do agente para listar e
   pedir instalação; nada entra no `requirements.txt`
-- [ ] ⭐ **Skills de criação** junto com a caixa (Opus/Antigravity): `editar-imagem`, `modelagem-3d`, `jogos-godot`,
+- [x] ⭐ **Skills de criação** junto com a caixa (Claude): `editar-imagem`, `modelagem-3d`, `jogos-godot`,
   `jogos-web` (Canvas/Three.js, sem instalar nada) e `video-ffmpeg`, cada uma com fluxo testável e exemplos
 - [ ] ⭐ Memória por projeto: o agente lembra sozinho decisões e estado de cada pasta de projeto entre conversas
   (junto com o painel de memórias já listado na Fase 5)
@@ -174,8 +174,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [ ] Permissões por pasta: liberar escrita só no projeto aberto e leitura no resto, configurável
 - [ ] Servidores MCP populares com um clique (Playwright, GitHub, Blender MCP, Godot MCP), com explicação do que fazem
 - [ ] Perguntar antes da compactação automática (hoje compacta e avisa), com opção "sempre automático"
-- [~] Equipe com modelos reais: DeepSeek e GLM testados (Diário 2026-10-16); falta Nemotron e medir custo por modelo
-  (Claude Opus 5.5)
+- [x] Equipe com modelos reais: DeepSeek, GLM e Nemotron testados, custo medido por rodada (Diário 2026-10-16)
 
 ## Diário
 
@@ -340,3 +339,12 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   reconhece elementos criados pelo JS (`el.id =`, templates). Rodada 2 (GLM-5.3-Flash, depois): mesmo fluxo, 4
   ajudantes, `check_web_page` usado 21 vezes, nenhum controle de tela, 8,9 min e 1,16 M tokens (-52%); site com 0 erros
   de JS nas 4 páginas, sem overflow no celular, integração limpa. Verificado também: pytest 159 + 2 pulados.
+- **2026-10-16 — Claude Opus 5.5 (Antigravity) + Claude Opus 5.5**: caixa de ferramentas da Fase 9. O Opus do
+  Antigravity fez `agent/core/toolbox.py` (download só do catálogo e por https, tamanho e SHA-256 conferidos, `.part` e
+  pasta temporária, zip/tar.xz com proteção contra caminhos perigosos, 7z pelo tar do Windows), o catálogo com versões
+  fixas e hashes oficiais, `toolbox_list`/`toolbox_install` (risk "exec"), a ponte em `gui.py` e 10 testes — e parou
+  pelo limite de uso. Concluído aqui: seção "Ferramentas de criação" (cartões, progresso, instalar/remover com
+  confirmação), detalhe no modal de permissão, nomes das ferramentas, as 5 skills e o README. Verificado: pytest 175 +
+  2 pulados; instalação real do ImageMagick (3 s) e do OpenSCAD (6 s) com hash conferido e teste do programa; o agente
+  (Nemotron) fez um porta-copos 3D no OpenSCAD (STL + prévia) e a miniatura no ImageMagick em 42 s / 131 mil tokens;
+  janela real com a seção e o pedido de permissão do Blender capturados.

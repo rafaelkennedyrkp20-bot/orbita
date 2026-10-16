@@ -19,6 +19,10 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## [Não lançado]
 
 ### Melhorias
+- **Ferramentas de criação** (página Conexões): ImageMagick, OpenSCAD, Blender, Godot e FFmpeg, que a IA sabe usar
+  para editar imagem, modelar 3D, fazer jogos e vídeo. Nada vem instalado; baixa só com clique ou com permissão do
+  agente, de URL oficial fixa e com conferência de SHA-256. Novas skills: `editar-imagem`, `modelagem-3d`,
+  `jogos-godot`, `jogos-web` e `video-ffmpeg`.
 - **Ditado por voz**: clique no microfone (ou Ctrl+M), fale e o texto vai aparecendo no campo enquanto você fala;
   clique de novo (ou Enter) para terminar e revise antes de enviar. Esc cancela. Funciona com o agente trabalhando.
   Com chave da Groq (plano grátis) ou da OpenAI, transcreve na nuvem, como o ChatGPT e o Claude: rápido em qualquer PC,

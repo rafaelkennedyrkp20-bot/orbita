@@ -50,6 +50,8 @@ def register_builtin_tools(registry: ToolRegistry, services) -> None:
     _register_skills(registry, services)
     _register_agents(registry)
     _register_mcp_search(registry, services)
+    from agent.core.toolbox import register_toolbox_tools
+    register_toolbox_tools(registry)   # caixa de ferramentas opcional (toolbox_list / toolbox_install)
 
 
 # ─────────────────────────────────────────────────────────────

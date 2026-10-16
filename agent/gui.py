@@ -35,7 +35,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMainWindow, QMenu, QSystemTrayIcon
 
 from agent import __version__
-from agent.core import checkpoints, grok_cli, mentions, routing, updater
+from agent.core import checkpoints, grok_cli, mentions, routing, toolbox, updater
 from agent.core.brain import Brain
 from agent.core.config import (
     DATA_DIR, GUI_VOICE_MAX_RECORD_SECONDS, GUI_VOICE_NO_SPEECH_TIMEOUT, GUI_VOICE_SILENCE_SECONDS, LOGS_DIR,
@@ -143,6 +143,9 @@ class AgentWorker(QThread):
             approval_id = uuid.uuid4().hex[:10]
             done, answer = threading.Event(), ["no"]
             self._pending[approval_id] = (done, answer)
+            if request.get("tool") == "toolbox_install":   # permissão mostra nome, tamanho e origem
+                request = {**request, "detail": toolbox.get_toolbox().approval_detail(
+                    str((request.get("args") or {}).get("id", "")))}
             self.push({"type": "approval", "id": approval_id, "request": request})
             self.raw_event.emit("attention", {"title": "Permissão necessária", "text": request.get("tool", "")})
             while not done.wait(0.2):
@@ -266,6 +269,8 @@ class Api(QObject):
         self.brain = window.brain
         self._relay.connect(self.message)   # emissões de outras threads chegam enfileiradas
         self._grok_cache: tuple[float, dict] = (0.0, {})
+        # Progresso da caixa de ferramentas (instalação pela interface ou pelo agente) vai para a página.
+        toolbox.get_toolbox().add_listener(lambda data: self.push({"type": "toolbox", **data}))
 
     def push(self, payload: dict) -> None:
         try:
@@ -325,6 +330,7 @@ class Api(QObject):
             "mcp": brain.mcp.status(),
             "skills": [{"name": s.name, "description": s.description, "origin": s.origin}
                        for s in sorted(brain.skills.skills.values(), key=lambda s: s.name)],
+            "toolbox": toolbox.get_toolbox().list(),
             "conversations": brain.conversations.list(),
             "conversation_id": brain.conversation_id,
             "conversation_title": brain.conversation_title,
@@ -795,6 +801,38 @@ class Api(QObject):
     @pyqtSlot(result=str)
     def mcpImport(self) -> str:
         return json.dumps(self.brain.mcp.import_external())
+
+    # ── Caixa de ferramentas (programas opcionais) ───────────
+
+    @pyqtSlot(result=str)
+    def toolboxList(self) -> str:
+        return json.dumps(toolbox.get_toolbox().list(), ensure_ascii=False)
+
+    @pyqtSlot(str)
+    def toolboxInstall(self, tool_id: str) -> None:
+        """Clique do usuário em Instalar: o clique é a permissão. Baixa só a URL do catálogo."""
+        box = toolbox.get_toolbox()
+
+        def work():
+            try:
+                box.install(tool_id)
+                self.push({"type": "toolbox", "id": tool_id, "state": "tested", "test": box.run_test(tool_id)})
+            except Exception as error:   # o ouvinte já avisou a página do erro de instalação
+                logger.warning("Caixa de ferramentas: %s falhou: %s", tool_id, error)
+                if box.find_executable(tool_id):
+                    self.push({"type": "toolbox", "id": tool_id, "state": "error",
+                               "error": f"Instalado, mas o teste falhou: {error}"})
+        threading.Thread(target=work, daemon=True).start()
+
+    @pyqtSlot(str)
+    def toolboxRemove(self, tool_id: str) -> None:
+        """Apagar o Blender são milhares de arquivos: fora da thread da interface."""
+        def work():
+            try:
+                toolbox.get_toolbox().remove(tool_id)   # o ouvinte avisa a página ("removed")
+            except Exception as error:
+                self.push({"type": "toolbox", "id": tool_id, "state": "error", "error": str(error)})
+        threading.Thread(target=work, daemon=True).start()
 
     @pyqtSlot(str, result=str)
     def grok(self, action: str) -> str:

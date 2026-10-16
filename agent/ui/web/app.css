@@ -333,6 +333,11 @@ pre.diff .f { color: var(--text); font-weight: 700; background: var(--panel2); b
 .stt-tip .i { flex: none; color: var(--accent2); margin-top: 2px; }
 .stt-tip a { color: var(--accent2); }
 
+/* Caixa de ferramentas */
+.tb-tile .foot .mono { flex: 1; color: var(--dim); font-size: 11.5px; font-family: var(--mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-path { font: 11.5px/1.5 var(--mono); color: var(--muted); background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-path code { white-space: normal; }
+
 /* Equipe: qual modelo os ajudantes usam */
 .team-mode { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; margin: 0 0 18px; }
 .tm-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
