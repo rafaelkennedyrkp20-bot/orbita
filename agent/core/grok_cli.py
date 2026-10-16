@@ -19,8 +19,10 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Callable, Optional
@@ -31,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 GROK_HOME = Path.home() / ".grok"
 INSTALL_COMMAND = "irm https://x.ai/cli/install.ps1 | iex"   # instalador oficial da xAI (Windows)
+INSTALL_COMMAND_UNIX = "curl -fsSL https://x.ai/cli/install.sh | bash"   # instalador oficial (Linux/macOS)
+# Terminais comuns no Linux: (programa, argumentos antes do comando)
+TERMINALS = [("x-terminal-emulator", ["-e"]), ("gnome-terminal", ["--"]), ("konsole", ["-e"]), ("kitty", []),
+             ("alacritty", ["-e"]), ("xfce4-terminal", ["-x"]), ("tilix", ["-e"]), ("xterm", ["-e"])]
 PERMISSION_MAP = {"perguntar": "default", "auto": "auto", "livre": "bypassPermissions"}
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -39,7 +45,8 @@ def executable() -> Optional[str]:
     found = shutil.which("grok")
     if found:
         return found
-    for candidate in (GROK_HOME / "bin" / "grok.exe", Path.home() / ".local" / "bin" / "grok.exe"):
+    for candidate in (GROK_HOME / "bin" / "grok.exe", Path.home() / ".local" / "bin" / "grok.exe",
+                      GROK_HOME / "bin" / "grok", Path.home() / ".local" / "bin" / "grok"):
         if candidate.is_file():
             return str(candidate)
     return None
@@ -64,7 +71,23 @@ def status() -> dict:
 
 def open_console(args: list[str]) -> None:
     """Abre uma janela de console (o login abre o navegador e pode pedir interação)."""
-    subprocess.Popen(["cmd.exe", "/c", "start", "Grok Build", "cmd.exe", "/k", *args])
+    if os.name == "nt":
+        subprocess.Popen(["cmd.exe", "/c", "start", "Grok Build", "cmd.exe", "/k", *args])
+        return
+    _unix_terminal(shlex.join(args))
+
+
+def _unix_terminal(command: str) -> None:
+    """Roda o comando num terminal do sistema e o deixa aberto para a pessoa ler o resultado."""
+    script = f"{command}; echo; read -r -p 'Pressione Enter para fechar…' _"
+    if sys.platform == "darwin":
+        subprocess.Popen(["osascript", "-e", f'tell application "Terminal" to do script {json.dumps(script)}'])
+        return
+    for program, flags in TERMINALS:
+        if shutil.which(program):
+            subprocess.Popen([program, *flags, "bash", "-c", script], start_new_session=True)
+            return
+    raise ProviderError(f"Nenhum terminal encontrado. Rode no seu terminal: {command}")
 
 
 def login(device_code: bool = False) -> None:
@@ -83,7 +106,10 @@ def logout() -> str:
 
 
 def install() -> None:
-    """Abre o PowerShell rodando o instalador oficial — só quando o usuário clica em Instalar."""
+    """Abre um terminal rodando o instalador oficial — só quando o usuário clica em Instalar."""
+    if os.name != "nt":
+        _unix_terminal(INSTALL_COMMAND_UNIX)
+        return
     subprocess.Popen(["cmd.exe", "/c", "start", "Instalar Grok CLI", "powershell", "-NoExit", "-NoProfile",
                       "-ExecutionPolicy", "Bypass", "-Command", INSTALL_COMMAND])
 

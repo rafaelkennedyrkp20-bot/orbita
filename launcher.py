@@ -24,8 +24,11 @@ def _print(message: str) -> None:
     print(f"[Órbita] {message}", flush=True)
 
 
+IS_WINDOWS = os.name == "nt"
+
+
 def _venv_python() -> Path:
-    return VENV_DIR / "Scripts" / "python.exe"
+    return VENV_DIR / "Scripts" / "python.exe" if IS_WINDOWS else VENV_DIR / "bin" / "python"
 
 
 def _requirements_hash() -> str:
@@ -37,7 +40,13 @@ def ensure_environment() -> Path:
     python = _venv_python()
     if not python.is_file():
         _print("Criando ambiente isolado (apenas no primeiro uso)...")
-        subprocess.check_call([sys.executable, "-m", "venv", str(VENV_DIR)])
+        try:
+            subprocess.check_call([sys.executable, "-m", "venv", str(VENV_DIR)])
+        except subprocess.CalledProcessError:
+            if not IS_WINDOWS:   # Debian/Ubuntu separam o venv do Python
+                _print("Não consegui criar o ambiente. No Debian/Ubuntu instale: sudo apt install python3-venv")
+                shutil.rmtree(VENV_DIR, ignore_errors=True)
+            raise
 
     current_hash = _requirements_hash()
     installed_hash = REQUIREMENTS_STAMP.read_text(encoding="ascii").strip() if REQUIREMENTS_STAMP.exists() else ""
@@ -54,7 +63,7 @@ def ensure_environment() -> Path:
 def _ollama_executable() -> str | None:
     candidates = (
         shutil.which("ollama"),
-        PROJECT_ROOT / "models" / "llm" / "ollama" / "ollama.exe",
+        PROJECT_ROOT / "models" / "llm" / "ollama" / ("ollama.exe" if IS_WINDOWS else "ollama"),
         Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe",
         Path(r"C:\Program Files\Ollama\ollama.exe"),
     )
@@ -79,7 +88,8 @@ def ensure_ollama() -> None:
 
     executable = _ollama_executable()
     if not executable:
-        raise RuntimeError("Ollama não foi encontrado. Verifique models\\llm\\ollama ou instale o Ollama.")
+        raise RuntimeError("Ollama não foi encontrado. Instale em https://ollama.com (ou coloque-o em "
+                           f"{Path('models', 'llm', 'ollama')}).")
 
     _print("Iniciando servidor Ollama local...")
     subprocess.Popen(
@@ -96,10 +106,31 @@ def ensure_ollama() -> None:
     raise RuntimeError("Ollama não respondeu a tempo. Execute o arquivo de verificação para detalhes.")
 
 
+def _linux_shortcut(only_if_missing: bool) -> int:
+    """Atalho no menu de aplicativos (padrão freedesktop): ~/.local/share/applications/orbita.desktop."""
+    data_home = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    target = data_home / "applications" / "orbita.desktop"
+    if only_if_missing and target.exists():
+        return 0
+    python = _venv_python()
+    if not python.is_file():
+        return 0
+    target.parent.mkdir(parents=True, exist_ok=True)
+    quote = lambda p: '"' + str(p).replace('"', '\\"') + '"'   # noqa: E731
+    target.write_text(
+        "[Desktop Entry]\nType=Application\nName=Órbita\nComment=Seu agente pessoal de IA\n"
+        f"Exec={quote(python)} {quote(PROJECT_ROOT / 'launcher.py')} --no-console\n"
+        f"Path={PROJECT_ROOT}\nIcon={PROJECT_ROOT / 'agent' / 'ui' / 'web' / 'logo.svg'}\n"
+        "Terminal=false\nCategories=Utility;\nStartupWMClass=Órbita\n", encoding="utf-8")
+    target.chmod(0o755)
+    _print(f"Atalho criado no menu de aplicativos ({target}).")
+    return 0
+
+
 def create_shortcuts(only_if_missing: bool = False) -> int:
     """Atalhos com o ícone do app (Área de Trabalho e Menu Iniciar) que abrem sem console."""
-    if os.name != "nt":
-        return 0
+    if not IS_WINDOWS:
+        return _linux_shortcut(only_if_missing) if sys.platform.startswith("linux") else 0
     windowed = VENV_DIR / "Scripts" / "pythonw.exe"
     icon = PROJECT_ROOT / "agent" / "ui" / "web" / "app.ico"
     targets = [Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop" / "Órbita.lnk",
@@ -150,6 +181,10 @@ def main() -> int:
             windowed = python.with_name("pythonw.exe")
             if windowed.is_file() and (sys.stdout is None or args.no_console):
                 subprocess.Popen([str(windowed), str(PROJECT_ROOT / "agent" / "main.py"), mode], cwd=str(PROJECT_ROOT))
+                return 0
+            if not IS_WINDOWS and args.no_console:   # atalho do menu: a janela segue sozinha
+                subprocess.Popen([str(python), str(PROJECT_ROOT / "agent" / "main.py"), mode], cwd=str(PROJECT_ROOT),
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
                 return 0
         return subprocess.call([str(python), str(PROJECT_ROOT / "agent" / "main.py"), mode], cwd=str(PROJECT_ROOT))
     except subprocess.CalledProcessError as error:

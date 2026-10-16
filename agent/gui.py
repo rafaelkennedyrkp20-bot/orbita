@@ -655,8 +655,14 @@ class Api(QObject):
 
     @pyqtSlot(str)
     def revealPath(self, path: str) -> None:
-        if os.path.exists(path):
+        if not os.path.exists(path):
+            return
+        if os.name == "nt":
             subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", path])
+        else:   # Linux: abre a pasta que contém o arquivo no gerenciador padrão
+            QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(os.path.abspath(path))))
 
     @pyqtSlot(str)
     def openUrl(self, url: str) -> None:

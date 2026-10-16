@@ -1,3 +1,5 @@
+import os
+
 from agent.core.tools import Tool, ToolContext, ToolRegistry, ToolResult
 
 
@@ -43,7 +45,8 @@ def test_grep_finds_lines(brain, tmp_path):
 
 
 def test_shell_runs_and_strips_ansi(brain, tmp_path):
-    result = run(brain, "run_shell", {"command": "Write-Output 'olá mundo'"}, tmp_path)
+    command = "Write-Output 'olá mundo'" if os.name == "nt" else r"printf '\033[32molá mundo\033[0m\n'"
+    result = run(brain, "run_shell", {"command": command}, tmp_path)
     assert not result.is_error and "olá mundo" in result.text and "\x1b[" not in result.text
 
 
@@ -79,7 +82,8 @@ def test_memory_tools(brain, tmp_path):
 
 
 def test_shell_quoted_executable_path(brain, tmp_path):
-    result = run(brain, "run_shell", {"command": r'"C:\Windows\System32\whoami.exe"'}, tmp_path)
+    command = r'"C:\Windows\System32\whoami.exe"' if os.name == "nt" else '"/bin/echo" ok'
+    result = run(brain, "run_shell", {"command": command}, tmp_path)
     assert not result.is_error, result.text
 
 

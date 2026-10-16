@@ -282,9 +282,9 @@ def _register_files(r: ToolRegistry) -> None:
 def _project_python(folder: Path) -> str:
     """Python do venv do próprio projeto (venv/.venv/env); senão, o do Órbita."""
     for name in ("venv", ".venv", "env"):
-        candidate = folder / name / "Scripts" / "python.exe"
-        if candidate.is_file():
-            return str(candidate)
+        for candidate in (folder / name / "Scripts" / "python.exe", folder / name / "bin" / "python"):
+            if candidate.is_file():
+                return str(candidate)
     return sys.executable
 
 
@@ -320,17 +320,47 @@ def _size(size: float) -> str:
 # Shell
 # ─────────────────────────────────────────────────────────────
 
+IS_WINDOWS = os.name == "nt"
+SHELL_HELP = (
+    "Run a command in PowerShell (NOT cmd: use Get-ChildItem, Select-String, etc.; chain with ';') on "
+    "this Windows PC and return output and exit code. Use for git, python, pip, npm, builds, tests and "
+    "system tasks. Non-interactive only." if IS_WINDOWS else
+    f"Run a command in bash on this {'macOS' if sys.platform == 'darwin' else 'Linux'} PC and return output "
+    "and exit code. Use for git, python, pip, npm, builds, tests and system tasks. Non-interactive only "
+    "(no sudo password prompts).")
+
+
 def _powershell() -> list[str]:
     exe = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
     return [exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"]
 
 
+def _shell_argv(command: str) -> list[str]:
+    """PowerShell no Windows; bash (ou sh) no Linux e no macOS."""
+    if IS_WINDOWS:
+        if command[:1] in ("'", '"'):
+            command = "& " + command  # PowerShell exige o operador & para executar um caminho entre aspas
+        return _powershell() + [
+            "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ProgressPreference='SilentlyContinue'; "
+            "if ($PSStyle) { $PSStyle.OutputRendering='PlainText' }; " + command]
+    return [shutil.which("bash") or "/bin/sh", "-c", command]
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    if not IS_WINDOWS:
+        import signal
+
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)   # o comando e tudo que ele abriu
+            return
+        except OSError:
+            pass
+    proc.kill()
+
+
 def _register_shell(r: ToolRegistry) -> None:
 
-    @tool(r, "run_shell",
-          "Run a command in PowerShell (NOT cmd: use Get-ChildItem, Select-String, etc.; chain with ';') on "
-          "this Windows PC and return output and exit code. Use for git, python, pip, npm, builds, tests and "
-          "system tasks. Non-interactive only.",
+    @tool(r, "run_shell", SHELL_HELP,
           {"command": {"type": "string"},
            "cwd": {"type": "string", "description": "Working directory. Default: workspace"},
            "timeout": {"type": "integer", "description": "Seconds (default 120, max 900)"}},
@@ -340,14 +370,10 @@ def _register_shell(r: ToolRegistry) -> None:
         if not cwd.is_dir():
             return ToolResult.error(f"Pasta de trabalho inexistente: {cwd}")
         timeout = max(5, min(int(args.get("timeout") or 120), 900))
-        command = args["command"].strip()
-        if command[:1] in ("'", '"'):
-            command = "& " + command  # PowerShell exige o operador & para executar um caminho entre aspas
-        script = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ProgressPreference='SilentlyContinue'; "
-                  "if ($PSStyle) { $PSStyle.OutputRendering='PlainText' }; " + command)
         proc = subprocess.Popen(
-            _powershell() + [script], cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            _shell_argv(args["command"].strip()), cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            start_new_session=not IS_WINDOWS,
         )
         deadline = time.monotonic() + timeout
         output = b""
@@ -357,7 +383,7 @@ def _register_shell(r: ToolRegistry) -> None:
                 break
             except subprocess.TimeoutExpired:
                 if (ctx.cancel and ctx.cancel.is_set()) or time.monotonic() > deadline:
-                    proc.kill()
+                    _kill_tree(proc)
                     output, _ = proc.communicate()
                     reason = "cancelado" if ctx.cancel and ctx.cancel.is_set() else f"tempo esgotado ({timeout}s)"
                     return ToolResult.error(f"Comando {reason}.\n{output.decode('utf-8', 'replace')[-8000:]}")

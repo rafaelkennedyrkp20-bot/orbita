@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE">GPL-3.0</a> · Windows · Python 3.10+ · só código-fonte
+  <a href="LICENSE">GPL-3.0</a> · Windows e Linux · Python 3.10+ · só código-fonte
 </p>
 
 <p align="center">
@@ -37,6 +37,26 @@ Iniciar_Orbita.bat
 Verificar a instalação: `Verificar_Orbita.bat` · Modo terminal: `venv\Scripts\python agent\main.py --text` · Recriar atalhos: `py -3.10 launcher.py --shortcut`
 
 O repositório é só o código. Modelos, o ambiente Python (`venv`), chaves, conversas e memória **não vêm junto** — o iniciador prepara o que falta na primeira abertura, e o que é seu fica neste computador.
+
+### Linux
+
+```bash
+# Debian/Ubuntu (Fedora: sudo dnf install python3 git portaudio · Arch: sudo pacman -S python git portaudio)
+sudo apt install python3 python3-venv git libportaudio2 xdg-utils
+git clone https://github.com/rafaelkennedyrkp20-bot/orbita.git
+cd orbita
+./iniciar_orbita.sh
+```
+
+Na primeira vez, o script cria o ambiente, instala as dependências e coloca **Órbita** no menu de aplicativos.
+Depois, abra o programa por lá. Verificar a instalação: `./iniciar_orbita.sh --check` · modo terminal:
+`venv/bin/python agent/main.py --text`.
+
+No Linux, a ferramenta de terminal do agente usa **bash** em vez do PowerShell, e os programas são abertos pelo menu
+de aplicativos (arquivos `.desktop`) ou pelo `xdg-open`. O volume é controlado pelo `pactl` (PipeWire/PulseAudio) ou
+pelo `amixer`. Mouse, teclado e captura de tela precisam de uma sessão gráfica X11 ou XWayland. Em Wayland puro,
+essas três ferramentas avisam que não estão disponíveis, e o resto funciona normalmente. A voz em pt-BR que lê as
+respostas precisa do Kokoro (`python setup_voz.py`); sem ele, é usado o `espeak` do sistema, se estiver instalado.
 
 ## A interface
 

@@ -39,6 +39,9 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   acontece com os arquivos. Atualizar agora fecha, atualiza e reabre sozinho. Conversas, configurações, chaves,
   memória, modelos e o ambiente Python nunca são tocados. O que é substituído ou removido ganha cópia de segurança.
   Pode ser desligado em Configurações › Sobre.
+- **Linux**: o Órbita roda no Linux com `./iniciar_orbita.sh` (cria o ambiente e o atalho no menu de aplicativos). O
+  terminal do agente usa bash, os programas abrem pelo menu do sistema, o volume usa PipeWire/PulseAudio e o agente
+  sabe em que sistema está.
 - **Partida e respostas mais rápidas**: bibliotecas pesadas (`httpx`, `asyncio`, geração de imagens) só são carregadas
   quando usadas, conexões HTTP são reaproveitadas e o roteamento/histórico usa cache em memória (inicialização ~40%
   mais rápida, tempo até o 1º token do motor de 854 ms para 28 ms e montagem por turno de 116 ms para 6 ms).

@@ -199,6 +199,8 @@ class MCPHub:
         """Copia servidores MCP já configurados em Claude Desktop, Claude Code e Cursor."""
         sources = [
             Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json",
+            Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "Claude" / "claude_desktop_config.json",
+            Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
             Path.home() / ".claude.json",
             Path.home() / ".cursor" / "mcp.json",
         ]

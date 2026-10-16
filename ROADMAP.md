@@ -144,6 +144,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] `.gitignore` para publicar sem modelos, chaves ou dados pessoais
 - [x] Licença **GNU GPL v3** (`LICENSE`, aviso no README e em Configurações › Sobre) — melhorias distribuídas continuam abertas
 - [x] Publicado no GitHub (rafaelkennedyrkp20-bot/orbita), só código-fonte
+- [x] Roda no Linux: `iniciar_orbita.sh`, atalho `.desktop`, shell bash no `run_shell` (mata o grupo de processos no timeout), abrir programas por `.desktop`/`xdg-open`, volume por `pactl`/`amixer`, controle de tela sem derrubar o resto quando não há sessão gráfica, login/instalação do Grok em terminal do sistema, prompt com o SO real; testado em contêiner Debian + Python 3.12
 - [x] Aviso de atualização e atualização com um clique usando o GitHub como âncora: git (`pull --ff-only`, recusa com alteração local) ou ZIP (substitui só o programa, cópia de segurança, manifesto para remoções); dados nunca tocados (`agent/core/updater.py`)
 - [x] Versionamento SemVer alfa (`agent/__init__.py`, `CHANGELOG.md`, regras no AGENTS.md); versão atual 0.1.0-alpha
 - [x] Prompt padrão para evoluir o projeto com qualquer IA (`docs/PROMPT_EVOLUCAO.md`)
@@ -239,4 +240,12 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   (c) custo por turno (`system_prompt` + `routing` + `conversations` + `memória`): `116,42 ms → 5,97 ms` (`-94,9%`;
   `system_prompt` `53,03 ms → 2,69 ms`, `routing` `57,09 ms → 1,21 ms`, `conversations` `7,70 ms → 2,14 ms`).
   Verificado: pyflakes 0 avisos; pytest 96 passando.
-
+- **2026-10-16 — Claude Opus 5.5**: revisão do trabalho de velocidade do Argon (c8592bd): caches invalidados nas
+  escritas, cliente HTTP compartilhado thread-safe e fechado no `finally`, ajuste do `platform` só no Windows — aceito
+  sem mudanças. Portabilidade para Linux: `iniciar_orbita.sh` + `.gitattributes` (LF), launcher com `venv/bin/python`,
+  aviso de `python3-venv` e atalho `.desktop`; `run_shell` em bash com descrição própria; `BASE_PROMPT` com o SO e o
+  terminal reais (sem `platform.system()` na importação); `open_apps` por `.desktop`/`xdg-open`; volume por
+  `pactl`/`amixer`; `pyautogui` sob demanda; disco `/`; Grok CLI com `install.sh` oficial num terminal do sistema;
+  "Mostrar na pasta", atualizador e config do Claude Desktop nos caminhos do Linux. Verificado: Windows — pyflakes 0,
+  pytest 99 + 2 pulados (só Linux); Linux (Docker, Debian, Python 3.12) — pyflakes 0, pytest 101 passando, janela real
+  em Xvfb com captura (interface completa, shell = /usr/bin/bash) e `./iniciar_orbita.sh --check` do zero.

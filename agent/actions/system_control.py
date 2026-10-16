@@ -9,18 +9,41 @@ import time
 from datetime import datetime
 from typing import Optional, Tuple
 
-import pyautogui
 import psutil
 
 from agent.core.config import DATA_DIR
 
 logger = logging.getLogger(__name__)
+_pyautogui = None
 
-# Configurações de segurança do pyautogui
-pyautogui.PAUSE = 0.1         # Pausa entre ações (evita erros)
-pyautogui.FAILSAFE = True     # Mover mouse para canto superior esquerdo = para tudo
+
+def _gui():
+    """pyautogui sob demanda: sem tela gráfica (servidor, SSH) o resto do módulo continua funcionando."""
+    global _pyautogui
+    if _pyautogui is None:
+        try:
+            import pyautogui
+        except Exception as error:   # Linux sem DISPLAY, Wayland puro sem XWayland...
+            raise RuntimeError(f"controle de tela indisponível neste sistema ({error}). No Linux é preciso uma "
+                               "sessão gráfica X11 ou XWayland.") from error
+        pyautogui.PAUSE = 0.1         # Pausa entre ações (evita erros)
+        pyautogui.FAILSAFE = True     # Mover mouse para canto superior esquerdo = para tudo
+        _pyautogui = pyautogui
+    return _pyautogui
 
 SCREENSHOTS_DIR = DATA_DIR / "screenshots"
+
+
+def _linux_audio(pactl: list[str], amixer: list[str], done: str) -> str:
+    import shutil
+    import subprocess
+
+    for argv in (pactl, amixer):
+        if shutil.which(argv[0]):
+            result = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                return done
+    return "Não consegui mudar o áudio: instale pactl (PipeWire/PulseAudio) ou amixer (alsa-utils)."
 
 
 class SystemControl:
@@ -54,7 +77,7 @@ class SystemControl:
 
             path = SCREENSHOTS_DIR / f"{filename}.png"
 
-            img = pyautogui.screenshot(region=region)
+            img = _gui().screenshot(region=region)
             img.save(str(path))
 
             logger.info(f"Screenshot salvo: {path}")
@@ -80,7 +103,7 @@ class SystemControl:
             Confirmação da ação.
         """
         try:
-            pyautogui.click(x, y, button=button, clicks=clicks)
+            _gui().click(x, y, button=button, clicks=clicks)
             logger.debug(f"Clique em ({x}, {y}) [{button}]")
             return f"Clique em ({x}, {y}) realizado."
         except Exception as e:
@@ -99,7 +122,7 @@ class SystemControl:
             Confirmação da ação.
         """
         try:
-            pyautogui.moveTo(x, y, duration=duration)
+            _gui().moveTo(x, y, duration=duration)
             return f"Mouse movido para ({x}, {y})."
         except Exception as e:
             return f"Erro ao mover mouse: {e}"
@@ -117,9 +140,9 @@ class SystemControl:
         """
         try:
             if x and y:
-                pyautogui.scroll(amount, x=x, y=y)
+                _gui().scroll(amount, x=x, y=y)
             else:
-                pyautogui.scroll(amount)
+                _gui().scroll(amount)
             direction = "cima" if amount > 0 else "baixo"
             return f"Scroll {direction} ({abs(amount)} unidades)."
         except Exception as e:
@@ -127,7 +150,7 @@ class SystemControl:
 
     def get_mouse_position(self) -> Tuple[int, int]:
         """Retorna a posição atual do mouse."""
-        return pyautogui.position()
+        return _gui().position()
 
     # ─────────────────────────────────────────────
     # Teclado
@@ -146,7 +169,7 @@ class SystemControl:
         """
         try:
             if text.isascii() and "\n" not in text:
-                pyautogui.typewrite(text, interval=interval)
+                _gui().typewrite(text, interval=interval)
             else:
                 # pyautogui não digita acentos/emoji: cola via área de transferência
                 # e restaura o conteúdo anterior.
@@ -154,7 +177,7 @@ class SystemControl:
 
                 previous = pyperclip.paste()
                 pyperclip.copy(text)
-                pyautogui.hotkey("ctrl", "v")
+                _gui().hotkey("ctrl", "v")
                 time.sleep(0.15)
                 pyperclip.copy(previous)
             logger.debug(f"Texto digitado: '{text[:30]}'")
@@ -176,9 +199,9 @@ class SystemControl:
         try:
             if "+" in key:
                 keys = [k.strip() for k in key.split("+")]
-                pyautogui.hotkey(*keys)
+                _gui().hotkey(*keys)
             else:
-                pyautogui.press(key)
+                _gui().press(key)
             return f"Tecla pressionada: {key}"
         except Exception as e:
             return f"Erro ao pressionar tecla '{key}': {e}"
@@ -194,7 +217,7 @@ class SystemControl:
             Confirmação da ação.
         """
         try:
-            pyautogui.hotkey(*keys)
+            _gui().hotkey(*keys)
             combo = "+".join(keys)
             return f"Atalho executado: {combo}"
         except Exception as e:
@@ -214,7 +237,7 @@ class SystemControl:
         try:
             cpu = psutil.cpu_percent(interval=1)
             ram = psutil.virtual_memory()
-            disk = psutil.disk_usage(os.environ.get("SystemDrive", "C:") + "\\")
+            disk = psutil.disk_usage(os.environ.get("SystemDrive", "C:") + "\\" if os.name == "nt" else "/")
             battery = psutil.sensors_battery()
 
             lines = [
@@ -235,7 +258,7 @@ class SystemControl:
 
     def get_screen_size(self) -> Tuple[int, int]:
         """Retorna a resolução da tela principal."""
-        return pyautogui.size()
+        return _gui().size()
 
     # ─────────────────────────────────────────────
     # Volume
@@ -243,7 +266,7 @@ class SystemControl:
 
     def set_volume(self, level: int) -> str:
         """
-        Ajusta o volume do sistema (Windows).
+        Ajusta o volume do sistema (Windows: API de áudio; Linux: PipeWire/PulseAudio ou ALSA).
 
         Args:
             level: Nível de 0 a 100.
@@ -251,6 +274,10 @@ class SystemControl:
         Returns:
             Confirmação da ação.
         """
+        if os.name != "nt":
+            return _linux_audio(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{max(0, min(100, level))}%"],
+                                ["amixer", "-q", "sset", "Master", f"{max(0, min(100, level))}%"],
+                                f"Volume ajustado para {max(0, min(100, level))}%.")
         try:
             from ctypes import cast, POINTER
             from comtypes import CLSCTX_ALL
@@ -274,9 +301,9 @@ class SystemControl:
             # Fallback via teclas de mídia
             times = level // 2
             for _ in range(50):
-                pyautogui.press("volumedown")
+                _gui().press("volumedown")
             for _ in range(times):
-                pyautogui.press("volumeup")
+                _gui().press("volumeup")
             return f"Volume ajustado (aproximado) para {level}%."
         except Exception as e:
             logger.error(f"Erro ao ajustar volume: {e}")
@@ -284,8 +311,11 @@ class SystemControl:
 
     def mute_toggle(self) -> str:
         """Alterna mudo/unmuted."""
+        if os.name != "nt":
+            return _linux_audio(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"],
+                                ["amixer", "-q", "sset", "Master", "toggle"], "Áudio alternado (mudo/normal).")
         try:
-            pyautogui.press("volumemute")
+            _gui().press("volumemute")
             return "Áudio alternado (mudo/normal)."
         except Exception as e:
             return f"Erro ao alternar mudo: {e}"

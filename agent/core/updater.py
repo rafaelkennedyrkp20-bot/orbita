@@ -355,11 +355,11 @@ def _wait_pid(pid: int, timeout: float = 60) -> None:
 
 
 def relaunch(root: Path = ROOT) -> None:
-    python = root / "venv" / "Scripts" / ("pythonw.exe" if os.name == "nt" else "python")
+    python = (root / "venv" / "Scripts" / "pythonw.exe") if os.name == "nt" else (root / "venv" / "bin" / "python")
     if not python.is_file():
         python = Path(sys.executable)
     subprocess.Popen([str(python), str(root / "launcher.py"), "--no-console"], cwd=str(root),
-                     creationflags=_NO_WINDOW)
+                     creationflags=_NO_WINDOW, start_new_session=os.name != "nt")
 
 
 def start_detached(sha: str, root: Path = ROOT) -> None:
@@ -368,7 +368,8 @@ def start_detached(sha: str, root: Path = ROOT) -> None:
     windowed = python.with_name("pythonw.exe")
     subprocess.Popen([str(windowed if windowed.is_file() else python), "-m", "agent.core.updater", "apply",
                       "--pid", str(os.getpid()), "--sha", sha, "--restart"], cwd=str(root),
-                     creationflags=_NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0))
+                     creationflags=_NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0),
+                     start_new_session=os.name != "nt")   # no Linux sobrevive ao fechamento da janela
 
 
 def main(argv: Optional[list[str]] = None) -> int:

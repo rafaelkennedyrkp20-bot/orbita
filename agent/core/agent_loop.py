@@ -17,8 +17,10 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 import platform
 import re
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -46,9 +48,12 @@ continuar o trabalho sem o histórico original. Preserve: objetivo do usuário, 
 arquivos/caminhos/comandos relevantes e seus resultados, erros encontrados e o que ficou pendente. \
 Não invente nada. Use tópicos curtos, no máximo cerca de 400 palavras."""
 
-BASE_PROMPT = """Você é o Órbita, o agente pessoal de IA do usuário: um agente autônomo rodando no computador Windows do usuário, \
-com acesso real a arquivos, terminal (PowerShell), internet, programas instalados, servidores MCP, skills \
-e a uma equipe de outros agentes. Responda sempre em português do Brasil, de forma direta.
+_OS_NAME = "Windows" if os.name == "nt" else ("macOS" if sys.platform == "darwin" else "Linux")
+_SHELL_NAME = "PowerShell" if _OS_NAME == "Windows" else "bash"
+
+BASE_PROMPT = f"""Você é o Órbita, o agente pessoal de IA do usuário: um agente autônomo rodando no computador {_OS_NAME} do usuário, \
+com acesso real a arquivos, terminal ({_SHELL_NAME}), internet, programas instalados, servidores MCP, skills \
+e a uma equipe de outros agentes. Responda sempre em português do Brasil, de forma direta.""" + """
 
 ## Ciclo de Execução (Understand → Plan → Execute → Verify)
 - **Aja de verdade**: quando o pedido envolver fazer algo, use as ferramentas — não apenas explique.
