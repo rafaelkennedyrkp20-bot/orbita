@@ -28,9 +28,9 @@ from agent.core.config import DATA_DIR
 logger = logging.getLogger(__name__)
 
 CATALOG_FILE = DATA_DIR / "model_catalog.json"
-SPECIALTIES = ["codigo", "revisao", "pesquisa", "raciocinio", "visao", "imagem", "geral"]
+SPECIALTIES = ["codigo", "revisao", "pesquisa", "raciocinio", "visao", "imagem", "video", "geral"]
 SPECIALTY_LABELS = {"codigo": "código", "revisao": "revisão", "pesquisa": "pesquisa", "raciocinio": "raciocínio",
-                    "visao": "visão", "imagem": "imagem", "geral": "geral"}
+                    "visao": "visão", "imagem": "imagem", "video": "vídeo", "geral": "geral"}
 COST_WEIGHT = {"maximo": 1.2, "equilibrado": 0.5, "livre": 0.1}
 
 # Perfis da equipe → especialidade usada quando o perfil não fixa um modelo.
@@ -39,12 +39,14 @@ PROFILE_SPECIALTY = {"programador": "codigo", "lider_dev": "codigo", "revisor": 
                      "automacao_pc": "visao", "grok_build": "codigo"}
 TAG_SPECIALTY = {"código": "codigo", "codigo": "codigo", "testes": "codigo", "revisão": "revisao",
                  "segurança": "revisao", "pesquisa": "pesquisa", "documentação": "pesquisa",
-                 "raciocínio": "raciocinio", "matemática": "raciocinio", "visão": "visao", "imagem": "imagem"}
+                 "raciocínio": "raciocinio", "matemática": "raciocinio", "visão": "visao",
+                 "imagem": "imagem", "vídeo": "video", "video": "video"}
 
 DEFAULT_CATALOG: list[dict] = [
     # Modelos de imagem (não são de chat): usados pela ferramenta generate_image
     {"ref": "openai:gpt-image-1", "imagem": 3, "cost": 2, "only": "imagem"},
     {"ref": "openrouter:google/gemini-2.5-flash-image", "imagem": 3, "cost": 1, "only": "imagem"},
+    {"ref": "xai:grok-2-image", "imagem": 3, "cost": 1, "only": "imagem"},
     # Locais (custo zero; qualidade depende do tamanho)
     {"match": "ollama:*27b*", "codigo": 2, "revisao": 2, "pesquisa": 2, "raciocinio": 2, "geral": 2, "cost": 0},
     {"match": "ollama:*32b*", "codigo": 2, "revisao": 2, "pesquisa": 2, "raciocinio": 2, "geral": 2, "cost": 0},
@@ -131,7 +133,7 @@ def rank(specialty: str, refs: list[str], catalog: list[dict], mode: str = "equi
         entry = entry_for(ref, catalog)
         if entry.get("only") and entry["only"] != specialty:
             continue
-        quality = entry.get(specialty, 0 if specialty in ("imagem", "visao") else entry.get("geral", 1))
+        quality = entry.get(specialty, 0 if specialty in ("imagem", "visao", "video") else entry.get("geral", 1))
         if quality <= 0:
             continue
         score = quality - weight * entry.get("cost", 1) + (0.05 if ref == prefer else 0)

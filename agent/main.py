@@ -93,15 +93,18 @@ def run_health_check():
         elif cfg.get("api_key_env") and settings.has_credentials(name):
             print(f"✅ {cfg['label']}: chave {cfg['api_key_env']} configurada.")
 
-    # 2. faster-whisper
-    try:
-        import faster_whisper
-        print("✅ faster-whisper: instalado.")
-        checks.append(True)
-    except ImportError:
-        print("❌ faster-whisper: não instalado.")
-        print("   → pip install faster-whisper")
-        checks.append(False)
+    # 2. Pacotes opcionais (voz, atalhos, web)
+    import importlib.util
+
+    for mod_name, label, hint in (
+        ("faster_whisper", "faster-whisper", "pip install faster-whisper"),
+        ("keyboard", "keyboard", "pip install keyboard"),
+        ("ddgs", "ddgs (busca web)", "pip install ddgs"),
+        ("bs4", "BeautifulSoup (leitura web)", "pip install beautifulsoup4"),
+    ):
+        found = importlib.util.find_spec(mod_name) is not None
+        print(f"{'✅' if found else '❌'} {label}: {'instalado.' if found else 'não instalado. → ' + hint}")
+        checks.append(found)
 
     # 3. Silero VAD
     try:
@@ -124,35 +127,6 @@ def run_health_check():
         checks.append(True)
     except Exception as e:
         print(f"❌ sounddevice: erro ({e})")
-        checks.append(False)
-
-    # 5. keyboard
-    try:
-        import keyboard
-        print("✅ keyboard: instalado.")
-        checks.append(True)
-    except ImportError:
-        print("❌ keyboard: não instalado.")
-        print("   → pip install keyboard")
-        checks.append(False)
-
-    # 6. Busca web
-    try:
-        from ddgs import DDGS
-        print("✅ ddgs: busca web instalada.")
-        checks.append(True)
-    except ImportError:
-        print("❌ ddgs: busca web não instalada.")
-        print("   → pip install ddgs")
-        checks.append(False)
-
-    # 7. Leitura de páginas da web
-    try:
-        import bs4
-        print("✅ Leitura de páginas: BeautifulSoup instalado.")
-        checks.append(True)
-    except ImportError:
-        print("❌ Leitura de páginas: BeautifulSoup não instalado.")
         checks.append(False)
 
     # 8. pyautogui

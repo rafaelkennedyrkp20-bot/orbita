@@ -65,14 +65,19 @@ class MemoryManager:
                 logger.error(f"Erro ao carregar log de hoje: {e}")
                 self._session_log = []
 
+    @property
+    def _today_jsonl_file(self) -> Path:
+        """Caminho do arquivo de log append-only JSONL de hoje."""
+        return DAILY_LOGS_DIR / f"{self._today}.jsonl"
+
     def log_interaction(self, user_input: str, agent_response: str, intent: str = "chat"):
         """
-        Registra uma interação na sessão atual.
+        Registra uma interação na sessão atual e faz append atômico em JSONL.
 
         Args:
             user_input: Texto do usuário.
             agent_response: Resposta do agente.
-            intent: Intenção detectada.
+            intent: Intenção/modelo utilizado.
         """
         entry = {
             "timestamp": datetime.now().isoformat(),
@@ -85,6 +90,12 @@ class MemoryManager:
         # Compacta se exceder o limite
         if len(self._session_log) > DAILY_LOG_MAX_ENTRIES:
             self._session_log = self._session_log[-DAILY_LOG_MAX_ENTRIES:]
+
+        try:
+            with open(self._today_jsonl_file, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as error:
+            logger.debug("Falha no append JSONL: %s", error)
 
         logger.debug(f"Interação registrada. Total hoje: {len(self._session_log)}")
         if CHAT_AUTOSAVE_EVERY_INTERACTION:

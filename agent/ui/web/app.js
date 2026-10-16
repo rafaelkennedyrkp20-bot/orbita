@@ -153,6 +153,7 @@ function bindChrome() {
   title.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); title.blur(); } });
   title.addEventListener("blur", () => { if (S.conversation_id) call("renameConversation", S.conversation_id, title.textContent.trim()).then(refreshConvs); });
   $("#chip-profile").addEventListener("click", profileMenu);
+  $("#chip-project").addEventListener("click", () => projectDialog());
   $("#chip-model").addEventListener("click", () => { settingsSection = "modelos"; go("settings"); });
   $("#chip-perm").addEventListener("click", cyclePermission);
   $$(".tab").forEach(t => t.addEventListener("click", () => selectTab(t.dataset.tab)));
@@ -198,6 +199,9 @@ function renderTopbar() {
   const p = S.profile || {};
   $("#profile-ic").textContent = p.icon || "✨";
   $("#profile-name").textContent = p.name || "Perfil";
+  $("#project-name").textContent = S.workspace_set ? (S.workspace_name || "Projeto") : "Abrir projeto";
+  $("#chip-project").classList.toggle("need", !S.workspace_set);
+  $("#chip-project").title = S.workspace_set ? ("Projeto: " + (S.workspace || "")) : "Escolher ou criar a pasta do projeto";
   $("#model-name").textContent = S.model_label || "";
   const perm = S.settings.permission_mode;
   $("#perm-name").textContent = { perguntar: "Perguntar", auto: "Auto", livre: "Livre" }[perm] || perm;
@@ -293,10 +297,14 @@ function renderWelcome() {
     ["mouse", "Controlar o PC", "Tire um screenshot e me diga o que está aberto na tela."],
     ["layers", "Engenharia reversa", "Analise com o REA o executável "],
   ];
+  const project = S.workspace_set ? (S.workspace || "") : "";
   $("#messages").innerHTML = `<div class="welcome"><img class="orb" src="logo.svg" alt="">
     <h1>${name ? `Olá, <span>${esc(name)}</span>` : `<span>Órbita</span>`}</h1>
     <p>${esc(S.profile?.icon || "")} ${esc(S.profile?.name || "")} · ${esc(S.model_label || "")} — o que vamos fazer hoje?</p>
+    <div class="project-banner"><div class="txt"><b>${project ? "Projeto aberto" : "Nenhum projeto aberto"}</b><span>${project ? esc(project) : "Escolha ou crie a pasta em que o agente vai trabalhar."}</span></div><button class="btn primary" id="welcome-project">${icon("folder")} ${project ? "Trocar projeto" : "Abrir ou criar projeto"}</button></div>
     <div class="cards">${cards.map(([ic, t, p]) => `<div class="card" data-prompt="${esc(p)}"><div class="ci">${icon(ic)}</div><b>${t}</b><span>${esc(p.length > 70 ? p.slice(0, 70) + "…" : p)}</span></div>`).join("")}</div></div>`;
+  const openProject = $("#welcome-project");
+  if (openProject) openProject.addEventListener("click", () => projectDialog());
   $$(".card", $("#messages")).forEach(c => c.addEventListener("click", () => {
     const i = $("#input"); i.value = c.dataset.prompt; i.focus(); autosize();
     i.setSelectionRange(i.value.length, i.value.length);
@@ -500,6 +508,7 @@ function onEvent(e) {
     case "mcp": S.mcp = e.servers; $("#mcp-dot").classList.toggle("on", e.servers.some(s => s.status === "erro")); if ($("#page-connections").classList.contains("active")) renderConnections(); break;
     case "state": S = { ...S, ...e.state }; renderAll(); break;
     case "models": onModels(e); break;
+    case "probe": onProbe(e); break;
     case "pull": onPull(e); break;
   }
 }
@@ -570,6 +579,8 @@ function approval(e) {
 function palette(initial = "") {
   const cmds = [
     ["plus", "Nova conversa", () => action("new"), "Ctrl+N"],
+    ["folder", "Abrir ou criar projeto", () => projectDialog()],
+    ["globe", "Adicionar API manual", () => { settingsSection = "api"; go("settings"); }],
     ["settings", "Abrir configurações", () => go("settings"), "Ctrl+,"],
     ["cpu", "Trocar modelo", () => { settingsSection = "modelos"; go("settings"); }],
     ["users", "Equipe e perfis", () => go("team")],
@@ -639,7 +650,7 @@ function profileEditor(p) {
     <div class="row" style="margin-top:14px"><div style="flex:1"><b>Provedor</b><select class="inp" id="pe-prov">${providerOptions(p.provider, true)}</select></div>
       <div style="flex:1"><b>Modelo</b><input class="inp" id="pe-model" list="pe-models" value="${esc(p.model)}" placeholder="nome do modelo"><datalist id="pe-models"></datalist></div></div>
     <label class="row" style="margin-top:8px"><span class="toggle"><input type="checkbox" id="pe-bind" ${p.bound ? "checked" : ""}><span></span></span> Ativar este perfil quando eu escolher este modelo</label>
-    <div class="row" style="margin-top:12px"><div style="flex:2"><b>Pasta de trabalho</b><div class="row"><input class="inp" id="pe-ws" style="flex:1" value="${esc(p.workspace)}" placeholder="vazio = sua pasta de usuário"><button class="btn small" id="pe-pick">${icon("folder")}</button></div></div>
+    <div class="row" style="margin-top:12px"><div style="flex:2"><b>Pasta deste perfil</b><div class="row"><input class="inp" id="pe-ws" style="flex:1" value="${esc(p.workspace)}" placeholder="vazio = usar o projeto aberto na tela"><button class="btn small" id="pe-pick">${icon("folder")}</button></div></div>
       <div style="flex:1"><b>Temperatura</b><input class="inp" id="pe-temp" type="number" step="0.1" min="0" max="2" value="${p.temperature ?? ""}" placeholder="padrão"></div>
       <div style="flex:1"><b>Máx. passos</b><input class="inp" id="pe-steps" type="number" min="1" max="200" value="${p.max_steps ?? ""}" placeholder="padrão"></div></div>
     <div style="margin-top:12px"><b>Ferramentas liberadas</b><div class="row" style="margin-top:6px">${S.all_groups.map(g => `<label class="row" style="gap:6px;margin-right:10px"><input type="checkbox" class="pe-g" value="${g}" ${p.tool_groups.includes(g) ? "checked" : ""}> ${groupLabels[g] || g}</label>`).join("")}</div></div>
@@ -685,7 +696,7 @@ function renderConnections() {
 
 // ── Página: Configurações ──────────────────────────────────────────────────────
 const SECTIONS = [
-  ["geral", "user", "Geral"], ["modelos", "cpu", "Modelos"], ["chaves", "key", "Chaves de API"], ["grok", "bolt", "Conta Grok"],
+  ["geral", "user", "Geral"], ["modelos", "cpu", "Modelos"], ["api", "globe", "API manual"], ["chaves", "key", "Chaves de API"], ["grok", "bolt", "Conta Grok"],
   ["economia", "coins", "Economia de tokens"], ["permissoes", "shield", "Permissões"], ["voz", "wave", "Voz"], ["sobre", "info", "Sobre"],
 ];
 function renderSettings() {
@@ -700,7 +711,7 @@ function renderSettings() {
     case "geral":
       html = `<h1>Geral</h1><p class="lead">Quem você é e como o agente começa a trabalhar.</p><div class="group">
         ${field("Seu nome", "O agente usa para se dirigir a você.", `<input class="inp" data-text="user_name" value="${esc(st.user_name || "")}">`)}
-        ${field("Pasta de trabalho padrão", "Onde arquivos e comandos atuam quando o perfil não define outra.", `<div class="row"><input class="inp" style="flex:1" data-text="default_workspace" value="${esc(st.default_workspace || "")}"><button class="btn small" id="ws-pick">${icon("folder")}</button></div>`)}
+        ${field("Projeto aberto", esc(S.workspace_set ? S.workspace : "Nenhuma pasta escolhida. O agente usa a sua pasta de usuário."), `<button class="btn primary" id="open-project">${icon("folder")} Abrir ou criar</button>`)}
         ${field("Tema", "Aparência da janela.", seg("theme", [["dark", "Escuro"], ["light", "Claro"]], st.theme || "dark"))}
         ${field("Notificações do Windows", "Avisa no canto da tela quando uma tarefa termina e a janela não está em foco.", toggle("native_notifications", st.native_notifications !== false))}
         ${field("Mostrar raciocínio", "Exibe o pensamento de modelos que raciocinam (DeepSeek-R1, Qwen3…).", toggle("show_reasoning", st.show_reasoning))}
@@ -722,11 +733,25 @@ function renderSettings() {
         ${field("Modelo econômico", "Usado para resumos e quando o roteador não achar nada (provedor:modelo).", `<input class="inp" data-text="cheap_model" value="${esc(st.cheap_model || "")}" placeholder="ex.: deepseek:deepseek-chat">`)}
         ${field("Modelo de imagem", "Para gerar imagens; vazio = automático.", `<input class="inp" data-text="image_model" value="${esc(st.image_model || "")}" placeholder="ex.: openai:gpt-image-1">`)}
         ${field("Catálogo de capacidades", "Notas por especialidade e custo de cada modelo.", `<button class="btn small" id="cat-open">${icon("code")} Editar catálogo</button>`)}</div>
-        <div class="group"><h3>Adicionar provedor compatível com OpenAI</h3>
-        <div class="row" style="padding:10px 0"><input class="inp" id="np-id" style="width:120px" placeholder="id"><input class="inp" id="np-url" style="flex:1" placeholder="https://api.exemplo.com/v1"><input class="inp" id="np-env" style="width:190px" placeholder="VAR_DA_CHAVE"><input class="inp" id="np-models" style="width:200px" placeholder="modelos, separados por vírgula"><button class="btn" id="np-add">${icon("plus")}</button></div></div>`;
+        <div class="group"><h3>Outra API</h3>
+        <div class="row" style="padding:12px 0"><span style="color:var(--muted);flex:1">Together, Fireworks, Groq, um servidor seu ou LM Studio em outra porta.</span><button class="btn" id="goto-api">${icon("plus")} Adicionar API manual</button></div></div>`;
       break;
+    case "api": {
+      const custom = (S.providers || []).filter(p => !p.builtin);
+      html = `<h1>API manual</h1><p class="lead">Cole o endereço de qualquer API compatível com a OpenAI. A chave fica só no <code>.env</code> deste computador. Servidor local pode ficar sem chave.</p>
+        <div class="group">
+        ${field("Nome", "Como ela aparece na lista. Ex.: Together, Fireworks, meu servidor.", `<input class="inp" id="api-name" placeholder="Together">`)}
+        ${field("Endereço", "O link base. Quase sempre termina em /v1.", `<input class="inp" id="api-url" placeholder="https://api.together.xyz/v1" spellcheck="false">`)}
+        ${field("Chave", "Opcional. Não é enviada para lugar nenhum além dessa API.", `<input class="inp" id="api-key" type="password" placeholder="cole a chave, se a API pedir" autocomplete="off">`)}
+        ${field("Modelo", "O nome exato nessa API. Use Verificar para buscar a lista.", `<input class="inp" id="api-model" placeholder="ex.: meta-llama/Llama-3.3-70B-Instruct-Turbo" spellcheck="false">`)}
+        <div class="row" style="padding:12px 0"><button class="btn" id="api-probe">${icon("refresh")} Verificar modelos</button><button class="btn primary" id="api-save">${icon("check")} Salvar e usar</button></div>
+        <div class="status" id="probe-status"></div><div id="probe-models"></div></div>
+        <div class="group"><h3>APIs que você adicionou</h3>
+        ${custom.length ? custom.map(p => `<div class="api-row"><div class="who"><div class="nm">${esc(p.label)}</div><div class="sz">${esc(p.base_url || "")}${p.has_credentials ? "" : " · sem chave"}</div></div><button class="btn small" data-use-api="${esc(p.id)}">Usar</button><button class="btn small danger" data-drop-api="${esc(p.id)}">Remover</button></div>`).join("") : `<div class="empty">Nenhuma API extra ainda.</div>`}</div>`;
+      break;
+    }
     case "chaves":
-      html = `<h1>Chaves de API</h1><p class="lead">Ficam somente no arquivo <code>.env</code> deste computador. Deixe em branco para manter a atual.</p><div class="group">
+      html = `<h1>Chaves de API</h1><p class="lead">Ficam somente no arquivo <code>.env</code> deste computador. Deixe em branco para manter a atual. Para um serviço que não está na lista, use <b>API manual</b>.</p><div class="group">
         ${S.providers.filter(p => p.api_key_env).map(p => field(esc(p.label), p.has_credentials ? `<span style="color:var(--ok)">● configurada</span> · ${esc(p.api_key_env)}` : esc(p.api_key_env),
           `<div class="row"><input class="inp" type="password" style="flex:1" data-key="${esc(p.api_key_env)}" placeholder="${p.has_credentials ? "••••••••  (manter)" : "cole a chave"}"><button class="btn small" data-savekey="${esc(p.api_key_env)}">Salvar</button></div>`)).join("")}</div>`;
       break;
@@ -791,8 +816,10 @@ function bindSettings() {
     if (r && r.status) { S.grok = r.status; renderSettings(); }
   }));
   $$("[data-open]", body).forEach(b => b.addEventListener("click", () => call("openPath", b.dataset.open)));
-  const ws = $("#ws-pick"); if (ws) ws.onclick = async () => { const f = await call("pickFolder", S.settings.default_workspace || ""); if (f) setSetting("default_workspace", f).then(renderSettings); };
+  const openProject = $("#open-project"); if (openProject) openProject.onclick = () => projectDialog();
   const onb = $("#re-onb"); if (onb) onb.onclick = showOnboarding;
+  const gotoApi = $("#goto-api"); if (gotoApi) gotoApi.onclick = () => { settingsSection = "api"; renderSettings(); };
+  if (settingsSection === "api") bindManualApi();
   const cat = $("#cat-open"); if (cat) cat.onclick = () => call("openPath", "catalog");
   if (settingsSection === "modelos") bindModels();
 }
@@ -810,16 +837,129 @@ function bindModels() {
     if (p && !p.has_credentials) toast("warn", "Falta acesso", p.type === "grok_cli" ? "Entre na conta Grok em Configurações › Conta Grok." : `Configure ${p.api_key_env} em Chaves de API.`, 6000);
   };
   $("#pull-btn").onclick = () => { const n = $("#pull-name").value.trim(); if (n) { call("pullModel", n); toast("info", "Ollama", `Baixando ${n}…`); } };
-  $("#np-add").onclick = async () => {
-    const data = { id: $("#np-id").value.trim(), url: $("#np-url").value.trim(), env: $("#np-env").value.trim(), models: $("#np-models").value };
-    if (!data.id || !data.url) return toast("warn", "Provedor", "Informe id e URL.");
-    S = await call("addProvider", JSON.stringify(data)); renderSettings(); toast("success", "Provedor adicionado", data.id);
-  };
   call("localModels").then(list => {
     $("#local-models").innerHTML = (list && list.length) ? list.map(m => `<div class="model-row"><span class="nm">${esc(m.name)}</span><span class="sz">${esc(m.size)} · ${esc(m.params || "")}</span><button class="btn small" data-use-local="${esc(m.name)}">${S.provider === "ollama" && S.model === m.name ? "Em uso ✓" : "Usar"}</button></div>`).join("")
       : `<div class="empty">Ollama não está rodando ou não há modelos instalados.</div>`;
     $$("[data-use-local]").forEach(b => b.addEventListener("click", async () => { const r = await call("selectModel", "ollama", b.dataset.useLocal); S = r.state; renderAll(); renderSettings(); toast("success", "Modelo local ativo", b.dataset.useLocal); }));
   });
+}
+function bindManualApi() {
+  const body = $("#set-body");
+  $("#api-probe").onclick = () => {
+    const url = $("#api-url").value.trim();
+    if (!url) return toast("warn", "API", "Cole o endereço da API.");
+    $("#probe-status").textContent = "Verificando modelos…";
+    $("#probe-models").innerHTML = "";
+    call("probeProvider", JSON.stringify({ url, key: $("#api-key").value }));
+  };
+  $("#api-save").onclick = async () => {
+    const data = {
+      label: $("#api-name").value.trim(),
+      url: $("#api-url").value.trim(),
+      key: $("#api-key").value,
+      model: $("#api-model").value.trim(),
+      use: true,
+    };
+    if (!data.label || !data.url) return toast("warn", "API", "Informe o nome e o endereço.");
+    if (!data.model) return toast("warn", "API", "Informe o modelo, ou clique em Verificar modelos e escolha um.");
+    const res = await call("addProvider", JSON.stringify(data));
+    if (!res || res.error) return toast("error", "API", (res && res.error) || "Não deu para salvar.");
+    S = res.state;
+    renderAll();
+    renderSettings();
+    toast("success", "API pronta", `${data.label} · ${data.model}`);
+  };
+  $$("[data-use-api]", body).forEach(b => b.addEventListener("click", async () => {
+    const provider = S.providers.find(p => p.id === b.dataset.useApi);
+    const model = (provider?.models || [])[0];
+    if (!model) return toast("warn", "API", "Essa API não tem um modelo salvo. Adicione de novo informando o modelo.");
+    const res = await call("selectModel", provider.id, model);
+    S = res.state;
+    renderAll();
+    renderSettings();
+    toast("success", "Modelo ativo", S.model_label);
+  }));
+  $$("[data-drop-api]", body).forEach(b => b.addEventListener("click", async () => {
+    const provider = S.providers.find(p => p.id === b.dataset.dropApi);
+    if (!await confirmBox("Remover esta API?", provider ? provider.label : "Ela sai da lista. A chave continua no .env deste PC.")) return;
+    const res = await call("removeProvider", b.dataset.dropApi);
+    if (!res || res.error) return toast("error", "API", (res && res.error) || "Não deu para remover.");
+    S = res.state;
+    renderAll();
+    renderSettings();
+    toast("success", "API removida", provider ? provider.label : "");
+  }));
+}
+function onProbe(e) {
+  const status = $("#probe-status");
+  const list = $("#probe-models");
+  if (!status || !list) return;
+  if (!e.ok) {
+    status.textContent = e.error || "Não deu para verificar.";
+    return;
+  }
+  if (e.base_url && $("#api-url")) $("#api-url").value = e.base_url;
+  const shown = (e.models || []).slice(0, 80);
+  status.textContent = `${e.models.length} modelo(s) encontrado(s). Clique em um para usar.`;
+  list.innerHTML = shown.map(m => `<button type="button" class="btn small" data-pick-model="${esc(m)}">${esc(m)}</button>`).join("")
+    + (e.models.length > shown.length ? `<span class="status">e mais ${e.models.length - shown.length}. Digite o nome no campo Modelo.</span>` : "");
+  $$("[data-pick-model]", list).forEach(b => b.addEventListener("click", () => { $("#api-model").value = b.dataset.pickModel; }));
+}
+async function useProject(res) {
+  if (!res || res.error) {
+    toast("error", "Projeto", (res && res.error) || "Não deu para abrir essa pasta.");
+    return;
+  }
+  const fresh = $("#pj-fresh") ? $("#pj-fresh").checked : false;
+  S = res.state;
+  closeModal();
+  if (fresh) {
+    await call("newConversation");
+    resetChat();
+    go("chat");
+  } else {
+    renderAll();
+    if ($("#page-settings").classList.contains("active")) renderSettings();
+  }
+  toast("success", "Projeto aberto", S.workspace, 3200);
+}
+function projectDialog() {
+  const current = S.workspace || "";
+  const parent = current.replace(/[\\/][^\\/]+$/, "") || current;
+  openModal(`<div class="modal"><h2>Projeto</h2>
+    <p class="sub">O agente lê, cria e edita arquivos dentro desta pasta. Abra um projeto que já existe ou crie uma pasta nova.</p>
+    <div class="pathbox">${current && S.workspace_set ? esc(current) : "Nenhuma pasta escolhida. Hoje ele usa a sua pasta de usuário."}</div>
+    <div class="actions" style="justify-content:flex-start">
+      <button class="btn primary" id="pj-open">${icon("folder")} Abrir pasta</button>
+      <button class="btn" id="pj-new">${icon("plus")} Criar pasta nova</button>
+    </div>
+    <div id="pj-create" hidden>
+      <div class="stack">
+        <label for="pj-name">Nome do projeto</label>
+        <input class="inp" id="pj-name" placeholder="ex.: site-da-loja">
+        <label for="pj-parent">Criar dentro de</label>
+        <div class="row"><input class="inp" id="pj-parent" style="flex:1" value="${esc(parent)}"><button class="btn small" id="pj-parent-pick" title="Escolher pasta">${icon("folder")}</button></div>
+      </div>
+      <div class="actions" style="justify-content:flex-start"><button class="btn primary" id="pj-create-go">${icon("check")} Criar e abrir</button></div>
+    </div>
+    <label class="row" style="margin-top:14px"><span class="toggle"><input type="checkbox" id="pj-fresh" ${S.conversation_id ? "" : "checked"}><span></span></span> Começar uma conversa nova neste projeto</label>
+  </div>`, false);
+  $("#pj-open").onclick = async () => {
+    if (busy) return toast("warn", "Aguarde", "O agente ainda está trabalhando nesta conversa.");
+    const folder = await call("pickFolder", current);
+    if (folder) useProject(await call("setWorkspace", folder));
+  };
+  $("#pj-new").onclick = () => { $("#pj-create").hidden = false; $("#pj-fresh").checked = true; $("#pj-name").focus(); };
+  $("#pj-parent-pick").onclick = async () => {
+    const folder = await call("pickFolder", $("#pj-parent").value);
+    if (folder) $("#pj-parent").value = folder;
+  };
+  $("#pj-create-go").onclick = async () => {
+    if (busy) return toast("warn", "Aguarde", "O agente ainda está trabalhando nesta conversa.");
+    const name = $("#pj-name").value.trim();
+    if (!name) return toast("warn", "Projeto", "Dê um nome para a pasta.");
+    useProject(await call("createWorkspace", JSON.stringify({ parent: $("#pj-parent").value.trim(), name })));
+  };
 }
 function onModels(e) {
   const p = S.providers.find(x => x.id === e.provider); if (p && e.models.length) p.models = e.models;

@@ -64,3 +64,17 @@ def test_ollama_conversion_and_vision_hint():
 def test_tools_unsupported_detection():
     assert isinstance(_http_error(400, '{"error": "registry.ollama.ai/x does not support tools"}'), ToolsUnsupported)
     assert not isinstance(_http_error(400, '{"error": "bad request"}'), ToolsUnsupported)
+
+
+def test_openai_preserves_reasoning_content_on_tool_calls():
+    p = OpenAICompatProvider("deepseek", {"base_url": "https://api.deepseek.com/v1"})
+    messages = [
+        {"role": "user", "content": "analise"},
+        {"role": "assistant", "content": "", "reasoning": "passo 1: ler arquivo",
+         "tool_calls": [{"id": "c1", "name": "read_file", "arguments": {"path": "x.py"}}]},
+        {"role": "tool", "tool_call_id": "c1", "name": "read_file", "content": "print(1)"},
+    ]
+    out = p._convert("deepseek-reasoner", messages)
+    assert out[1]["reasoning_content"] == "passo 1: ler arquivo"
+    assert out[1]["tool_calls"][0]["function"]["name"] == "read_file"
+

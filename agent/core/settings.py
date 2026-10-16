@@ -11,7 +11,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
+import unicodedata
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -143,6 +145,42 @@ PERMISSION_MODES = {
     "livre": "Livre (a IA age sem pedir confirmação)",
 }
 
+_RESERVED_FOLDER_NAMES = (
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def resolve_workspace(profile_workspace: str, default_workspace: str, *, home: Path | None = None) -> Path:
+    """Pasta em que o agente trabalha: a do perfil, senão a do projeto, senão a pasta do usuário."""
+    fallback = home or Path.home()
+    chosen = (profile_workspace or default_workspace or "").strip()
+    if not chosen:
+        return fallback
+    try:
+        path = Path(chosen).expanduser()
+    except (OSError, RuntimeError, ValueError):
+        return fallback
+    return path if path.is_dir() else fallback
+
+
+def project_folder_name(name: str) -> str:
+    """Nome seguro para uma pasta nova de projeto no Windows."""
+    clean = (name or "").strip().rstrip(". ")
+    if not clean or re.search(r'[<>:"/\\|?*\x00-\x1f]', clean):
+        raise ValueError('Use um nome simples, sem \\ / : * ? " < > |')
+    if clean.split(".")[0].upper() in _RESERVED_FOLDER_NAMES:
+        raise ValueError("Esse nome é reservado pelo Windows. Escolha outro.")
+    if len(clean) > 80:
+        raise ValueError("O nome está longo demais.")
+    return clean
+
+
+def _provider_slug(label: str) -> str:
+    ascii_name = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "_", ascii_name.lower()).strip("_") or "api"
+
 
 class Settings:
     """Preferências persistidas em `data/settings.json` (thread-safe)."""
@@ -198,6 +236,59 @@ class Settings:
         if name not in providers:
             raise KeyError(f"Provedor desconhecido: {name}")
         return providers[name]
+
+    def add_custom_provider(self, *, label: str, base_url: str, api_key: str = "",
+                            models: list[str] | None = None) -> str:
+        """Registra uma API compatível com a OpenAI. A chave, se houver, vai para o .env."""
+        label = (label or "").strip()
+        base_url = (base_url or "").strip().rstrip("/")
+        if not label:
+            raise ValueError("Dê um nome para essa API.")
+        if not base_url.startswith(("http://", "https://")):
+            raise ValueError("O endereço precisa começar com http:// ou https://.")
+        provider_id = self._unique_provider_id(_provider_slug(label))
+        clean_models = []
+        for model in models or []:
+            text = str(model).strip()
+            if text and text not in clean_models:
+                clean_models.append(text)
+        entry: dict[str, Any] = {
+            "type": "openai",
+            "label": label,
+            "base_url": base_url,
+            "models": clean_models[:40],
+        }
+        key = (api_key or "").strip()
+        if key:
+            env = "ORBITA_" + re.sub(r"[^A-Z0-9]", "_", provider_id.upper()) + "_API_KEY"
+            entry["api_key_env"] = env
+            self.save_api_key(env, key)
+        stored = dict(self.get("providers") or {})
+        stored[provider_id] = entry
+        self.set("providers", stored)
+        return provider_id
+
+    def remove_custom_provider(self, provider_id: str) -> None:
+        if provider_id in DEFAULT_PROVIDERS:
+            raise ValueError("Esse provedor faz parte do Órbita e não pode ser removido.")
+        stored = dict(self.get("providers") or {})
+        if provider_id not in stored:
+            raise ValueError("API não encontrada.")
+        stored.pop(provider_id)
+        self.set("providers", stored, save=False)
+        if self.get("provider") == provider_id:
+            self.set("provider", "ollama", save=False)
+            self.set("model", "", save=False)
+        self.save()
+
+    def _unique_provider_id(self, base: str) -> str:
+        existing = set(self.providers())
+        candidate = base or "api"
+        number = 2
+        while candidate in existing:
+            candidate = f"{base}_{number}"
+            number += 1
+        return candidate
 
     @staticmethod
     def api_key(provider_cfg: dict[str, Any]) -> str:

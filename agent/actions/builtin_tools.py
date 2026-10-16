@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -214,6 +215,59 @@ def _register_files(r: ToolRegistry) -> None:
             return ToolResult.error(f"Arquivo não encontrado: {path}")
         ctx.emit("preview", {"path": str(path)})
         return f"Exibindo {path} no painel lateral."
+
+    @tool(r, "verify_project",
+          "Run deterministic quality gates (static lint via pyflakes and automated tests via pytest) "
+          "in the workspace and return a structured PASS/FAIL report. Call this after code edits.",
+          {"target": {"type": "string", "description": "Optional specific file/folder to lint (default: auto-detect)"},
+           "pytest_args": {"type": "string", "description": "Optional pytest filter, e.g. 'tests/test_tools.py -k edit'"},
+           "skip_tests": {"type": "boolean", "description": "If true, runs only fast static analysis"}},
+          group="arquivos")
+    def verify_project(args, ctx: ToolContext):
+        cwd = ctx.workspace
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        checks = []
+        failed = False
+
+        # 1) Lint estático (pyflakes)
+        lint_target = args.get("target")
+        if not lint_target:
+            lint_target = "agent" if (cwd / "agent").is_dir() else "."
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pyflakes", lint_target],
+                cwd=str(cwd), capture_output=True, text=True, timeout=45, creationflags=flags,
+            )
+            out = (proc.stdout + proc.stderr).strip()
+            if proc.returncode == 0:
+                checks.append(f"[PASS] pyflakes ({lint_target}): 0 erros")
+            else:
+                failed = True
+                checks.append(f"[FAIL] pyflakes ({lint_target}):\n{out[:2000]}")
+        except Exception as exc:
+            checks.append(f"[SKIP] pyflakes indisponível: {exc}")
+
+        # 2) Testes automatizados (pytest)
+        if not args.get("skip_tests") and ((cwd / "tests").is_dir() or args.get("pytest_args")):
+            extra = (args.get("pytest_args") or "tests").split()
+            try:
+                proc = subprocess.run(
+                    [sys.executable, "-m", "pytest", *extra, "-q", "--tb=short"],
+                    cwd=str(cwd), capture_output=True, text=True, timeout=120, creationflags=flags,
+                )
+                out = ANSI_RE.sub("", (proc.stdout + proc.stderr).strip())
+                if proc.returncode == 0:
+                    summary_line = out.splitlines()[-1] if out else "ok"
+                    checks.append(f"[PASS] pytest ({' '.join(extra)}): {summary_line}")
+                else:
+                    failed = True
+                    checks.append(f"[FAIL] pytest ({' '.join(extra)}):\n{out[-3000:]}")
+            except Exception as exc:
+                failed = True
+                checks.append(f"[FAIL] pytest erro: {exc}")
+
+        status = "FAIL" if failed else "PASS"
+        return ToolResult(text=f"Quality Gate: {status}\n" + "\n".join(checks), is_error=failed)
 
 
 def _walk_files(base: Path, pattern: str | None):
@@ -466,13 +520,21 @@ def _register_agents(r: ToolRegistry) -> None:
 
     @tool(r, "delegate_task",
           "Delegate work to sub-agents that run with their own fresh context and report back. Give each "
-          "task complete, self-contained instructions. Several tasks run in parallel. Optional per task: "
-          "profile (e.g. 'pesquisador', 'programador'), model ('provider:model') or specialty — without "
-          "model, the best available model for the specialty is chosen automatically.",
+          "task complete, self-contained instructions and structured contracts (files, acceptance_criteria, verify). "
+          "Several tasks run in parallel. Optional per task: profile (e.g. 'pesquisador', 'programador', 'revisor'), "
+          "model ('provider:model') or specialty — without model, the best available model is chosen automatically.",
           {"tasks": {"type": "array", "items": {"type": "object", "properties": {
-              "task": {"type": "string"}, "profile": {"type": "string"}, "model": {"type": "string"},
+              "task": {"type": "string", "description": "Clear objective and context for the sub-agent"},
+              "profile": {"type": "string"},
+              "model": {"type": "string"},
               "specialty": {"type": "string", "enum": ["codigo", "revisao", "pesquisa", "raciocinio",
-                                                       "visao", "imagem", "geral"]}},
+                                                       "visao", "imagem", "video", "geral"]},
+              "files": {"type": "array", "items": {"type": "string"},
+                        "description": "Target files the sub-agent should inspect or modify"},
+              "acceptance_criteria": {"type": "array", "items": {"type": "string"},
+                                      "description": "Verifiable conditions required for completion"},
+              "verify": {"type": "boolean",
+                         "description": "If true, runs verify_project automatically after the sub-agent finishes"}},
               "required": ["task"]}}},
           ["tasks"], group="agentes")
     def delegate_task(args, ctx: ToolContext):

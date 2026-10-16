@@ -11,6 +11,7 @@ import logging
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from agent.core.agent_loop import AgentSession, ApproveFn, EventFn
@@ -21,7 +22,7 @@ from agent.core.mcp_hub import MCPHub
 from agent.core import routing
 from agent.core.profiles import Profile, ProfileManager
 from agent.core.providers import get_provider
-from agent.core.settings import Settings
+from agent.core.settings import Settings, project_folder_name, resolve_workspace
 from agent.core.skills import SkillManager
 from agent.core.tools import ToolRegistry
 from agent.core.usage import UsageTracker
@@ -171,6 +172,31 @@ class Brain:
 
     def list_models(self, provider: str) -> list[str]:
         return get_provider(provider, self.settings).list_models()
+
+    def effective_workspace(self) -> Path:
+        return resolve_workspace(self.profile.workspace, self.settings.get("default_workspace") or "")
+
+    def set_workspace(self, folder: str | Path) -> Path:
+        """Define a pasta do projeto. Se o perfil ativo tem pasta própria, ela acompanha."""
+        path = Path(folder).expanduser()
+        if not path.is_dir():
+            raise ValueError("Essa pasta não existe.")
+        resolved = str(path.resolve())
+        profile = self.profile
+        if (profile.workspace or "").strip():
+            profile.workspace = resolved
+            self.profiles.save(profile)
+        self.settings.set("default_workspace", resolved)
+        return path
+
+    def create_workspace(self, parent: str, name: str) -> Path:
+        """Cria uma pasta de projeto dentro de `parent` e passa a trabalhar nela."""
+        parent_path = Path(parent).expanduser() if (parent or "").strip() else Path.home()
+        if not parent_path.is_dir():
+            raise ValueError("Escolha uma pasta que já existe para criar o projeto dentro dela.")
+        folder = parent_path / project_folder_name(name)
+        folder.mkdir(exist_ok=True)
+        return self.set_workspace(folder)
 
     # ── Sessões ──────────────────────────────────────────────
 

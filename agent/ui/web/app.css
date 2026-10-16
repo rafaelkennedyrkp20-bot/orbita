@@ -151,7 +151,20 @@ svg.i { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-widt
 @keyframes float { 50% { transform: translateY(-7px) rotate(-3deg); } }
 .welcome h1 { font-size: 30px; margin: 0 0 6px; font-weight: 800; letter-spacing: -.02em; }
 .welcome h1 span { background: var(--grad); -webkit-background-clip: text; color: transparent; }
-.welcome p { color: var(--muted); margin: 0 0 28px; }
+.welcome p { color: var(--muted); margin: 0 0 18px; }
+.project-banner { display: flex; align-items: center; gap: 16px; text-align: left; margin: 0 auto 22px; padding: 14px 16px; border: 1px solid var(--line2); border-radius: 16px; background: var(--grad-soft); }
+.project-banner .txt { flex: 1; min-width: 0; }
+.project-banner b { display: block; }
+.project-banner span { color: var(--muted); font-size: 12.5px; word-break: break-all; }
+.pathbox { font-family: var(--mono); font-size: 12.5px; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; word-break: break-all; }
+.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.stack > label { font-size: 12px; color: var(--muted); font-weight: 650; }
+#probe-models { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; max-height: 180px; overflow: auto; }
+.api-row { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.api-row:last-child { border-bottom: 0; }
+.api-row .who { flex: 1; min-width: 0; }
+.api-row .nm { font-weight: 650; }
+.api-row .sz { color: var(--dim); font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; text-align: left; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 15px; cursor: pointer; transition: transform .15s, border-color .15s, background .15s; }
 .card:hover { transform: translateY(-2px); border-color: var(--line2); background: var(--panel2); }
@@ -345,3 +358,5 @@ label.row { cursor: pointer; }
 #conv-title { min-width: 90px; flex: 1 1 140px; }
 .meter .bar { width: 46px; }
 #topbar #chip-perm { flex: none; max-width: none; }
+#topbar #chip-project { flex: none; max-width: 220px; }
+#topbar #chip-project.need { border-style: dashed; border-color: var(--accent); }

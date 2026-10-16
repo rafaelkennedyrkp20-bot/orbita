@@ -39,6 +39,8 @@ from agent.core.config import (
     PROJECT_ROOT,
 )
 from agent.core.profiles import ALL_GROUPS, Profile
+from agent.core.providers import probe_compat_models
+from agent.core.settings import DEFAULT_PROVIDERS
 from agent.ui import brand, render
 
 logger = logging.getLogger(__name__)
@@ -208,9 +210,12 @@ class Api(QObject):
     def state(self) -> dict:
         brain, settings = self.brain, self.brain.settings
         provider, model = brain.current_model
+        workspace = brain.effective_workspace()
         providers = []
         for name, cfg in settings.providers().items():
             providers.append({"id": name, "label": cfg.get("label", name), "type": cfg.get("type"),
+                              "base_url": cfg.get("base_url", ""),
+                              "builtin": name in DEFAULT_PROVIDERS,
                               "api_key_env": cfg.get("api_key_env", ""), "has_credentials": settings.has_credentials(name),
                               "models": cfg.get("models", [])})
         profiles = [self.profile_view(p) for p in brain.profiles.list()]
@@ -221,6 +226,9 @@ class Api(QObject):
             "profiles": profiles,
             "team": [p for p in profiles if p["in_team"]],
             "provider": provider, "model": model, "model_label": _short_model(f"{provider}:{model}"),
+            "workspace": str(workspace),
+            "workspace_name": workspace.name,
+            "workspace_set": bool((brain.profile.workspace or "").strip() or (settings.get("default_workspace") or "").strip()),
             "providers": providers,
             "mcp": brain.mcp.status(),
             "skills": [{"name": s.name, "description": s.description, "origin": s.origin}
@@ -330,16 +338,61 @@ class Api(QObject):
     @pyqtSlot(str, result=str)
     def addProvider(self, raw: str) -> str:
         data = json.loads(raw)
-        provider_id = "".join(ch for ch in data.get("id", "").lower() if ch.isalnum() or ch in "-_")
-        if provider_id and data.get("url"):
-            providers = dict(self.brain.settings.get("providers") or {})
-            entry = {"type": "openai", "label": provider_id, "base_url": data["url"].strip(),
-                     "models": [m.strip() for m in data.get("models", "").split(",") if m.strip()]}
-            if data.get("env"):
-                entry["api_key_env"] = data["env"].strip()
-            providers[provider_id] = entry
-            self.brain.settings.set("providers", providers)
-        return self._state_json()
+        models = data.get("models") or ""
+        if isinstance(models, str):
+            models = [item.strip() for item in models.split(",") if item.strip()]
+        model = (data.get("model") or "").strip()
+        if model and model not in models:
+            models.insert(0, model)
+        try:
+            provider_id = self.brain.settings.add_custom_provider(
+                label=(data.get("label") or data.get("id") or "").strip(),
+                base_url=(data.get("url") or "").strip(),
+                api_key=data.get("key") or "",
+                models=models,
+            )
+        except ValueError as error:
+            return json.dumps({"error": str(error)}, ensure_ascii=False)
+        if data.get("use", True) and model:
+            self.brain.select_model(provider_id, model)
+        return json.dumps({"state": self.state(), "id": provider_id}, ensure_ascii=False, default=str)
+
+    @pyqtSlot(str, result=str)
+    def removeProvider(self, provider_id: str) -> str:
+        try:
+            self.brain.settings.remove_custom_provider(provider_id)
+        except ValueError as error:
+            return json.dumps({"error": str(error)}, ensure_ascii=False)
+        return json.dumps({"state": self.state()}, ensure_ascii=False, default=str)
+
+    @pyqtSlot(str)
+    def probeProvider(self, raw: str) -> None:
+        data = json.loads(raw)
+
+        def work():
+            result = probe_compat_models(data.get("url") or "", data.get("key") or "")
+            self.push({"type": "probe", **result})
+
+        threading.Thread(target=work, daemon=True).start()
+
+    @pyqtSlot(str, result=str)
+    def setWorkspace(self, path: str) -> str:
+        try:
+            self.brain.set_workspace(path)
+        except ValueError as error:
+            return json.dumps({"error": str(error)}, ensure_ascii=False)
+        return json.dumps({"state": self.state()}, ensure_ascii=False, default=str)
+
+    @pyqtSlot(str, result=str)
+    def createWorkspace(self, raw: str) -> str:
+        data = json.loads(raw)
+        try:
+            self.brain.create_workspace(data.get("parent") or "", data.get("name") or "")
+        except ValueError as error:
+            return json.dumps({"error": str(error)}, ensure_ascii=False)
+        except OSError as error:
+            return json.dumps({"error": f"Não consegui criar a pasta: {error.strerror or error}"}, ensure_ascii=False)
+        return json.dumps({"state": self.state()}, ensure_ascii=False, default=str)
 
     @pyqtSlot(str, result=str)
     def saveProfile(self, raw: str) -> str:

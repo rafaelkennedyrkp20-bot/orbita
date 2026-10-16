@@ -16,9 +16,9 @@ Você ──► GUI (agent/gui.py) / terminal / voz
             │  5. repete até a resposta final, limite de passos ou freio de tokens
             ▼
          ToolRegistry (core/tools.py)
-            ├─ embutidas (actions/builtin_tools.py): arquivos, shell, web, PC, memória, skills,
-            │   delegate_task (equipe), find_tools (MCP adiado)
-            ├─ generate_image (actions/image_gen.py)
+            ├─ embutidas (actions/builtin_tools.py): arquivos + verify_project (gate), shell, web, PC,
+            │   memória, skills, delegate_task (equipe com contrato estruturado), find_tools (MCP adiado)
+            ├─ generate_image (actions/image_gen.py): style anchor, negative_prompt, shot_id + sidecar .meta.json
             └─ MCP (core/mcp_hub.py): cada servidor em data/mcp.json vira ferramentas mcp__<srv>__<tool>
 ```
 

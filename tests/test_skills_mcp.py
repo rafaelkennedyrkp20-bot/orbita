@@ -42,6 +42,15 @@ def test_safe_tool_names():
     assert len(_safe_name("servidor", "x" * 100)) == 64
 
 
+def test_project_core_skills_are_valid():
+    manager = SkillManager()
+    expected = {"spec-plan-tdd", "code-review-simplify", "debug-recovery", "creative-pipeline"}
+    assert expected.issubset(set(manager.skills.keys()))
+    for name in expected:
+        body = manager.load(name)
+        assert "## When to Use" in body and "## Verification" in body
+
+
 SERVER = textwrap.dedent("""
     from mcp.server.mcpserver import MCPServer
     server = MCPServer("teste")

@@ -31,7 +31,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Compactação inteligente: turnos antigos viram resumo (modelo econômico) ao passar de 85% do orçamento; se falhar, volta ao corte simples
 - [ ] Contagem real de tokens por provedor (hoje: estimativa chars/3,5 quando a API não informa)
 - [ ] Bloco de "raciocínio" recolhível na interface (hoje mostra só um resumo/contagem)
-- [ ] DeepSeek reasoner com ferramentas: confirmar se `reasoning_content` precisa voltar nas mensagens
+- [x] DeepSeek reasoner com ferramentas: `reasoning_content` preservado nas chamadas de ferramentas do turno ativo e podado em turnos antigos (`core/providers.py`, `core/agent_loop.py`)
 
 ## Fase 2 — Prompts de injeção, perfis e espaços de trabalho
 
@@ -109,8 +109,8 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Busca web: parágrafos duplicados removidos; nova ferramenta `fetch_url`
 - [x] Imports pesados (Whisper, teclado, pyautogui) só quando usados
 - [x] Código morto removido (`llm_interface.py`, `file_ops.py`, roteador por palavras-chave, métodos sem uso)
-- [x] 47 testes automatizados (`tests/`), incluindo servidor MCP real, agente externo, roteamento e compactação
-- [ ] Log diário em JSONL (append) em vez de reescrever o arquivo do dia
+- [x] 53 testes automatizados (`tests/`), incluindo servidor MCP real, agente externo, roteamento, compactação, contratos de handoff, quality gates (`verify_project`) e pipeline criativo
+- [x] Log diário em JSONL (append atômico em `<data>.jsonl`) além do snapshot diário (`memory/memory_manager.py`)
 - [ ] Sandbox opcional para o shell; lista de comandos proibidos
 - [ ] Empacotar como `.exe` (PyInstaller) com instalador
 
@@ -147,3 +147,11 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   assistente de primeira execução e configurações completas. Nota de licença: o código pode ser MIT/Apache, mas
   distribuir um `.exe` com PyQt6 exige cumprir a GPL v3 do PyQt6 (ou trocar para PySide6, LGPL).
 - **2026-10-15 — Claude (Opus 5.5)**: licença escolhida: GNU GPL v3 (copyleft; compatível com o PyQt6).
+- **2026-10-15 — Gemini 4 Argon (Principal Architect Refinement)**: auditoria arquitetural e refinamento 2026:
+  `AGENTS.md` reescrito com alta densidade, gates de verificação, fronteiras de módulos e protocolo de handoff;
+  4 skills core criadas em `skills/` (`spec-plan-tdd`, `code-review-simplify`, `debug-recovery`, `creative-pipeline`);
+  nova ferramenta `verify_project` (`risk="read"`) para Quality Gates determinísticos (`pyflakes` + `pytest`) sem atrito de permissão;
+  contratos estruturados em `delegate_task` (`files`, `acceptance_criteria`, `verify`) com gate automático pós-subagente;
+  suporte a `reasoning_content` no turno ativo para DeepSeek Reasoner com poda automática em turnos antigos;
+  pipeline criativo em `generate_image` com `style` anchor, `negative_prompt`, `shot_id` e sidecar `.meta.json` + rota `xai:grok-2-image` e especialidade `video`;
+  log diário append-only em `.jsonl` e 53 testes automatizados passando.

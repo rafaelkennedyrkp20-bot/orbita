@@ -99,3 +99,48 @@ def test_edit_preserves_crlf(brain, tmp_path):
     (tmp_path / "w.txt").write_bytes(b"a\r\nb\r\n")
     run(brain, "edit_file", {"path": "w.txt", "old_string": "b", "new_string": "c"}, tmp_path)
     assert (tmp_path / "w.txt").read_bytes() == b"a\r\nc\r\n"
+
+
+def test_verify_project_gate_passes_and_catches_errors(brain, tmp_path):
+    (tmp_path / "ok.py").write_text("def soma(a, b):\n    return a + b\n", encoding="utf-8")
+    res_ok = run(brain, "verify_project", {"target": "ok.py", "skip_tests": True}, tmp_path)
+    assert not res_ok.is_error and "Quality Gate: PASS" in res_ok.text
+
+    (tmp_path / "bad.py").write_text("import modulo_nao_usado\nx = variavel_inexistente\n", encoding="utf-8")
+    res_bad = run(brain, "verify_project", {"target": "bad.py", "skip_tests": True}, tmp_path)
+    assert res_bad.is_error and "Quality Gate: FAIL" in res_bad.text
+
+
+def test_generate_image_saves_sidecar_metadata(brain, tmp_path, monkeypatch):
+    import json
+    import agent.actions.image_gen as img_mod
+    from agent.actions.image_gen import register_image_tool
+
+    register_image_tool(brain.registry, brain)
+    brain.settings.set("image_model", "openai:gpt-image-1", save=False)
+    monkeypatch.setattr(brain.settings, "api_key", lambda cfg: "sk-fake")
+    captured = {}
+
+    def fake_openai_image(base, headers, model, prompt, size):
+        captured["prompt"] = prompt
+        captured["size"] = size
+        return b"\x89PNG\r\n\x1a\n"
+
+    monkeypatch.setattr(img_mod, "_openai_image", fake_openai_image)
+    out_file = tmp_path / "shot_01.png"
+    res = run(brain, "generate_image", {
+        "prompt": "Cyberpunk street in rain",
+        "style": "35mm anamorphic, neon cyan and magenta",
+        "negative_prompt": "watermark, text",
+        "shot_id": "shot_01",
+        "size": "1536x1024",
+        "save_to": str(out_file),
+    }, tmp_path)
+    assert not res.is_error and out_file.is_file()
+    assert "[Style Anchor: 35mm anamorphic" in captured["prompt"]
+    assert "[Avoid: watermark, text]" in captured["prompt"]
+    meta_file = tmp_path / "shot_01.meta.json"
+    assert meta_file.is_file()
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    assert meta["shot_id"] == "shot_01" and meta["size"] == "1536x1024"
+

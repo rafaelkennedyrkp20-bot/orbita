@@ -246,3 +246,52 @@ def test_external_agent_keeps_session_and_rules(brain, monkeypatch):
     assert "estilo do projeto" in calls[0]["rules"]
     assert calls[1]["session_id"] == "sessao-1" and calls[1]["prompt"] == "segundo"
     assert calls[1]["permission"] == "livre"
+
+
+def test_delegate_structured_contract_and_verify(brain, provider):
+    seen_prompts = []
+
+    def worker(messages, tools):
+        seen_prompts.append(messages[-1]["content"])
+        return ChatResult(text="Status: DONE\nArquivos: a.py")
+
+    from agent.core.tools import Tool, ToolResult
+    brain.registry.register(Tool("verify_project", "verify", {"type": "object"},
+                                 lambda a, c: ToolResult("Quality Gate: PASS\n[PASS] pyflakes: 0 erros"),
+                                 group="arquivos"))
+    provider([
+        ChatResult(tool_calls=[call("delegate_task", tasks=[{
+            "task": "refatore módulo A",
+            "profile": "programador",
+            "files": ["agent/a.py"],
+            "acceptance_criteria": ["0 erros no pyflakes", "função x testada"],
+            "verify": True,
+        }])]),
+        worker,
+        ChatResult(text="Tudo validado."),
+    ])
+    s = session(brain)
+    assert s.run("refatore") == "Tudo validado."
+    assert "## Contrato da Subtarefa" in seen_prompts[0]
+    assert "agent/a.py" in seen_prompts[0] and "0 erros no pyflakes" in seen_prompts[0]
+    tool_msg = next(m for m in s.messages if m["role"] == "tool")
+    assert "Gate de Verificação Automática" in tool_msg["content"]
+    assert "Quality Gate: PASS" in tool_msg["content"]
+
+
+def test_reasoning_kept_in_current_turn_and_pruned_in_old(brain, provider):
+    fake = provider([
+        ChatResult(text="", reasoning="pensando no passo 1", tool_calls=[call("list_dir")]),
+        ChatResult(text="Concluído turno 1."),
+        ChatResult(text="Concluído turno 2."),
+    ])
+    s = session(brain)
+    s.run("turno 1")
+    # Na segunda chamada do turno 1 (após list_dir), o reasoning deve estar presente no histórico enviado
+    assistant_in_turn1 = next(m for m in fake.calls[1]["messages"] if m["role"] == "assistant")
+    assert assistant_in_turn1.get("reasoning") == "pensando no passo 1"
+    # No turno 2, o reasoning antigo do turno 1 é podado para economizar contexto
+    s.run("turno 2")
+    old_assistants = [m for m in fake.calls[2]["messages"] if m["role"] == "assistant"]
+    assert all("reasoning" not in m for m in old_assistants)
+

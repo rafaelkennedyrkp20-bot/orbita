@@ -320,6 +320,8 @@ class OpenAICompatProvider(Provider):
                 flush_images()
             if role == "assistant":
                 item: dict[str, Any] = {"role": "assistant", "content": msg.get("content") or None}
+                if msg.get("reasoning") and msg.get("tool_calls"):
+                    item["reasoning_content"] = msg["reasoning"]
                 if msg.get("tool_calls"):
                     item["tool_calls"] = [{
                         "id": c["id"], "type": "function",
@@ -616,6 +618,61 @@ PROVIDER_TYPES = {
 
 _cache: dict[tuple, Provider] = {}
 _cache_lock = threading.Lock()
+
+
+def _model_ids(payload: Any) -> list[str]:
+    if isinstance(payload, dict):
+        items = payload.get("data") if isinstance(payload.get("data"), list) else payload.get("models")
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        items = None
+    found: list[str] = []
+    for item in items or []:
+        if isinstance(item, str) and item.strip():
+            found.append(item.strip())
+        elif isinstance(item, dict):
+            value = item.get("id") or item.get("name") or ""
+            if str(value).strip():
+                found.append(str(value).strip())
+    return sorted(set(found))
+
+
+def probe_compat_models(base_url: str, api_key: str = "") -> dict[str, Any]:
+    """Consulta /models de uma API compatível com a OpenAI e devolve o endereço que funcionou."""
+    url = (base_url or "").strip().rstrip("/")
+    empty = {"ok": False, "models": [], "base_url": url, "error": ""}
+    if not url.startswith(("http://", "https://")):
+        empty["error"] = "O endereço precisa começar com http:// ou https://."
+        return empty
+    headers = {"Accept": "application/json"}
+    if (api_key or "").strip():
+        headers["Authorization"] = f"Bearer {api_key.strip()}"
+    endpoints = [f"{url}/models"] if url.endswith("/v1") else [f"{url}/v1/models", f"{url}/models"]
+    last = "A API não respondeu. Confira o endereço e se ela está no ar."
+    for endpoint in endpoints:
+        try:
+            response = httpx.get(endpoint, headers=headers, timeout=12, follow_redirects=True)
+        except httpx.HTTPError:
+            last = "Não consegui conectar nesse endereço. Confira o link e a internet."
+            continue
+        if response.status_code in (401, 403):
+            empty["error"] = "A API recusou o acesso. Confira a chave, ou deixe em branco se o servidor não pede chave."
+            return empty
+        if response.status_code >= 400:
+            last = f"A API respondeu {response.status_code}. Confira se o endereço termina em /v1."
+            continue
+        try:
+            payload = response.json()
+        except ValueError:
+            last = "A resposta não é uma lista de modelos. O endereço precisa ser uma API compatível com a OpenAI."
+            continue
+        ids = _model_ids(payload)
+        if ids:
+            return {"ok": True, "models": ids[:300], "base_url": endpoint[: -len("/models")], "error": ""}
+        last = "Conectou, mas não veio uma lista de modelos. Você ainda pode digitar o nome do modelo."
+    empty["error"] = last
+    return empty
 
 
 def get_provider(name: str, settings) -> Provider:
