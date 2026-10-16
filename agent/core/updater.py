@@ -245,11 +245,8 @@ def check(root: Path = ROOT) -> dict:
     if mode == "zip":
         info["files"] = _zip_plan(root, remote)
     else:
-        dirty = local_changes(root)
-        if dirty and not info["blocked"]:
-            shown = ", ".join(dirty[:6]) + ("…" if len(dirty) > 6 else "")
-            info["blocked"] = (f"Há alterações locais não salvas em {len(dirty)} arquivo(s) ({shown}). "
-                               "Salve (commit) ou descarte e tente de novo.")
+        # Alterações da pessoa não bloqueiam mais: a interface oferece "atualizar guardando minhas alterações".
+        info["local_changes"] = local_changes(root)
 
     if not info["blocked"]:
         info["blocked"] = write_problem(root, mode)   # Linux: pasta de outro usuário (instalada com sudo)
@@ -351,26 +348,46 @@ def apply_zip(root: Path, zip_path: Path, sha: str) -> dict:
             "backup": str(backup) if (replaced or removed) else ""}
 
 
-def apply_git(root: Path) -> dict:
+def apply_git(root: Path, keep_local: bool = False) -> dict:
+    """`git pull --ff-only`. Com `keep_local`, alterações da pessoa em arquivos do programa são guardadas
+    (cópia em data/updates/backup-… + git stash), a atualização entra e elas são reaplicadas por cima.
+    Se uma delas conflitar com a versão nova, fica a versão nova e a da pessoa continua no backup."""
     problem = write_problem(root, "git")
     if problem:
         raise RuntimeError(problem)
     dirty = local_changes(root)
-    if dirty:
+    if dirty and not keep_local:
         raise RuntimeError(f"Alterações locais não salvas em {len(dirty)} arquivo(s) ({', '.join(dirty[:5])}); "
                            "nada foi alterado.")
     generated = [p for p in _status(root) if p in GENERATED]
     if generated:   # o programa regravou (ex.: o ícone): volta ao original para o pull passar
         _git(root, "checkout", "--", *generated)
+    backup = ""
+    if dirty:
+        folder = updates_dir(root) / f"backup-{datetime.now():%Y%m%d-%H%M%S}"
+        for rel in dirty:
+            _backup(root, folder, rel)
+        backup = str(folder)
+        _git(root, "stash", "push", "--quiet", "-m", "orbita: alterações guardadas antes de atualizar", "--", *dirty)
     before = _git(root, "rev-parse", "HEAD").strip()
-    _git(root, "fetch", "--quiet", "origin", BRANCH)
     try:
+        _git(root, "fetch", "--quiet", "origin", BRANCH)
         _git(root, "merge", "--ff-only", f"origin/{BRANCH}")
     except RuntimeError as error:
+        if dirty:
+            _git(root, "stash", "pop", "--quiet", check=False)   # devolve tudo como estava
         raise RuntimeError("Sua cópia tem commits que não estão no GitHub; atualize com git pull. "
                            f"Nada foi alterado. ({error})")
     changed = _git(root, "diff", "--name-only", before, "HEAD").split()
-    return {"replaced": changed, "added": [], "removed": [], "backup": ""}
+    conflicts: list[str] = []
+    if dirty:
+        _git(root, "stash", "pop", "--quiet", check=False)
+        conflicts = _git(root, "diff", "--name-only", "--diff-filter=U", check=False).split()
+        if conflicts:   # fica a versão nova; a da pessoa está no backup (e no git stash)
+            _git(root, "checkout", "HEAD", "--", *conflicts, check=False)
+            _git(root, "reset", "--quiet", "--", *conflicts, check=False)
+    return {"replaced": changed, "added": [], "removed": [], "backup": backup,
+            "kept_local": [p for p in dirty if p not in conflicts], "conflicts": conflicts}
 
 
 def _first_existing(path: Path) -> Path:
@@ -381,13 +398,13 @@ def _first_existing(path: Path) -> Path:
     return path.anchor and Path(path.anchor) or path
 
 
-def apply(root: Path = ROOT, sha: Optional[str] = None) -> dict:
+def apply(root: Path = ROOT, sha: Optional[str] = None, keep_local: bool = False) -> dict:
     mode = install_mode(root)
     problem = write_problem(root, mode)
     if problem:
         raise RuntimeError(problem)
     if mode == "git":
-        return apply_git(root)
+        return apply_git(root, keep_local=keep_local)
     sha = sha or _http_json(f"{API}/commits/{BRANCH}")["sha"]
     work = updates_dir(root)
     work.mkdir(parents=True, exist_ok=True)
@@ -426,12 +443,12 @@ def relaunch(root: Path = ROOT) -> None:
                      creationflags=_NO_WINDOW, start_new_session=os.name != "nt")
 
 
-def start_detached(sha: str, root: Path = ROOT) -> None:
+def start_detached(sha: str, root: Path = ROOT, keep_local: bool = False) -> None:
     """Chamado pela janela antes de fechar: o atualizador espera o programa sair e trabalha sozinho."""
     python = Path(sys.executable)
     windowed = python.with_name("pythonw.exe")
     subprocess.Popen([str(windowed if windowed.is_file() else python), "-m", "agent.core.updater", "apply",
-                      "--pid", str(os.getpid()), "--sha", sha, "--restart"], cwd=str(root),
+                      "--pid", str(os.getpid()), "--sha", sha, "--restart"] + (["--keep-local"] if keep_local else []), cwd=str(root),
                      creationflags=_NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0),
                      start_new_session=os.name != "nt")   # no Linux sobrevive ao fechamento da janela
 
@@ -444,6 +461,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     run.add_argument("--pid", type=int, default=0)
     run.add_argument("--sha", default=None)
     run.add_argument("--restart", action="store_true")
+    run.add_argument("--keep-local", action="store_true")
     args = parser.parse_args(argv)
     if args.cmd == "check":
         print(json.dumps(check(), ensure_ascii=False, indent=1))
@@ -453,7 +471,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     result_file = updates_dir() / "result.json"
     result_file.parent.mkdir(parents=True, exist_ok=True)
     try:
-        result = {"ok": True, **apply(sha=args.sha)}
+        result = {"ok": True, **apply(sha=args.sha, keep_local=args.keep_local)}
     except Exception as error:
         result = {"ok": False, "error": str(error)}
     result["at"] = datetime.now().isoformat(timespec="seconds")

@@ -49,6 +49,11 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   tokens (entrega o que tem como PARTIAL), em vez de gastar o saldo testando sem fim.
 
 ### Corrigido
+- Quem alterou arquivos do programa (ex.: o `iniciar_orbita.sh` para outro Python) não fica mais travado: a atualização
+  oferece "Atualizar guardando minhas alterações" — guarda, atualiza e reaplica por cima, com cópia em
+  `data/updates/backup-…`; se uma alteração conflitar, fica a versão nova e a sua continua na cópia.
+- Instalação no Linux muito mais leve: o `silero-vad` saiu das dependências (puxava o PyTorch com CUDA, vários GB);
+  a voz usa a detecção por volume e o filtro de silêncio do Whisper. Aceita Python 3.10 a 3.14.
 - Atualização automática que não "pegava" (relato de usuário no Linux): o programa regravava o ícone `app.ico` ao
   abrir e o git passava a acusar "alteração local", então a atualização era recusada. O ícone não é mais regravado, o
   atualizador restaura sozinho os arquivos que o próprio programa gera e ignora mudança só de permissão (`chmod +x`).

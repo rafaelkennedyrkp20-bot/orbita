@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0"
 
 set "PY="
-for %%V in (3.12 3.11 3.10) do (
+for %%V in (3.12 3.13 3.11 3.14 3.10) do (
     if not defined PY (
         py -%%V --version >nul 2>&1 && set "PY=py -%%V"
     )
@@ -13,7 +13,7 @@ if not defined PY (
     python --version >nul 2>&1 && set "PY=python"
 )
 if not defined PY (
-    echo Python 3.10, 3.11 ou 3.12 nao foi encontrado.
+    echo Python 3.10 a 3.14 nao foi encontrado.
     echo Instale em https://www.python.org/downloads/ marcando "Add python.exe to PATH".
     pause
     exit /b 1

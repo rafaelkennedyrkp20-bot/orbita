@@ -138,6 +138,7 @@ def _clone_with_remote(tmp_path):
     (origin / "agent" / "ui" / "web").mkdir(parents=True)
     (origin / "agent" / "ui" / "web" / "app.ico").write_bytes(b"ICO-original")
     (origin / "app.py").write_text("v1\n", encoding="utf-8")
+    (origin / "iniciar.sh").write_text("python3.12 launcher.py\n", encoding="utf-8")
     run(origin, "init", "-q", "-b", "main")
     run(origin, "add", ".")
     run(origin, "commit", "-qm", "v1")
@@ -158,6 +159,30 @@ def test_regenerated_icon_does_not_block_the_update(tmp_path):
     result = updater.apply_git(clone)
     assert (clone / "app.py").read_text(encoding="utf-8") == "v2\n" and "app.py" in result["replaced"]
     assert (clone / "agent" / "ui" / "web" / "app.ico").read_bytes() == b"ICO-original"
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="git não instalado")
+def test_update_keeping_local_changes(tmp_path):
+    """Caso real: o usuário do Linux editou o iniciar.sh (Python 3.13) e o atualizador só recusava."""
+    clone = _clone_with_remote(tmp_path)
+    (clone / "iniciar.sh").write_text("python3.13 launcher.py\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="não salvas"):
+        updater.apply_git(clone)                                   # sem pedir, continua não mexendo em nada
+    result = updater.apply_git(clone, keep_local=True)
+    assert (clone / "app.py").read_text(encoding="utf-8") == "v2\n"          # atualizou
+    assert (clone / "iniciar.sh").read_text(encoding="utf-8") == "python3.13 launcher.py\n"   # e manteve a edição
+    assert result["kept_local"] == ["iniciar.sh"] and result["conflicts"] == []
+    assert (Path(result["backup"]) / "iniciar.sh").read_text(encoding="utf-8") == "python3.13 launcher.py\n"
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="git não instalado")
+def test_conflicting_local_change_keeps_new_version_and_backup(tmp_path):
+    clone = _clone_with_remote(tmp_path)
+    (clone / "app.py").write_text("minha versão\n", encoding="utf-8")   # o upstream também mudou app.py
+    result = updater.apply_git(clone, keep_local=True)
+    assert (clone / "app.py").read_text(encoding="utf-8") == "v2\n" and result["conflicts"] == ["app.py"]
+    assert (Path(result["backup"]) / "app.py").read_text(encoding="utf-8") == "minha versão\n"
+    assert updater.local_changes(clone) == []                                # repositório limpo, sem marcas de conflito
 
 
 def test_folder_without_write_permission_is_explained_before_touching_anything(tmp_path, monkeypatch):

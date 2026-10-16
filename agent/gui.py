@@ -917,12 +917,12 @@ class Api(QObject):
     def checkUpdate(self) -> None:
         self.check_updates(manual=True)
 
-    @pyqtSlot(str, result=str)
-    def applyUpdate(self, sha: str) -> str:
+    @pyqtSlot(str, bool, result=str)
+    def applyUpdate(self, sha: str, keep_local: bool = False) -> str:
         if self.win.busy:
             return json.dumps({"error": "Espere o agente terminar a tarefa atual antes de atualizar."}, ensure_ascii=False)
         try:
-            updater.start_detached(sha)
+            updater.start_detached(sha, keep_local=keep_local)
         except Exception as error:
             return json.dumps({"error": f"Não consegui iniciar o atualizador: {error}"}, ensure_ascii=False)
         QTimer.singleShot(400, self.win.close)   # o atualizador espera a janela fechar e reabre sozinho

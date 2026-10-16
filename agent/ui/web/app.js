@@ -674,14 +674,15 @@ function updateModal(u) {
       <li>Ficam intactos: conversas, configurações, perfis, chaves (<code>.env</code>), memória, modelos e o ambiente Python.</li>${files}
       <li>O Órbita fecha, atualiza e abre de novo sozinho, em alguns segundos.</li></ul></div>
     ${u.blocked ? `<div class="up-blocked">${icon("alert")} ${esc(u.blocked)}</div>` : ""}
+    ${!u.blocked && (u.local_changes || []).length ? `<div class="up-blocked up-local">${icon("info")} Você alterou ${u.local_changes.length === 1 ? "um arquivo" : u.local_changes.length + " arquivos"} do programa (${esc(u.local_changes.slice(0, 4).join(", "))}${u.local_changes.length > 4 ? "…" : ""}). A atualização guarda essas alterações, atualiza e as reaplica por cima. Uma cópia fica em data/updates/backup-…; se alguma conflitar com a versão nova, fica a nova e a sua continua na cópia.</div>` : ""}
     <div class="actions"><button class="btn" id="up-gh">${icon("globe")} Ver no GitHub</button><button class="btn" id="up-later">Depois</button>
-      <button class="btn primary" id="up-go" ${u.blocked ? "disabled" : ""}>${icon("download")} Atualizar agora</button></div></div>`);
+      <button class="btn primary" id="up-go" ${u.blocked ? "disabled" : ""}>${icon("download")} ${(u.local_changes || []).length ? "Atualizar guardando minhas alterações" : "Atualizar agora"}</button></div></div>`);
   $("#up-gh").onclick = () => call("openUrl", u.url);
   $("#up-later").onclick = closeModal;
   $("#up-go").onclick = async () => {
     if (busy) return toast("warn", "Aguarde", "Espere o agente terminar a tarefa atual.");
     $("#up-go").disabled = true; $("#up-go").innerHTML = `<span class="spin"></span> Atualizando…`;
-    const r = await call("applyUpdate", u.remote);
+    const r = await call("applyUpdate", u.remote, (u.local_changes || []).length > 0);
     if (r && r.error) { toast("error", "Atualização", r.error); closeModal(); }
   };
 }
@@ -963,7 +964,11 @@ function onEvent(e) {
     case "checkpoint": checkpointCard(e); break;
     case "update": onUpdate(e); break;
     case "updated":
-      if (e.result.ok) toast("success", "Órbita atualizado", `${(e.result.replaced || []).length + (e.result.added || []).length} arquivos do programa atualizados. Seus dados ficaram intactos.`, 9000);
+      if (e.result.ok) {
+        toast("success", "Órbita atualizado", `${(e.result.replaced || []).length + (e.result.added || []).length} arquivos do programa atualizados. Seus dados ficaram intactos.`
+          + ((e.result.kept_local || []).length ? ` Suas alterações foram reaplicadas: ${e.result.kept_local.join(", ")}.` : ""), 9000);
+        if ((e.result.conflicts || []).length) toast("warn", "Alterações suas em conflito", `Em ${e.result.conflicts.join(", ")} ficou a versão nova; a sua está em ${e.result.backup}.`, 0);
+      }
       else toast("error", "A atualização não foi aplicada", e.result.error || "Erro desconhecido. Nada foi alterado.", 0);
       break;
     case "turn_end": closeTurn(); if (e.plan) planActions(); refreshConvs().then(() => { S.conversation_id = e.conversation_id || S.conversation_id; S.conversation_title = e.title || S.conversation_title; renderTopbar(); renderConvs(); }); break;

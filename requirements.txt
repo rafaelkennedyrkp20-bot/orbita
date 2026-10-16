@@ -18,7 +18,8 @@ faster-whisper>=1.0.3          # Transcrição offline (Whisper otimizado)
 sounddevice>=0.4.7             # Microfone e reprodução
 soundfile>=0.12.1              # Arquivos de áudio
 numpy>=1.26.0
-silero-vad>=6.2.0              # Detecção de fala (CPU/ONNX)
+# silero-vad (opcional): detector de fala da conversa por voz; puxa o PyTorch (vários GB no Linux).
+# Sem ele, o Órbita detecta a fala pelo volume e o Whisper usa o filtro de silêncio próprio.
 kokoro-onnx>=0.5.0             # Voz neural local (pf_dora)
 pyttsx3>=2.90                  # Voz do Windows (fallback)
 keyboard>=0.13.5               # Atalho do modo voz no terminal

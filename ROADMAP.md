@@ -356,3 +356,11 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   `core.fileMode=false`; `write_problem()` no check, no apply e checagem de escrita antes de gravar o ZIP; aviso com
   quebra de linha. Verificado: pytest 177 + 2 pulados (2 novos: clone com remoto local e ícone regravado; pasta sem
   escrita). Não verificado num Linux real nesta rodada (Docker Desktop não subiu).
+- **2026-10-16 — Claude Opus 5.5**: o amigo do usuário (Linux) continuava sem atualizar: "alterações locais em
+  iniciar_orbita.sh e requirements.txt". Provável causa: Python 3.13 da distro (o script aceitava só 3.10–3.12) e o
+  peso das dependências. Resolução das dependências para Linux com `uv pip compile` (sem instalar): `silero-vad` puxava
+  torch 2.14 + 16 pacotes nvidia-* + triton (117 → 90 pacotes sem ele); 3.13 e 3.14 resolvem com wheels. Mudanças:
+  `silero-vad` opcional; `.sh`/`.bat` aceitam 3.10–3.14; `apply_git(keep_local=True)` com backup + `git stash` +
+  reaplicação (conflito: fica a versão nova, a do usuário no backup); `check` lista `local_changes` em vez de bloquear;
+  botão "Atualizar guardando minhas alterações". Verificado: pytest 179 + 2 pulados (clone real com edição mantida e com
+  conflito); janela de atualização capturada. Não verificado num Linux real (Docker Desktop não subiu).
