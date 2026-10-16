@@ -26,6 +26,15 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   pedido é esse. A tabela de modelos com acesso entra nesse momento, não em todo turno. A skill não configura nada.
 - O prompt deixa de despejar o corpo das skills: o campo `when` vira um roteador curto, e o corpo só entra com
   `use_skill`. Relatório de subagente sem Status/Verificação, ou com PARTIAL/BLOCKED, é marcado e não conta como entrega.
+- **Pontos de restauração**: antes de cada resposta o Órbita guarda uma foto da pasta do projeto (num git separado,
+  sem mexer no seu). Depois da resposta aparece um cartão com os arquivos alterados, o diff colorido e os botões
+  Desfazer e Refazer. Pode ser desligado em Configurações › Permissões.
+- **`@arquivo`** no campo de mensagem: digite `@` para escolher um arquivo do projeto. O conteúdo vai junto da mensagem,
+  então o agente não precisa procurar nem ler de novo.
+- **Modo plano**: o botão Planejar faz o agente só ler e propor um plano. Tudo que alteraria algo fica bloqueado
+  nesse turno. Depois é só clicar em Executar plano.
+- Fechar um pedido de permissão com `Esc`, ou clicar em Parar, agora responde "não" em vez de deixar o agente travado
+  esperando.
 
 ## [0.1.0-alpha] — 2026-10-16
 

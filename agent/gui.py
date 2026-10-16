@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
@@ -33,7 +34,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMainWindow, QMenu, QSystemTrayIcon
 
 from agent import __version__
-from agent.core import grok_cli, routing
+from agent.core import checkpoints, grok_cli, mentions, routing
 from agent.core.brain import Brain
 from agent.core.config import (
     DATA_DIR, GUI_VOICE_MAX_RECORD_SECONDS, GUI_VOICE_NO_SPEECH_TIMEOUT, GUI_VOICE_SILENCE_SECONDS, LOGS_DIR,
@@ -49,7 +50,13 @@ logger = logging.getLogger(__name__)
 WEB_INDEX = brand.WEB_DIR / "index.html"
 SETTABLE = {"theme", "user_name", "default_workspace", "native_notifications", "show_reasoning", "permission_mode",
             "economy_mode", "turn_token_budget", "daily_token_budget", "voice_replies", "auto_routing",
-            "cheap_model", "image_model", "ollama_num_ctx", "ollama_keep_alive"}
+            "cheap_model", "image_model", "ollama_num_ctx", "ollama_keep_alive", "checkpoints"}
+# Modo plano: vai junto da mensagem; as ferramentas que alteram algo ficam bloqueadas no turno.
+PLAN_NOTE = ("\n\n[Modo plano] Ainda NÃO execute: não crie, edite nem apague arquivos e não rode comandos que "
+             "alterem algo — essas ferramentas estão bloqueadas neste turno. Leia e pesquise o que precisar e "
+             "responda com um plano curto: objetivo, arquivos envolvidos, passos numerados, riscos e como "
+             "verificar. Termine perguntando se pode executar.")
+_MENTIONS_MARK = "\n\n---\nArquivos citados pelo usuário"
 QUICK_PROMPTS = [
     {"label": "Resumir esta conversa", "text": "Resuma o que fizemos até agora e o que ficou pendente."},
     {"label": "Revisar com a equipe", "text": "Peça ao revisor da equipe para revisar o que foi feito e corrija os problemas encontrados."},
@@ -74,6 +81,20 @@ def _args_summary(args: dict, limit: int = 120) -> str:
     return raw if len(raw) <= limit else raw[:limit] + "…"
 
 
+def _visible_user_text(text: str) -> str:
+    """O que o usuário digitou, sem o anexo de @arquivos nem a nota do modo plano."""
+    return text.split(_MENTIONS_MARK, 1)[0].replace(PLAN_NOTE, "")
+
+
+def project_folder(brain: Brain) -> Optional[Path]:
+    """Pasta do projeto escolhida pelo usuário (None se ele ainda não escolheu nenhuma)."""
+    chosen = (brain.profile.workspace or "").strip() or (brain.settings.get("default_workspace") or "").strip()
+    if not chosen:
+        return None
+    folder = brain.effective_workspace()
+    return folder if folder.is_dir() else None
+
+
 # ─────────────────────────────────────────────────────────────
 # Trabalho em segundo plano
 # ─────────────────────────────────────────────────────────────
@@ -92,9 +113,13 @@ class AgentWorker(QThread):
         self.running = True
         self._approval_lock = threading.Lock()
         self._pending: dict[str, tuple[threading.Event, list]] = {}
+        self.checkpoints = checkpoints.Checkpoints()
+        self.plan_active = False
 
     def approve(self, request: dict) -> str:
         """Chamado pelas threads do agente; bloqueia até a resposta do usuário na interface."""
+        if self.plan_active and request.get("type") == "tool":
+            return "no"   # modo plano: nada que altere arquivos ou rode comandos
         with self._approval_lock:
             approval_id = uuid.uuid4().hex[:10]
             done, answer = threading.Event(), ["no"]
@@ -112,6 +137,12 @@ class AgentWorker(QThread):
         if pending:
             pending[1][0] = value if value in ("yes", "always", "no") else "no"
             pending[0].set()
+
+    def deny_pending(self) -> None:
+        """Parar: nenhuma confirmação fica esperando um clique que não vai chegar."""
+        for done, answer in list(self._pending.values()):
+            answer[0] = "no"
+            done.set()
 
     def events(self, kind: str, data: dict) -> None:
         self.raw_event.emit(kind, data)
@@ -136,16 +167,46 @@ class AgentWorker(QThread):
             finally:
                 self.busy.emit(False)
 
-    def _turn(self, text: str, images: list[str], speak: bool) -> None:
+    def _turn(self, text: str, images: list[str], speak: bool, plan: bool = False) -> None:
         provider, model = self.brain.current_model
         self.events("turn_start", {"model": f"{provider}:{model}"})
-        response = self.brain.run_turn(text, images, events=self.events, approve=self.approve)
-        self.events("turn_end", {"text": response})
+        folder = project_folder(self.brain) if self.brain.settings.get("checkpoints", True) else None
+        label = " ".join(_visible_user_text(text).split())[:120]
+        before = self.checkpoints.snapshot(folder, f"antes: {label}") if folder and not plan else None
+        with self._plan_mode(plan):
+            response = self.brain.run_turn(text, images, events=self.events, approve=self.approve)
+        self.events("turn_end", {"text": response, "plan": plan})
+        turn = self.checkpoints.finish(folder, before, f"depois: {label}") if before else None
+        if turn:
+            self.events("checkpoint", {"workspace": turn.workspace, "before": turn.before, "after": turn.after,
+                                       "changes": [asdict(c) for c in turn.changes]})
         if speak and self.brain.settings.get("voice_replies", True) and self.running:
             spoken = render.speech_text(response)
             if spoken:
                 self.events("status", {"text": "Falando…"})
                 self.brain.speaker.speak(spoken, blocking=True)
+
+    @contextmanager
+    def _plan_mode(self, on: bool):
+        """No modo plano tudo que altera pede permissão, e `approve` nega sem perguntar."""
+        if not on:
+            yield
+            return
+        settings = self.brain.settings
+        previous = settings.get("permission_mode", "auto")
+        session = self.brain.session
+        allowed = set(session.always_allowed) if session else set()
+        if session:
+            session.always_allowed.clear()
+        settings.set("permission_mode", "perguntar", save=False)
+        self.plan_active = True
+        try:
+            yield
+        finally:
+            self.plan_active = False
+            settings.set("permission_mode", previous)
+            if self.brain.session:
+                self.brain.session.always_allowed |= allowed
 
     def _voice(self) -> None:
         self.push({"type": "listening"})
@@ -261,11 +322,47 @@ class Api(QObject):
     @pyqtSlot(str)
     def send(self, raw: str) -> None:
         data = json.loads(raw)
-        self.win.worker.commands.put(("turn", (data.get("text", ""), data.get("images") or [], False)))
+        plan = bool(data.get("plan"))
+        text = data.get("text", "") + (PLAN_NOTE if plan else "")
+        folder = project_folder(self.brain)
+        if folder is not None and "@" in text:
+            try:
+                text = mentions.expand(text, folder)
+            except OSError as error:
+                logger.warning("Falha ao anexar @arquivos: %s", error)
+        self.win.worker.commands.put(("turn", (text, data.get("images") or [], False, plan)))
+
+    @pyqtSlot(str, result=str)
+    def searchFiles(self, query: str) -> str:
+        folder = project_folder(self.brain)
+        return json.dumps(mentions.search(folder, query) if folder else [], ensure_ascii=False)
+
+    # ── Checkpoints (desfazer o que uma resposta mudou) ──────
+
+    @pyqtSlot(str, result=str)
+    def checkpointDiff(self, raw: str) -> str:
+        data = json.loads(raw)
+        try:
+            text = self.win.worker.checkpoints.diff(Path(data["workspace"]), data["before"], data["after"])
+        except Exception as error:
+            return json.dumps({"error": f"Não consegui montar o diff: {error}"}, ensure_ascii=False)
+        return json.dumps({"diff": text}, ensure_ascii=False)
+
+    @pyqtSlot(str, result=str)
+    def checkpointUndo(self, raw: str) -> str:
+        if self.win.busy:
+            return json.dumps({"error": "Espere o agente terminar antes de desfazer."}, ensure_ascii=False)
+        data = json.loads(raw)
+        try:
+            result = self.win.worker.checkpoints.undo(Path(data["workspace"]), data["before"], data["after"])
+        except Exception as error:
+            return json.dumps({"error": f"Não consegui desfazer: {error}"}, ensure_ascii=False)
+        return json.dumps(result, ensure_ascii=False)
 
     @pyqtSlot()
     def stop(self) -> None:
         self.brain.stop()
+        self.win.worker.deny_pending()
         self.push({"type": "status", "text": "Parando…"})
 
     @pyqtSlot()
@@ -294,7 +391,9 @@ class Api(QObject):
         if not data:
             return "null"
         for block in data["blocks"]:
-            if block["kind"] == "assistant":
+            if block["kind"] == "user":
+                block["text"] = _visible_user_text(block.get("text") or "")
+            elif block["kind"] == "assistant":
                 block["html"] = render.markdown_html(block.pop("md"))
             elif block["kind"] == "tool":
                 block["summary"] = _args_summary(block.get("args") or {})
@@ -723,7 +822,7 @@ class MainWindow(QMainWindow):
             elif not self._streamed_any and text and not text.startswith("⚠️"):
                 push({"type": "seg", "id": uuid.uuid4().hex[:8], "html": render.markdown_html(text), "streaming": False})
             push({"type": "turn_end", "conversation_id": self.brain.conversation_id,
-                  "title": self.brain.conversation_title})
+                  "title": self.brain.conversation_title, "plan": bool(data.get("plan"))})
             self.notify("Tarefa concluída", render.speech_text(text, 200) or "O agente terminou.")
         elif kind == "usage":
             push({"type": "usage", "total": data.get("total", 0), "turn": data.get("turn", 0)})
@@ -735,6 +834,8 @@ class MainWindow(QMainWindow):
                 push({"type": "toast", "kind": "info", "title": "Modo compatível", "text": data["text"]})
         elif kind == "compacted":
             push({"type": "compacted", "messages": data.get("messages", 0)})
+        elif kind == "checkpoint":
+            push({"type": "checkpoint", **data})
         elif kind == "model_start" and agent == "principal":
             push({"type": "status", "text": "Pensando…"})
         elif kind == "attention":

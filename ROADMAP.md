@@ -94,6 +94,10 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [ ] Renderizar diagramas Mermaid e páginas HTML ("artefatos") no painel Visualizar
 - [x] Ícone na bandeja do sistema com menu e notificações do Windows
 - [ ] Atalho global de teclado para chamar a janela
+- [x] Pontos de restauração por resposta: git "sombra" em `data/checkpoints` (sem tocar no git do projeto), cartão com arquivos alterados, diff colorido, Desfazer e Refazer (`agent/core/checkpoints.py`)
+- [x] `@arquivo` no campo de mensagem: autocompletar com arquivos do projeto e conteúdo citado anexado à mensagem (economiza uma rodada de ferramenta) (`agent/core/mentions.py`)
+- [x] Modo plano (Plan/Act): botão Planejar; ferramentas que alteram ficam bloqueadas no turno; botões Executar plano / Ajustar
+- [x] Dica de conversa longa: sugere conversa nova para assunto novo (menos deriva e menos tokens)
 
 ## Fase 6 — Economia de tokens
 
@@ -118,6 +122,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Log diário só em JSONL (uma linha por interação, sem reescrever o arquivo); lê o JSON antigo do dia se existir
 - [ ] Sandbox opcional para o shell; lista de comandos proibidos
 - [ ] Empacotar como `.exe` (PyInstaller) com instalador
+- [ ] Avaliar casca Tauri (Rust) reaproveitando `agent/ui/web`, para distribuir um `.exe` leve (baixa prioridade; o motor continua em Python)
 
 ---
 
@@ -194,3 +199,11 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   contagens válidas como `65 passed, 0 failed`, sem aceitar verificação ausente ou falha não zero. Regressão
   demonstrada antes da correção. Verificado: pyflakes 0 avisos; pytest 75 passando na árvore atual (66 do projeto
   e 9 testes não rastreados de checkpoints/mentions, sem relação com o handoff). Sem teste com modelo real.
+- **2026-10-16 — Claude Opus 5.5**: usabilidade a partir de pesquisa do que usuários mais elogiam em agentes de código
+  (checkpoints do Cline, /undo do Aider, Plan/Act, apontar arquivos em vez de deixar o modelo procurar, evitar deriva em
+  conversas longas). Novo: pontos de restauração por resposta com diff/desfazer/refazer, `@arquivo` com autocompletar e
+  anexo do conteúdo, modo plano com ferramentas de alteração bloqueadas no turno, dica de conversa longa. Corrigido o
+  ⭐ do Argon: fechar a confirmação com `Esc` ou clicar em Parar responde "não" em vez de travar o agente. Área: só
+  `agent/gui.py`, `agent/ui/web/*` e módulos novos (sem tocar no que Grok e Argon editavam). Verificado: pyflakes 0;
+  pytest 81 passando na árvore atual (13 novos: checkpoints, mentions, gui_turns); janela real com captura (autocompletar, cartão,
+  diff, desfazer, refazer, Esc na confirmação). Custo medido: 0,4–0,9 s por foto numa pasta real.

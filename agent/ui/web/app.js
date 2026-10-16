@@ -48,6 +48,11 @@ const ICONS = {
   user: "M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zM4 21a8 8 0 0 1 16 0",
   mouse: "M12 3a6 6 0 0 1 6 6v6a6 6 0 0 1-12 0V9a6 6 0 0 1 6-6zM12 7v3",
   layers: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5",
+  undo: "M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11",
+  redo: "M15 14l5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13",
+  map: "M9 4L3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14",
+  at: "M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1",
+  diff: "M6 3h8l4 4v14H6zM9 11h6M12 8v6M9 17h6",
 };
 // ── Ícones dos agentes: símbolo próprio sobre degradê (substituem os emojis do Windows) ──
 const S_ = 'stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"';
@@ -117,7 +122,7 @@ const now = () => new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minu
 
 let api = null;
 let S = {};              // estado vindo do Python
-let busy = false, attachments = [], liveTimer = null, liveStart = 0;
+let busy = false, attachments = [], liveTimer = null, liveStart = 0, planMode = false, longHintShown = false;
 let turnEl = null, segEls = {}, stepEls = {}, stepsBox = null;
 let settingsSection = "geral";
 
@@ -184,10 +189,13 @@ function bindChrome() {
     if (link && !link.closest("[data-go]")) { e.preventDefault(); call("openUrl", link.getAttribute("href")); }
   });
   const input = $("#input");
-  input.addEventListener("input", () => { autosize(); slashHint(); });
+  input.addEventListener("input", () => { autosize(); slashHint(); mentionHint(); });
   input.addEventListener("keydown", e => {
+    if (mentionKey(e)) return;
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   });
+  input.addEventListener("blur", () => setTimeout(closeMention, 150));
+  $("#plan-btn").addEventListener("click", () => setPlanMode(!planMode));
   $("#send").addEventListener("click", () => busy ? call("stop") : send());
   document.addEventListener("keydown", e => {
     if (e.ctrlKey && e.key.toLowerCase() === "k") { e.preventDefault(); palette(); }
@@ -328,7 +336,7 @@ async function openConversation(id) {
 
 // ── Chat ───────────────────────────────────────────────────────────────────────
 function resetChat(welcome = true) {
-  $("#messages").innerHTML = ""; turnEl = null; segEls = {}; stepEls = {}; stepsBox = null;
+  $("#messages").innerHTML = ""; turnEl = null; segEls = {}; stepEls = {}; stepsBox = null; longHintShown = false; undoNote = "";
   S.conversation_id = null; S.conversation_title = ""; S.conversation_tokens = 0;
   $("#feed").innerHTML = `<div class="empty">As ações do agente aparecem aqui em tempo real.</div>`;
   renderTopbar(); renderConvs();
@@ -368,21 +376,140 @@ function slashHint() {
   const v = $("#input").value;
   if (v === "/") palette("");
 }
-function send() {
-  const text = $("#input").value.trim();
+let undoNote = "";   // avisa o agente, na próxima mensagem, que o usuário desfez arquivos
+function send(override) {
+  const typed = override === undefined;
+  const text = (typed ? $("#input").value : override).trim();
   if ((!text && !attachments.length) || busy) return;
+  closeMention();
   if ($(".welcome")) $("#messages").innerHTML = "";
-  addUser(text || "Analise a imagem anexada.", attachments);
-  call("send", JSON.stringify({ text: text || "Analise a imagem anexada.", images: attachments }));
-  $("#input").value = ""; autosize(); attachments = []; renderAttachments();
+  const msg = text || "Analise a imagem anexada.", plan = typed && planMode;
+  addUser(msg, attachments, plan);
+  call("send", JSON.stringify({ text: msg + undoNote, images: attachments, plan }));
+  undoNote = "";
+  if (typed) { $("#input").value = ""; autosize(); }
+  attachments = []; renderAttachments();
+  maybeLongHint();
 }
-function addUser(text, images = []) {
+function addUser(text, images = [], plan = false) {
   closeTurn();
   const el = document.createElement("div");
   el.className = "msg user";
-  el.innerHTML = `<div class="bubble">${esc(text)}${(images || []).map(p => `<img class="zoomable" src="${fileUrl(p)}">`).join("")}</div>`;
+  el.innerHTML = `<div class="bubble">${plan ? `<span class="plan-tag">${icon("map")} só planejar</span>` : ""}${esc(text)}${(images || []).map(p => `<img class="zoomable" src="${fileUrl(p)}">`).join("")}</div>`;
   $("#messages").appendChild(el);
   scrollEnd(true);
+}
+function maybeLongHint() {
+  if (longHintShown || $$(".msg.user").length < 14) return;
+  longHintShown = true;
+  note("Conversa longa: para um assunto novo, comece outra conversa (Ctrl+N). O agente fica mais preciso e gasta menos tokens.", "tip");
+}
+
+// ── Modo plano ─────────────────────────────────────────────────────────────────
+function setPlanMode(on) {
+  planMode = on;
+  $("#plan-btn").classList.toggle("on", on);
+  $("#composer-box").classList.toggle("plan", on);
+  $("#input").placeholder = on ? "Modo plano: descreva o que quer. O agente só lê, planeja e espera o seu OK."
+    : "Peça qualquer coisa… (@ cita um arquivo, / comandos, Shift+Enter quebra linha)";
+}
+function planActions() {
+  const last = $$(".msg.bot").pop();
+  if (!last) return;
+  const row = document.createElement("div"); row.className = "plan-actions";
+  row.innerHTML = `<button class="btn primary small" data-pa="run">${icon("bolt")} Executar plano</button><button class="btn small" data-pa="adjust">${icon("edit")} Ajustar o plano</button>`;
+  $('[data-pa="run"]', row).onclick = () => { if (busy) return; setPlanMode(false); row.remove(); send("Pode executar o plano."); };
+  $('[data-pa="adjust"]', row).onclick = () => { row.remove(); $("#input").focus(); };
+  last.querySelector(".bot-body").appendChild(row);
+  scrollEnd();
+}
+
+// ── @arquivo ───────────────────────────────────────────────────────────────────
+let mention = null, mentionSeq = 0;
+async function mentionHint() {
+  const i = $("#input"), upto = i.value.slice(0, i.selectionStart);
+  const m = upto.match(/(^|\s)@("?)([^\s"@]*)$/);
+  if (!m || !S.workspace_set) return closeMention();
+  const seq = ++mentionSeq;
+  const items = await call("searchFiles", m[3]) || [];
+  if (seq !== mentionSeq || i.value.slice(0, i.selectionStart) !== upto) return;   // já digitou mais
+  if (!items.length) return closeMention();
+  mention = { start: upto.length - m[3].length - m[2].length - 1, end: upto.length, items, index: 0 };
+  renderMention();
+}
+function renderMention() {
+  const box = $("#mention-pop");
+  box.innerHTML = `<div class="mp-head">${icon("at")} Arquivos do projeto <span>↑↓ escolher · Enter insere · Esc fecha</span></div>` +
+    mention.items.map((p, k) => {
+      const cut = p.lastIndexOf("/");
+      return `<div class="mp-item ${k === mention.index ? "on" : ""}" data-k="${k}">${icon("file")}<b>${esc(p.slice(cut + 1))}</b><span>${esc(cut > 0 ? p.slice(0, cut) : "")}</span></div>`;
+    }).join("");
+  box.classList.add("on");
+  $$(".mp-item", box).forEach(el => el.addEventListener("mousedown", e => { e.preventDefault(); pickMention(+el.dataset.k); }));
+  const on = $(".mp-item.on", box); if (on) on.scrollIntoView({ block: "nearest" });
+}
+function closeMention() { mention = null; mentionSeq++; const box = $("#mention-pop"); if (box) box.classList.remove("on"); }
+function pickMention(k) {
+  const i = $("#input"), path = mention.items[k];
+  const token = "@" + (/\s/.test(path) ? `"${path}"` : path) + " ";
+  i.value = i.value.slice(0, mention.start) + token + i.value.slice(mention.end);
+  const pos = mention.start + token.length;
+  closeMention(); i.focus(); i.setSelectionRange(pos, pos); autosize();
+}
+function mentionKey(e) {
+  if (!mention) return false;
+  const n = mention.items.length;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { mention.index = (mention.index + (e.key === "ArrowDown" ? 1 : n - 1)) % n; renderMention(); }
+  else if (e.key === "Enter" || e.key === "Tab") pickMention(mention.index);
+  else if (e.key === "Escape") closeMention();
+  else return false;
+  e.preventDefault(); e.stopPropagation();
+  return true;
+}
+
+// ── Pontos de restauração ──────────────────────────────────────────────────────
+function checkpointCard(e) {
+  const last = $$(".msg.bot").pop();
+  if (!last) return;
+  const files = e.changes || [];
+  const add = files.reduce((s, c) => s + (c.added || 0), 0), del = files.reduce((s, c) => s + (c.removed || 0), 0);
+  const kind = { A: "novo", M: "alterado", D: "apagado" };
+  const el = document.createElement("div"); el.className = "cp-card";
+  el.innerHTML = `<div class="cp-head">${icon("diff")}<b>${files.length} ${files.length === 1 ? "arquivo alterado" : "arquivos alterados"}</b><span class="cp-stat"><i class="add">+${add}</i><i class="del">−${del}</i></span><span class="grow"></span>
+    <button class="btn small" data-cp="diff">${icon("eye")} Ver alterações</button><button class="btn small" data-cp="undo">${icon("undo")} Desfazer</button></div>
+    <div class="cp-files">${files.slice(0, 8).map(c => `<span class="cp-f ${esc(c.status)}" title="${kind[c.status] || c.status}"><i>${esc(c.status)}</i>${esc(c.path)}</span>`).join("")}${files.length > 8 ? `<span class="cp-more">+${files.length - 8}</span>` : ""}</div>`;
+  const ref = { workspace: e.workspace, before: e.before, after: e.after };
+  $('[data-cp="diff"]', el).onclick = () => showDiff(ref);
+  $('[data-cp="undo"]', el).onclick = () => undoCheckpoint(el, ref, false);
+  last.querySelector(".bot-body").appendChild(el);
+  feed("ok", `✓ ${files.length} ${files.length === 1 ? "arquivo alterado" : "arquivos alterados"} · ponto de restauração salvo`);
+  scrollEnd();
+}
+async function showDiff(ref) {
+  const r = await call("checkpointDiff", JSON.stringify(ref));
+  if (!r || r.error) return toast("error", "Alterações", r ? r.error : "Falhou.");
+  const meta = /^(\+\+\+|---|index |new file|deleted file|similarity|Binary files)/;
+  const lines = r.diff.split("\n").map(l => {
+    const cls = l.startsWith("diff --git") ? "f" : meta.test(l) ? "m" : l.startsWith("@@") ? "h" : l[0] === "+" ? "a" : l[0] === "-" ? "d" : "";
+    return `<span class="${cls}">${esc(l.startsWith("diff --git") ? l.replace(/^diff --git a\/(.*) b\/.*$/, "$1") : l) || " "}</span>`;
+  }).join("");   // cada linha já é um bloco: "\n" entre elas dobraria o espaçamento
+  openModal(`<div class="modal diff-modal"><div class="dm-head"><b>${icon("diff")} O que esta resposta mudou</b><button class="icon-btn" id="dm-x">${icon("x")}</button></div><pre class="diff">${lines}</pre></div>`);
+  $("#dm-x").onclick = closeModal;
+}
+async function undoCheckpoint(el, ref, redo) {
+  if (busy) return toast("warn", "Aguarde", "Espere o agente terminar.");
+  if (!redo && !(await confirmBox("Desfazer estas alterações?", "Os arquivos voltam a ser como eram antes desta resposta. O estado atual fica guardado, então dá para refazer.", "Desfazer"))) return;
+  const r = await call("checkpointUndo", JSON.stringify(ref));
+  if (!r || r.error) return toast("error", redo ? "Refazer" : "Desfazer", r ? r.error : "Falhou.");
+  const n = r.restored.length + r.removed.length;
+  toast("success", redo ? "Refeito" : "Desfeito", `${n} ${n === 1 ? "arquivo voltou" : "arquivos voltaram"} ${redo ? "à versão do agente" : "ao que eram antes"}.`);
+  undoNote = redo ? "" : "\n\n(Obs.: desfiz pelo Órbita as alterações de arquivos da sua resposta anterior.)";
+  el.classList.toggle("undone", !redo);
+  const btn = $('[data-cp="undo"]', el);
+  if (!r.redo) return btn.remove();
+  const next = { workspace: ref.workspace, before: r.redo[0], after: r.redo[1] };
+  btn.innerHTML = redo ? `${icon("undo")} Desfazer` : `${icon("redo")} Refazer`;
+  btn.onclick = () => undoCheckpoint(el, next, !redo);
 }
 function ensureTurn(model) {
   if (turnEl) return turnEl;
@@ -530,7 +657,7 @@ function onEvent(e) {
       $("#send").innerHTML = icon(busy ? "stop" : "send");
       $("#send").title = busy ? "Parar (Esc)" : "Enviar";
       setLive(busy, busy ? "Pensando…" : "");
-      if (!busy) { closeTurn(); $("#mic").classList.remove("rec"); }
+      if (!busy) { closeTurn(); $("#mic").classList.remove("rec"); if (pendingApproval) closeModal(); }
       break;
     case "turn_start": closeTurn(); ensureTurn(e.model); break;
     case "seg": segment(e.id, e.html, e.streaming); break;
@@ -545,7 +672,8 @@ function onEvent(e) {
     case "sub_end": subCard(e, true); feed("ok", `✓ <b>${esc(e.agent)}</b> terminou (${fmt(e.tokens)} tokens)`); renderAgents(); break;
     case "status": setLive(true, e.text); break;
     case "usage": S.conversation_tokens = e.total; updateMeter(e.total); break;
-    case "turn_end": closeTurn(); refreshConvs().then(() => { S.conversation_id = e.conversation_id || S.conversation_id; S.conversation_title = e.title || S.conversation_title; renderTopbar(); renderConvs(); }); break;
+    case "checkpoint": checkpointCard(e); break;
+    case "turn_end": closeTurn(); if (e.plan) planActions(); refreshConvs().then(() => { S.conversation_id = e.conversation_id || S.conversation_id; S.conversation_title = e.title || S.conversation_title; renderTopbar(); renderConvs(); }); break;
     case "error": note("⚠ " + e.message, "err"); toast("error", "Erro", e.message); break;
     case "compacted": note(`Histórico compactado: ${e.messages} mensagens antigas viraram um resumo`); break;
     case "approval": approval(e); break;
@@ -595,7 +723,11 @@ function openModal(html, clickClose = true) {
   const first = root.querySelector("input, textarea, button.primary");
   if (first) setTimeout(() => first.focus(), 30);
 }
-function closeModal() { $("#modal-root").innerHTML = ""; }
+let pendingApproval = null;   // id da confirmação aberta: fechar sem responder conta como "não"
+function closeModal() {
+  if (pendingApproval) { call("answerApproval", pendingApproval, "no"); pendingApproval = null; }
+  $("#modal-root").innerHTML = "";
+}
 function confirmBox(title, text, ok = "Confirmar") {
   return new Promise(resolve => {
     openModal(`<div class="modal"><h2>${esc(title)}</h2><p class="sub">${esc(text)}</p><div class="actions"><button class="btn" id="cf-no">Cancelar</button><button class="btn primary" id="cf-ok">${esc(ok)}</button></div></div>`);
@@ -619,8 +751,10 @@ function approval(e) {
       <details><summary class="sub" style="cursor:pointer">Todos os parâmetros</summary><pre>${esc(JSON.stringify(args, null, 2)).slice(0, 6000)}</pre></details>
       <div class="actions"><button class="btn danger" data-a="no">Negar</button><button class="btn" data-a="always">Permitir sempre nesta conversa</button><button class="btn primary" data-a="yes">Permitir</button></div>`;
   }
+  closeModal();
   openModal(`<div class="modal">${body}</div>`, false);
-  $$("[data-a]", $("#modal-root")).forEach(b => b.addEventListener("click", () => { call("answerApproval", e.id, b.dataset.a); closeModal(); }));
+  pendingApproval = e.id;
+  $$("[data-a]", $("#modal-root")).forEach(b => b.addEventListener("click", () => { pendingApproval = null; call("answerApproval", e.id, b.dataset.a); closeModal(); }));
 }
 
 // ── Paleta de comandos ─────────────────────────────────────────────────────────
@@ -828,7 +962,8 @@ function renderSettings() {
     }
     case "permissoes":
       html = `<h1>Permissões</h1><p class="lead">Quanto o agente pode fazer sozinho.</p><div class="group">
-        ${field("Modo", "Perguntar: confirma qualquer alteração. Automático: só comandos e controle do PC. Livre: nunca pergunta.", seg("permission_mode", [["perguntar", "Perguntar"], ["auto", "Automático"], ["livre", "Livre"]], st.permission_mode))}</div>`;
+        ${field("Modo", "Perguntar: confirma qualquer alteração. Automático: só comandos e controle do PC. Livre: nunca pergunta.", seg("permission_mode", [["perguntar", "Perguntar"], ["auto", "Automático"], ["livre", "Livre"]], st.permission_mode))}
+        ${field("Pontos de restauração", "Antes de cada resposta o Órbita guarda uma foto da pasta do projeto (fora dela, sem tocar no seu git). Dá para ver o que mudou e desfazer com um clique.", toggle("checkpoints", st.checkpoints !== false))}</div>`;
       break;
     case "voz":
       html = `<h1>Voz</h1><p class="lead">Fale com o agente pelo botão do microfone; a transcrição roda localmente.</p><div class="group">
