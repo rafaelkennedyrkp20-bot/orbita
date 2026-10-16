@@ -40,6 +40,8 @@ O repositório é só o código. Modelos, o ambiente Python (`venv`), chaves, co
 
 ## A interface
 
+- **Projeto**: clique em **Abrir projeto** (topo ou tela inicial) para abrir uma pasta ou criar uma nova — o agente
+  lê, cria e edita arquivos dentro dela. Os projetos recentes ficam a um clique.
 - **Conversas** salvas na lateral (busca, agrupadas por dia, renomeáveis) — reabra qualquer uma e continue.
 - **Chat** com respostas em tempo real, Markdown, código com botão Copiar, e os **passos do agente** (ferramentas)
   em blocos recolhíveis; subagentes aparecem como cartões com o modelo que estão usando.
@@ -122,7 +124,11 @@ Ajuste `Contexto do Ollama` em Configurações conforme a VRAM.
 ## Para quem vai evoluir o projeto
 
 Leia [AGENTS.md](AGENTS.md), [ROADMAP.md](ROADMAP.md) (guia de tarefas com o que falta) e
-[ARCHITECTURE.md](ARCHITECTURE.md). Testes: `venv\Scripts\python.exe -m pytest tests -q`.
+[ARCHITECTURE.md](ARCHITECTURE.md). Para pedir melhorias a qualquer IA, use o prompt pronto em
+[docs/PROMPT_EVOLUCAO.md](docs/PROMPT_EVOLUCAO.md). Testes: `venv\Scripts\python.exe -m pytest tests -q`.
+
+**Versão atual: 0.1.0-alpha.** O que mudou em cada versão está no [CHANGELOG.md](CHANGELOG.md). Correções
+pequenas entram no GitHub sem mudar a versão; só atualizações grandes ganham número novo.
 
 *100% seu: histórico, memória, chaves e perfis ficam neste computador.*
 

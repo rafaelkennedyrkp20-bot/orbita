@@ -42,6 +42,8 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [ ] Variáveis no prompt (`{workspace}`, `{user_name}`...) — hoje o ambiente é injetado automaticamente
 - [ ] Importar/exportar perfis; galeria de perfis prontos
 - [ ] "Prompts rápidos" acessíveis por `/comando` na caixa de texto
+- [x] Projeto de trabalho: abrir/criar pasta pela tela inicial, pelo topo e por Ctrl+K, com projetos recentes e pasta sugerida em Documentos
+- [ ] Conversas ligadas ao projeto (filtrar a lista lateral pelo projeto aberto)
 
 ## Fase 3 — MCP, Skills, Plugins e contas
 
@@ -109,8 +111,8 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Busca web: parágrafos duplicados removidos; nova ferramenta `fetch_url`
 - [x] Imports pesados (Whisper, teclado, pyautogui) só quando usados
 - [x] Código morto removido (`llm_interface.py`, `file_ops.py`, roteador por palavras-chave, métodos sem uso)
-- [x] 53 testes automatizados (`tests/`), incluindo servidor MCP real, agente externo, roteamento, compactação, contratos de handoff, quality gates (`verify_project`) e pipeline criativo
-- [x] Log diário em JSONL (append atômico em `<data>.jsonl`) além do snapshot diário (`memory/memory_manager.py`)
+- [x] 60 testes automatizados (`tests/`), incluindo servidor MCP real, agente externo, roteamento, compactação, contratos de entrega, `verify_project`, projetos e API manual
+- [x] Log diário só em JSONL (uma linha por interação, sem reescrever o arquivo); lê o JSON antigo do dia se existir
 - [ ] Sandbox opcional para o shell; lista de comandos proibidos
 - [ ] Empacotar como `.exe` (PyInstaller) com instalador
 
@@ -128,7 +130,10 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Segurança da interface: HTML do modelo sanitizado, CSP restrita, navegação externa sempre no navegador do sistema
 - [x] `.gitignore` para publicar sem modelos, chaves ou dados pessoais
 - [x] Licença **GNU GPL v3** (`LICENSE`, aviso no README e em Configurações › Sobre) — melhorias distribuídas continuam abertas
-- [ ] ⭐ Publicar no GitHub (repositório, README com capturas, releases)
+- [x] Publicado no GitHub (rafaelkennedyrkp20-bot/orbita), só código-fonte
+- [x] Versionamento SemVer alfa (`agent/__init__.py`, `CHANGELOG.md`, regras no AGENTS.md); versão atual 0.1.0-alpha
+- [x] Prompt padrão para evoluir o projeto com qualquer IA (`docs/PROMPT_EVOLUCAO.md`)
+- [ ] Integração contínua no GitHub (rodar pyflakes + pytest a cada envio)
 - [ ] Renomear pasta/arquivos `.bat` para Órbita (mantidos por compatibilidade por enquanto)
 - [ ] Sons sutis de notificação; animação do logo enquanto trabalha
 
@@ -155,3 +160,13 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   suporte a `reasoning_content` no turno ativo para DeepSeek Reasoner com poda automática em turnos antigos;
   pipeline criativo em `generate_image` com `style` anchor, `negative_prompt`, `shot_id` e sidecar `.meta.json` + rota `xai:grok-2-image` e especialidade `video`;
   log diário append-only em `.jsonl` e 53 testes automatizados passando.
+- **2026-10-16 — Claude (Opus 5.5)**: revisão do trabalho do Argon e do Grok (commitado antes, com crédito).
+  Correções: `verify_project` executa código, então passou a `risk="exec"` (estava `read`, burlando permissões),
+  usa o venv do próprio projeto, ignora venv/node_modules no lint e marca ferramenta ausente como "pulado";
+  verificação automática da equipe roda uma vez só, depois de todos, pedindo permissão; skill de revisão citava
+  parâmetro inexistente; log diário agora é só JSONL (o JSON inteiro ainda era reescrito a cada mensagem) e o
+  código morto de histórico saiu; interface: compositor não some mais embaixo, topo cabe em telas menores,
+  diálogo de projeto com botão fechar, projetos recentes e pasta sugerida em Documentos (antes sugeria a pasta
+  Users do disco C:). AGENTS.md reescrito (desenvolvimento x uso, coordenação entre IAs, regras de versão),
+  docs/PROMPT_EVOLUCAO.md, CHANGELOG e versão 0.1.0-alpha. Verificado: pyflakes 0 avisos, 60 testes,
+  fluxo de criar/abrir projeto testado na janela real.
