@@ -138,6 +138,27 @@ def test_contract_reaches_every_helper_and_mismatch_comes_back_to_the_lead(brain
     assert "Checagem automática de integração" in delegate_result and ".site-header" in delegate_result
 
 
+def test_generic_helpers_cannot_drive_the_desktop_and_stop_at_the_token_cap(brain, monkeypatch):
+    """Caso real: um ajudante 'testou' o site clicando na tela do usuário e gastou 1,1 milhão de tokens."""
+    seen_tools = []
+
+    def helper_step(messages, tools):
+        seen_tools.extend(t["function"]["name"] if "function" in t else t.get("name") for t in tools or [])
+        return ChatResult(tool_calls=[call("list_dir", path=".")], usage={"input_tokens": 200_000, "output_tokens": 1})
+    fake = install(monkeypatch, [
+        ChatResult(tool_calls=[call("delegate_task", tasks=[{"task": "teste o site"}])]),
+        helper_step, helper_step,          # 200k + 200k: no 3º passo o ajudante já passou do teto
+        ChatResult(text="integrado"),
+    ])
+    brain.settings.set("helper_token_cap", 300_000, save=False)
+    session = AgentSession(brain, brain.profiles.get("geral"), "river", "deepseek-v4", approve=lambda r: "yes")
+    assert session.run("teste") == "integrado"
+    assert "screenshot" not in seen_tools and "mouse_click" not in seen_tools and "check_web_page" in seen_tools
+    report = next(m["content"] for m in session.messages if m["role"] == "tool")
+    assert "PARTIAL" in report and "limite de 300.000 tokens" in report
+    assert len(fake.calls) == 4   # principal + 2 passos do ajudante (para no teto) + principal
+
+
 def test_environment_suggests_team_only_for_big_requests(brain, monkeypatch):
     fake = install(monkeypatch, [ChatResult(text="ok"), ChatResult(text="ok")])
     session = AgentSession(brain, brain.profiles.get("geral"), "anthropic", "claude-opus-5-5", approve=lambda r: "yes")

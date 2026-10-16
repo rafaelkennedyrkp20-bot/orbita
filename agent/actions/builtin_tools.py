@@ -14,7 +14,9 @@ Grupos (perfis liberam grupos inteiros):
 
 from __future__ import annotations
 
+import atexit
 import fnmatch
+import json
 import logging
 import os
 import re
@@ -347,31 +349,87 @@ def _shell_argv(command: str) -> list[str]:
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
+    """Encerra o comando E tudo que ele abriu (um servidor filho seguraria a saída para sempre)."""
     if not IS_WINDOWS:
         import signal
 
         try:
-            os.killpg(proc.pid, signal.SIGKILL)   # o comando e tudo que ele abriu
+            os.killpg(proc.pid, signal.SIGKILL)
             return
         except OSError:
             pass
-    proc.kill()
+    else:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=15,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
+# Comandos que não terminam sozinhos (servidores, watchers): vão para segundo plano automaticamente.
+LONG_RUNNING = re.compile(
+    r"(http\.server|\bnpm\s+(run\s+)?(dev|start|serve|watch)\b|\b(yarn|pnpm|bun)\s+(run\s+)?(dev|start|serve)\b|"
+    r"\bnpx\s+(serve|vite|http-server|live-server|next\s+dev)\b|\bvite(\s|$)|\bflask\s+run\b|\buvicorn\b|"
+    r"\bgunicorn\b|\blive-server\b|\bphp\s+-S\b|\bnodemon\b|\bjupyter\s+(notebook|lab)\b|\bstreamlit\s+run\b|"
+    r"\bpython\s+-m\s+(flask|uvicorn)\b|\b(serve|http-server)\s+[.\w/-])", re.I)
+_BACKGROUND: list[subprocess.Popen] = []
+
+
+def _stop_background() -> None:
+    for proc in _BACKGROUND:
+        if proc.poll() is None:
+            _kill_tree(proc)
+
+
+atexit.register(_stop_background)
+
+
+def _start_background(command: str, cwd: Path) -> ToolResult:
+    import tempfile
+
+    log_path = Path(tempfile.gettempdir()) / f"orbita-bg-{int(time.time() * 1000)}.log"
+    log = open(log_path, "wb")
+    proc = subprocess.Popen(_shell_argv(command), cwd=str(cwd), stdout=log, stderr=subprocess.STDOUT,
+                            stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                            start_new_session=not IS_WINDOWS)
+    _BACKGROUND.append(proc)
+    time.sleep(2.5)   # dá tempo de o servidor subir (ou falhar) e escrever a primeira saída
+    log.flush()
+    early = ANSI_RE.sub("", log_path.read_bytes().decode("utf-8", "replace")).strip()[-3000:]
+    if proc.poll() is not None:
+        return ToolResult(text=f"[exit {proc.returncode}] O comando terminou logo (não ficou rodando).\n"
+                               f"{early or '(sem saída)'}", is_error=proc.returncode != 0)
+    port = re.search(r"(?:port|porta|:)\s*(\d{4,5})\b", command + " " + early, re.I)
+    stop = f"Stop-Process -Id {proc.pid} -Force" if IS_WINDOWS else f"kill {proc.pid}"
+    return ToolResult(text=(
+        f"Rodando em segundo plano (PID {proc.pid})"
+        + (f", porta {port.group(1)} — ex.: http://127.0.0.1:{port.group(1)}/" if port else "") + ".\n"
+        f"Log: {log_path}\nPara encerrar: {stop} (o Órbita também encerra ao fechar).\n"
+        f"Primeira saída:\n{early or '(nada ainda)'}"))
 
 
 def _register_shell(r: ToolRegistry) -> None:
 
-    @tool(r, "run_shell", SHELL_HELP,
+    @tool(r, "run_shell", SHELL_HELP + " Servers, watchers and anything that never exits must use "
+          "background=true (known server commands are moved to background automatically).",
           {"command": {"type": "string"},
            "cwd": {"type": "string", "description": "Working directory. Default: workspace"},
-           "timeout": {"type": "integer", "description": "Seconds (default 120, max 900)"}},
+           "timeout": {"type": "integer", "description": "Seconds (default 120, max 900)"},
+           "background": {"type": "boolean",
+                          "description": "Start and return immediately (servers like http.server, npm run dev). "
+                                         "Returns PID, port and log file."}},
           ["command"], risk="exec", group="shell")
     def run_shell(args, ctx: ToolContext):
         cwd = ctx.resolve(args.get("cwd") or ".")
         if not cwd.is_dir():
             return ToolResult.error(f"Pasta de trabalho inexistente: {cwd}")
+        command = args["command"].strip()
+        if args.get("background") or LONG_RUNNING.search(command):
+            return _start_background(command, cwd)
         timeout = max(5, min(int(args.get("timeout") or 120), 900))
         proc = subprocess.Popen(
-            _shell_argv(args["command"].strip()), cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            _shell_argv(command), cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             start_new_session=not IS_WINDOWS,
         )
@@ -384,11 +442,74 @@ def _register_shell(r: ToolRegistry) -> None:
             except subprocess.TimeoutExpired:
                 if (ctx.cancel and ctx.cancel.is_set()) or time.monotonic() > deadline:
                     _kill_tree(proc)
-                    output, _ = proc.communicate()
+                    try:
+                        output, _ = proc.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:   # algum neto ainda segura a saída: desiste dela
+                        output = b""
                     reason = "cancelado" if ctx.cancel and ctx.cancel.is_set() else f"tempo esgotado ({timeout}s)"
-                    return ToolResult.error(f"Comando {reason}.\n{output.decode('utf-8', 'replace')[-8000:]}")
+                    return ToolResult.error(
+                        f"Comando {reason}. Se era um servidor ou algo que não termina, use background=true.\n"
+                        f"{output.decode('utf-8', 'replace')[-8000:]}")
         text = ANSI_RE.sub("", output.decode("utf-8", errors="replace")).strip()
         return ToolResult(text=f"[exit {proc.returncode}]\n{text or '(sem saída)'}", is_error=proc.returncode != 0)
+
+    @tool(r, "check_web_page",
+          "Open a web page (local .html file or http URL) in an invisible browser — NOT the user's screen — and "
+          "report JavaScript errors, files that failed to load, broken local links and horizontal overflow on "
+          "desktop (1366px) and phone (390px). Optional `script`: JavaScript run after load to test behavior "
+          "(e.g. click a button, then return document.querySelector('#total').textContent). Optional small "
+          "screenshot. Use this to verify sites instead of screenshot/mouse tools or starting servers.",
+          {"path": {"type": "string", "description": "Path to the .html file (relative to the workspace) or URL"},
+           "script": {"type": "string", "description": "Optional JS body; may use await; return a value"},
+           "screenshot": {"type": "boolean", "description": "Also return a small screenshot (desktop)"}},
+          ["path"], risk="exec", group="shell")
+    def check_web_page(args, ctx: ToolContext):
+        import json as _json
+        import tempfile
+
+        target = args["path"].strip()
+        if not target.startswith(("http://", "https://")):
+            path = ctx.resolve(target)
+            if not path.is_file():
+                return ToolResult.error(f"Página não encontrada: {path}")
+            target = str(path)
+        shot = (str(Path(tempfile.gettempdir()) / f"orbita-page-{int(time.time() * 1000)}.png")
+                if args.get("screenshot") else "")
+        root = Path(__file__).resolve().parents[2]
+        env = {**os.environ, "QT_QPA_PLATFORM": "offscreen", "PYTHONIOENCODING": "utf-8"}
+        try:
+            proc = subprocess.run([sys.executable, "-m", "agent.actions.web_check", target,
+                                   "--script", args.get("script") or "", "--shot", shot],
+                                  cwd=str(root), env=env, capture_output=True, timeout=90,
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            data = _json.loads(proc.stdout.decode("utf-8", "replace").strip().splitlines()[-1])
+        except Exception as error:
+            return ToolResult.error(f"Não consegui abrir a página no navegador invisível: {error}")
+        return ToolResult(text=_page_report(data), images=[shot] if shot and Path(shot).is_file() else [],
+                          is_error=bool(data.get("console_errors")))
+
+
+def _page_report(data: dict) -> str:
+    views = data.get("views") or {}
+    desk, phone = views.get("1366") or {}, views.get("390") or {}
+    lines = [f"Página: {desk.get('title') or '(sem título)'} — {desk.get('textChars', 0)} caracteres de texto, "
+             f"{desk.get('buttons', 0)} botões."]
+    errors = data.get("console_errors") or []
+    lines.append(f"Erros de JavaScript: {len(errors)}" + ("".join(f"\n  - {e}" for e in errors[:15]) if errors else ""))
+    broken = desk.get("brokenResources") or []
+    if broken:
+        lines.append("Arquivos que não carregaram: " + ", ".join(broken[:15]))
+    if data.get("broken_links"):
+        lines.append("Links locais quebrados: " + ", ".join(data["broken_links"][:15]))
+    lines.append(f"Desktop (1366px): conteúdo vaza {desk.get('overflowX', 0)} px para o lado."
+                 if desk.get("overflowX") else "Desktop (1366px): sem vazamento horizontal.")
+    lines.append(f"Celular (390px): conteúdo vaza {phone.get('overflowX', 0)} px para o lado — corrija o responsivo."
+                 if phone.get("overflowX") else "Celular (390px): sem vazamento horizontal.")
+    if "script" in data and data["script"] is not None:
+        s = data["script"]
+        lines.append(f"Script: {'ok' if s.get('ok') else 'ERRO'} → "
+                     + (json.dumps(s.get("value"), ensure_ascii=False)[:1500] if s.get("ok") else str(s.get("error"))))
+    return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────────────────────

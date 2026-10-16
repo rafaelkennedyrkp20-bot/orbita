@@ -431,6 +431,12 @@ class AgentSession:
                 return final_text or "(interrompido)"
             if not self._check_budget():
                 return final_text + "\n\n[Pausado pelo limite de tokens. Peça para continuar quando quiser.]"
+            helper_cap = int(self.settings.get("helper_token_cap") or 300_000)
+            if self.depth and self.turn_tokens > helper_cap:
+                # Ajudante girando em falso (ex.: testando visualmente sem parar): entrega o que tem.
+                return (final_text + f"\n\n**Status**: PARTIAL\n**Verificação**: interrompido pelo Órbita — este "
+                        f"ajudante passou do limite de {helper_cap:,} tokens. O agente principal deve conferir os "
+                        "arquivos da parte dele e terminar o que faltar.").replace(",", ".")
             tools = self.visible_tools()
             self._maybe_compact(tools)
             try:
@@ -824,7 +830,9 @@ class AgentSession:
             if spec.get("profile") and spec["profile"] in profiles.profiles:
                 profile = profiles.get(spec["profile"])
             else:
-                groups = [g for g in self.profile.tool_groups if g != "agentes"]
+                # Ajudante genérico: sem delegar e sem controlar a tela/mouse/teclado do usuário (vários em
+                # paralelo disputariam o mesmo desktop; para "ver" uma página use check_web_page).
+                groups = [g for g in self.profile.tool_groups if g not in ("agentes", "pc")]
                 profile = replace(self.profile, id="ajudante", name="Ajudante", in_team=False,
                                   tool_groups=groups, startup_prompt="", auto_startup=False)
             if not profile.workspace:

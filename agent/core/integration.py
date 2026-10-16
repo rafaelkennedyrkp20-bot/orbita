@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 SKIP = {"node_modules", ".git", "venv", ".venv", "dist", "build", "__pycache__", "AppData", "Application Data",
-        "Library", "site-packages", "models", "data"}
+        "Library", "site-packages"}   # "data/" e "assets/" são comuns em sites: entram na checagem
 HTML_CLASS = re.compile(r"""\bclass\s*=\s*["']([^"']+)["']""", re.I)
 HTML_ID = re.compile(r"""\bid\s*=\s*["']([^"']+)["']""", re.I)
 CSS_BLOCK = re.compile(r"/\*.*?\*/", re.S)
@@ -23,6 +23,8 @@ CSS_ID = re.compile(r"#(-?[_a-zA-Z][\w-]*)")
 JS_CLASS = re.compile(r"""(?:classList\.(?:add|toggle|remove|contains)\(\s*|className\s*[+]?=\s*)["'`]([^"'`]+)["'`]""")
 JS_QUERY = re.compile(r"""(?:querySelector(?:All)?|closest|matches)\(\s*["'`]([^"'`]+)["'`]""")
 JS_ID = re.compile(r"""getElementById\(\s*["'`]([^"'`]+)["'`]""")
+# Elementos que o próprio JS cria: el.id = "x" / setAttribute("id", "x") / HTML montado em string.
+JS_ID_ASSIGN = re.compile(r"""(?:\.id\s*=\s*|setAttribute\(\s*["']id["']\s*,\s*)["'`]([\w-]+)["'`]""")
 MAX_LIST = 25
 
 
@@ -92,17 +94,23 @@ def check(html: list[Path], css: list[Path], js: list[Path]) -> str:
             selector = re.sub(r"url\([^)]*\)", "", selector)
             css_classes.update(CSS_CLASS.findall(selector))
             css_ids.update(CSS_ID.findall(selector))
-    js_classes, js_ids = set(), set()
+    js_classes, js_ids, built_classes, built_ids = set(), set(), set(), set()
     for path in js:
-        c, i = _js_selectors(_read(path))
+        text = _read(path)
+        c, i = _js_selectors(text)
         js_classes |= c
         js_ids |= i
+        for match in HTML_CLASS.finditer(text):   # HTML montado em template string (cardJogo...)
+            built_classes.update(w for w in match.group(1).split() if re.fullmatch(r"-?[_a-zA-Z][\w-]*", w))
+        built_ids.update(m.strip() for m in HTML_ID.findall(text) if re.fullmatch(r"[\w-]+", m.strip()))
+        built_ids.update(JS_ID_ASSIGN.findall(text))
 
-    used = html_classes | js_classes   # classes que existem na página (HTML ou colocadas pelo JS)
-    unstyled = sorted(c for c in html_classes - css_classes if not c.startswith(("js-", "is-", "has-")))
+    page_classes = html_classes | built_classes   # classes que aparecem na página
+    used = page_classes | js_classes
+    unstyled = sorted(c for c in page_classes - css_classes if not c.startswith(("js-", "is-", "has-")))
     dead = sorted(css_classes - used)
-    js_missing_ids = sorted(js_ids - html_ids)
-    js_missing_classes = sorted(c for c in js_classes - html_classes - css_classes)
+    js_missing_ids = sorted(js_ids - html_ids - built_ids)
+    js_missing_classes = sorted(c for c in js_classes - page_classes - css_classes)
 
     problems = []
     if unstyled and len(unstyled) >= 3:

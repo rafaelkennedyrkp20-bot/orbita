@@ -42,6 +42,18 @@ def test_coherent_site_is_silent(tmp_path):
     assert integration.check_workspace(tmp_path, time.time() - 5) == ""
 
 
+def test_elements_created_by_js_are_not_false_alarms(tmp_path):
+    """Caso real (rodada com DeepSeek): o JS cria o #toast e monta os cards em template string."""
+    html = '<header class="header"><span id="cart-count"></span></header><main id="grid"></main>'
+    css = ".header{} .toast{} .card{} .card-body{} .btn-add{} .show{}"
+    js = """function toast(m){ let el = document.getElementById("toast");
+      if(!el){ el = document.createElement("div"); el.id = "toast"; el.className = "toast"; } el.classList.add("show"); }
+    const card = j => `<article class="card"><div class="card-body"><button class="btn-add">+</button></div></article>`;
+    document.getElementById("grid").innerHTML = card({}); document.getElementById("cart-count");"""
+    _files(tmp_path, html, css, js)
+    assert integration.check_workspace(tmp_path, time.time() - 5) == ""
+
+
 def test_old_files_and_non_web_projects_are_ignored(tmp_path):
     _files(tmp_path)
     assert integration.check_workspace(tmp_path, time.time() + 60) == ""   # nada mudou depois

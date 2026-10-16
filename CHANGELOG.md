@@ -38,8 +38,16 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   paralelo → integração). Pedidos pequenos não recebem nada. Cada ajudante sabe o que os outros estão fazendo.
   Até 6 ao mesmo tempo com modelos de ponta na nuvem, 4 nos demais e 2 com modelo local; o resto espera na fila
   (ajustável na página Equipe).
+- **Agentes testam sites sem mexer na sua tela**: nova ferramenta `check_web_page` abre a página num navegador
+  invisível e mostra erros de JavaScript, arquivos que não carregaram, links quebrados, conteúdo vazando no celular e,
+  se pedido, uma captura pequena; também roda um script de teste (ex.: clicar em "adicionar ao carrinho").
+- Ajudantes da equipe não controlam mais mouse, teclado e tela do usuário, e cada um para sozinho ao passar de 300 mil
+  tokens (entrega o que tem como PARTIAL), em vez de gastar o saldo testando sem fim.
 
 ### Corrigido
+- O terminal do agente não trava mais quando um comando abre um servidor (ex.: `python -m http.server`): servidores
+  e comandos que não terminam vão para segundo plano (com PID, porta e log), e no fim do prazo o Órbita encerra o
+  comando com tudo o que ele abriu.
 - A barra de digitar não some mais durante trabalhos longos: o painel Ao vivo crescia e empurrava a página para fora
   da janela; agora ele rola por dentro. Respostas com linhas longas também não cortam mais o texto à direita.
 - Raciocínio do modelo em bloco expansível: aberto enquanto ele pensa (texto completo, com tempo), fecha sozinho

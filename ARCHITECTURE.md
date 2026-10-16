@@ -43,6 +43,8 @@ Você ──► GUI (agent/gui.py) / terminal / voz
 | `agent/core/routing.py` | Catálogo de capacidades (`data/model_catalog.json`) e escolha do melhor modelo por especialidade (só com a equipe em "Automático"; o padrão é o ajudante usar o modelo do principal) |
 | `agent/core/capabilities.py` | Nível de cada modelo (ponta / padrão / compacto): mais autonomia e passos para os de ponta, "modo foco" para os locais pequenos |
 | `agent/core/checkpoints.py` · `mentions.py` · `updater.py` | Pontos de restauração por resposta (git sombra) · `@arquivo` · atualização pelo GitHub |
+| `agent/core/teamwork.py` · `integration.py` | Quando sugerir equipe e quantos ajudantes em paralelo · checagem HTML × CSS × JS depois da delegação |
+| `agent/actions/web_check.py` | Ferramenta `check_web_page`: abre a página num Chromium invisível (processo separado) e relata erros, recursos, links e overflow |
 | `agent/voice/dictation.py` | Ditado no campo de mensagem: grava até o 2º clique, texto parcial ao vivo, final preciso; GPU (CUDA) com volta automática para a CPU |
 | `agent/core/conversations.py` | Conversas salvas (`data/conversations/`) e conversão para blocos da interface |
 | `agent/memory/memory_manager.py` | Histórico diário e fatos de longo prazo |

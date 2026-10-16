@@ -307,3 +307,14 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   compactos só se a pessoa pedir. Paralelismo por nível/provedor (6/4/2; local = 2 por dividir a GPU), fila para o
   excedente, configurável (`team_max_parallel`). Ajudantes recebem a lista do que os colegas fazem. Verificado: pytest
   155 + 2 pulados (12 novos, incluindo prompt real de turno grande × pequeno); página Equipe capturada.
+- **2026-10-16 — Claude Opus 5.5**: teste real autorizado pelo usuário, com a API do river (mesmo pedido: "loja de jogos
+  indie completa em HTML/CSS/JS"). Rodada 1 (DeepSeek-V4.1-Flash, antes): o modelo seguiu o fluxo sugerido (esqueleto +
+  `delegate_task` com 4 ajudantes e contrato de 1,1 mil caracteres) e o site ficou bom, mas: um ajudante subiu
+  `http.server` e o `run_shell` travou 27 min (neto segurando o pipe; o kill não alcançava a árvore) e outro "testou"
+  controlando a tela (6 screenshots, cliques) — 1,13 M tokens só ele, 2,41 M no total, 35 min. Correções: `taskkill /T`
+  + `communicate` com prazo, `background=true` e detecção automática de servidores (`atexit` encerra);
+  `check_web_page` (`agent/actions/web_check.py`, Chromium offscreen em processo separado, script assíncrono por
+  consulta); ajudante genérico sem o grupo `pc`; teto `helper_token_cap` (300 mil) → PARTIAL; checagem de integração
+  reconhece elementos criados pelo JS (`el.id =`, templates). Rodada 2 (GLM-5.3-Flash, depois): mesmo fluxo, 4
+  ajudantes, `check_web_page` usado 21 vezes, nenhum controle de tela, 8,9 min e 1,16 M tokens (-52%); site com 0 erros
+  de JS nas 4 páginas, sem overflow no celular, integração limpa. Verificado também: pytest 159 + 2 pulados.
