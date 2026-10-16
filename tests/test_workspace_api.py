@@ -117,6 +117,26 @@ def test_used_models_become_visible_to_the_team(tmp_path, monkeypatch):
     assert not settings.remember_models("nao-existe", ["x"])
 
 
+def test_gateway_that_requires_a_key_says_where_to_get_it(monkeypatch):
+    """Caso real (issue #1): o OmniRoute pede chave mesmo local (401 com REQUIRE_API_KEY=false) e lista 479 modelos."""
+    class Response:
+        def __init__(self, status, payload=None):
+            self.status_code, self._payload = status, payload
+
+        def json(self):
+            return self._payload
+
+    many = {"data": [{"id": f"p{i // 100}/m{i}"} for i in range(479)]}
+    monkeypatch.setattr(httpx, "get", lambda url, headers, timeout, follow_redirects:
+                        Response(200, many) if headers.get("Authorization") == "Bearer certa" else Response(401))
+    without = probe_compat_models("http://127.0.0.1:20128/v1", "")
+    assert not without["ok"] and "pede uma chave" in without["error"] and "OmniRoute" in without["error"]
+    wrong = probe_compat_models("http://127.0.0.1:20128/v1", "errada")
+    assert not wrong["ok"] and "recusou essa chave" in wrong["error"]
+    right = probe_compat_models("http://127.0.0.1:20128/v1", "certa")
+    assert right["ok"] and len(right["models"]) == 479                     # lista inteira (antes cortava em 300)
+
+
 def test_local_gateway_without_key_end_to_end(tmp_path):
     """Gateway local sem chave (ex.: OmniRoute em 127.0.0.1:20128): endereço sem /v1, adicionar e listar modelos."""
     import json

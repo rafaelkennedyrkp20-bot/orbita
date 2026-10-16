@@ -695,7 +695,10 @@ def probe_compat_models(base_url: str, api_key: str = "") -> dict[str, Any]:
             last = "Não consegui conectar nesse endereço. Confira o link e a internet."
             continue
         if response.status_code in (401, 403):
-            empty["error"] = "A API recusou o acesso. Confira a chave, ou deixe em branco se o servidor não pede chave."
+            empty["error"] = ("A API recusou essa chave. Confira se copiou a chave inteira e se ela está ativa no painel "
+                              "do serviço." if (api_key or "").strip() else
+                              "Este servidor pede uma chave. Gateways como OmniRoute e LiteLLM pedem uma chave criada no "
+                              "painel deles (no OmniRoute: API Keys), mesmo rodando no seu PC. Cole-a no campo Chave.")
             return empty
         if response.status_code >= 400:
             last = f"A API respondeu {response.status_code}. Confira se o endereço termina em /v1."
@@ -707,7 +710,7 @@ def probe_compat_models(base_url: str, api_key: str = "") -> dict[str, Any]:
             continue
         ids = _model_ids(payload)
         if ids:
-            return {"ok": True, "models": ids[:300], "base_url": endpoint[: -len("/models")], "error": ""}
+            return {"ok": True, "models": ids[:1000], "base_url": endpoint[: -len("/models")], "error": ""}
         last = "Conectou, mas não veio uma lista de modelos. Você ainda pode digitar o nome do modelo."
     empty["error"] = last
     return empty

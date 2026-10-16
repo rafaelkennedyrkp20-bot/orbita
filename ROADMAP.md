@@ -400,3 +400,10 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   (conferido na janela com o `luma-salto` real). Blender FOI usado (`blender/personagens.py`), mas com primitivas e
   luz padrão; modelo `personagem_toon.py` testado no Blender 4.5.9 local (sprite com contorno e toon). Achado no teste:
   `//sprite.png` sem .blend salvou em `C:\` — corrigido na skill. pytest 191 + 2 pulados.
+- **2026-10-16 — Claude Opus 5.5**: issue #1 (OmniRoute) voltou pedindo detalhes. Instalado o OmniRoute 3.8.51
+  (npm, pasta isolada, só em 127.0.0.1) e testado com o Órbita: `/v1/models` dá 401 sem chave mesmo com
+  `REQUIRE_API_KEY=false` (provável travamento do usuário); com chave criada no painel lista 479 modelos de todo o
+  catálogo, a maioria sem provedor conectado; `ddgw/gpt-5.4-mini` respondeu pelo provedor do Órbita, mas sem tool
+  calling; `auto/best-chat` e `oc/*` falham sem provedor conectado. Aviso de 401 com/sem chave e pesquisa na lista do
+  API manual (janela real conferida). Achados: o OmniRoute escuta em 0.0.0.0 por padrão e lê o `.env` da pasta atual.
+  pytest 192 + 2 pulados.

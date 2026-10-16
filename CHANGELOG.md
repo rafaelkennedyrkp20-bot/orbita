@@ -76,6 +76,9 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 - Rolagem da conversa parava de acompanhar a resposta no meio de um turno longo (raciocínio + muitas ações) e
   podia puxar de volta quem rolou para ler. Agora só a pessoa desliga o acompanhamento; voltar ao fim religa.
 - Skill `modelagem-3d`: exemplos salvavam em `//arquivo`, que sem .blend vai para a raiz do disco (C:\).
+- API manual com gateways (OmniRoute, issue #1): o OmniRoute pede chave mesmo rodando no PC, e o aviso era genérico;
+  agora diz onde criar a chave. A lista de modelos do Verificar tem pesquisa e mostra todos (o OmniRoute lista 479;
+  antes cortava em 300 e mostrava só 80 botões, começando por modelos de imagem que não servem para conversa).
 - Atualização automática que não "pegava" (relato de usuário no Linux): o programa regravava o ícone `app.ico` ao
   abrir e o git passava a acusar "alteração local", então a atualização era recusada. O ícone não é mais regravado, o
   atualizador restaura sozinho os arquivos que o próprio programa gera e ignora mudança só de permissão (`chmod +x`).

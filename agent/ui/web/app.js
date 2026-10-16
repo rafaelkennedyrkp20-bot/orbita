@@ -1701,11 +1701,20 @@ function onProbe(e) {
     return;
   }
   if (e.base_url && $("#api-url")) $("#api-url").value = e.base_url;
-  const shown = (e.models || []).slice(0, 80);
-  status.textContent = `${e.models.length} modelo(s) encontrado(s). Clique em um para usar.`;
-  list.innerHTML = shown.map(m => `<button type="button" class="btn small" data-pick-model="${esc(m)}">${esc(m)}</button>`).join("")
-    + (e.models.length > shown.length ? `<span class="status">e mais ${e.models.length - shown.length}. Digite o nome no campo Modelo.</span>` : "");
-  $$("[data-pick-model]", list).forEach(b => b.addEventListener("click", () => { $("#api-model").value = b.dataset.pickModel; }));
+  // Gateways (OmniRoute, OpenRouter…) devolvem centenas de modelos: pesquisa na lista inteira.
+  const models = e.models || [];
+  status.textContent = `${models.length} modelo(s) encontrado(s). Pesquise e clique em um para usar.`;
+  list.innerHTML = `<label class="model-search">${icon("search")}<input id="probe-q" placeholder="Pesquisar (ex.: deepseek, claude, gpt)…" spellcheck="false" autocomplete="off"><span class="cnt" id="probe-count"></span></label><div class="model-pick" id="probe-list"></div>`;
+  const render = () => {
+    const q = $("#probe-q").value, picked = $("#api-model").value.trim();
+    const hit = models.filter(m => matchModelQuery(m, q));
+    $("#probe-count").textContent = `${hit.length} de ${models.length}`;
+    $("#probe-list").innerHTML = hit.slice(0, 150).map(m => `<button type="button" class="mp ${m === picked ? "on" : ""}" data-pick-model="${esc(m)}">${icon(m === picked ? "check" : "cpu")}<span>${esc(m)}</span></button>`).join("")
+      || `<div class="empty">Nenhum modelo com “${esc(q)}”. Você pode digitar o nome no campo Modelo.</div>`;
+    $$("[data-pick-model]", list).forEach(b => b.onclick = () => { $("#api-model").value = b.dataset.pickModel; render(); });
+  };
+  $("#probe-q").oninput = render;
+  render();
 }
 async function useProject(res) {
   if (!res || res.error) {
