@@ -31,6 +31,7 @@ openscad.com -o previa.png --imgsize=800,600 --viewall --autocenter modelo.scad
 ## Blender sem janela
 1. Escreva `cena.py` com `bpy` (o Blender roda o script e sai):
 ```python
+from pathlib import Path
 import bpy
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.mesh.primitive_uv_sphere_add(radius=1, location=(0, 0, 1))
@@ -42,13 +43,32 @@ bpy.ops.object.light_add(type="SUN", location=(4, -4, 6))
 bpy.ops.object.camera_add(location=(5, -5, 4), rotation=(1.1, 0, 0.785))
 scene = bpy.context.scene; scene.camera = bpy.context.active_object
 scene.render.engine = "BLENDER_EEVEE_NEXT"; scene.render.resolution_x, scene.render.resolution_y = 800, 600
-scene.render.filepath = bpy.path.abspath("//previa.png")
+scene.render.filepath = str(Path.cwd() / "previa.png")
 bpy.ops.render.render(write_still=True)
-bpy.ops.export_scene.gltf(filepath=bpy.path.abspath("//modelo.glb"))
+bpy.ops.export_scene.gltf(filepath=str(Path.cwd() / "modelo.glb"))
 ```
-2. Rode: `blender.exe -b -P cena.py` (na pasta do projeto; `//` = pasta do arquivo .blend ou a atual).
+2. Rode: `blender.exe -b -P cena.py` **na pasta do projeto**. Caminhos sempre com `Path.cwd()` ou absolutos: sem .blend salvo, `//` vira a raiz do disco (C:\).
    Se `BLENDER_EEVEE_NEXT` não existir na versão, use `BLENDER_EEVEE` ou `CYCLES` (mais lento).
 3. Confira `previa.png` com `read_file` e o tamanho do `modelo.glb`.
+
+## Personagem e sprites de jogo (qualidade)
+Primitivas soltas com luz padrão ficam com cara de "bonecos de bolinha" (caso real: cubo como bolsa, palitos
+como pernas, cores estouradas). Comece pelo modelo testado: `use_skill name="modelagem-3d" file="personagem_toon.py"`
+e troque só as partes. Ele já faz:
+- **Suave**: Subdivision Surface (nível 2) + sombreamento suave em todas as partes orgânicas.
+- **Toon de 2 tons** (Diffuse → Shader to RGB → ColorRamp constante): luz e sombra chapadas, sem plástico.
+- **Contorno** escuro por casco invertido (Solidify com normais invertidas + material com backface culling).
+- `view_transform = "Standard"` (sem lavar/estourar as cores), câmera **ortográfica**, fundo transparente.
+
+Regras de forma:
+- Proporção chibi: cabeça ≈ 45% da altura, olhos grandes (branco + pupila, com contorno fino), mãos e pés como
+  esferas achatadas. Partes **encostadas/afundadas** umas nas outras, nada flutuando, nada de cubo cru.
+- Paleta de 3–4 cores por personagem, com sombra de matiz mais fria/escura (não só preto). Inimigo com cor oposta.
+- Mesma câmera, escala e luz para todos os sprites. Animação: 2–4 quadros mudando pose (pernas/braços girando),
+  não só a posição; junte numa folha com `magick montage q*.png -tile 4x1 -geometry +0+0 -background none folha.png`.
+
+Revise a prévia antes de entregar (`read_file` na imagem): silhueta legível em 64 px? contorno aparece? cores sem
+estourar? partes conectadas? Se o seu modelo não enxerga imagens, peça a um ajudante com visão ou ao principal.
 
 ## Verificar sempre
 - Toda entrega 3D tem uma **imagem de prévia** conferida visualmente.

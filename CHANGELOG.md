@@ -19,6 +19,11 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## [Não lançado]
 
 ### Melhorias
+- **"Criado nesta resposta"**: no fim do turno, o que a resposta criou (página, imagem, vídeo, modelo) aparece num
+  cartão com **Testar no navegador** / Abrir e Mostrar na pasta — sem caçar o arquivo.
+- Botão **↓** para voltar ao fim da conversa quando você rolou para cima.
+- Skill `modelagem-3d`: seção de personagem/sprite de jogo com modelo testado (`personagem_toon.py`: suavização,
+  toon de 2 tons, contorno, câmera ortográfica, fundo transparente) e checklist de qualidade da prévia.
 - **Grok Build agora usa a equipe do Órbita**: com o Grok como modelo principal, ele recebe as ferramentas do
   Órbita por um servidor MCP local ("orbita", registrado uma vez no Grok): equipe de agentes com outros modelos
   (DeepSeek, GLM…), skills, Blender/Godot/ImageMagick e teste de página. Antes ele não via nada disso e saía
@@ -68,6 +73,9 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   fora do Windows; e erros de conexão mostram a causa real em vez do "TaskGroup".
 - Modelos de APIs próprias (ex.: river) não apareciam para a equipe quando a lista salva estava vazia: o modelo
   escolhido passa a ficar na lista do provedor, e a lista buscada na API preenche uma lista vazia.
+- Rolagem da conversa parava de acompanhar a resposta no meio de um turno longo (raciocínio + muitas ações) e
+  podia puxar de volta quem rolou para ler. Agora só a pessoa desliga o acompanhamento; voltar ao fim religa.
+- Skill `modelagem-3d`: exemplos salvavam em `//arquivo`, que sem .blend vai para a raiz do disco (C:\).
 - Atualização automática que não "pegava" (relato de usuário no Linux): o programa regravava o ícone `app.ico` ao
   abrir e o git passava a acusar "alteração local", então a atualização era recusada. O ícone não é mais regravado, o
   atualizador restaura sozinho os arquivos que o próprio programa gera e ignora mudança só de permissão (`chmod +x`).

@@ -2,6 +2,7 @@
 
 import json
 import queue
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -221,3 +222,21 @@ def test_pinned_prompt_saved_reapplied_and_in_system_prompt(tmp_path):
     assert brain.pinned_prompt == ""
     assert "## Instruções fixas desta conversa" not in brain.session.system_prompt(brain.session.visible_tools())
     assert brain.conversations.load(cid)["pinned_prompt"] == ""
+
+
+def test_turn_outputs_finds_what_was_created_so_the_user_can_test_it(tmp_path):
+    """Caso real: o agente fez o jogo e só disse "está pronto em luma-salto/index.html" — sem botão para testar."""
+    game = tmp_path / "luma salto"
+    (game / "assets").mkdir(parents=True)
+    (game / "index.html").write_text("<html></html>", encoding="utf-8")
+    sprites = tmp_path / "sprites"                     # caminho solto (sem crases) não pode ter espaço
+    sprites.mkdir()
+    (sprites / "luma.png").write_bytes(b"png")
+    (tmp_path / "rel.html").write_text("x", encoding="utf-8")
+    text = (f"**Luma Salto** está pronto em `{game / 'index.html'}`. Abre com dois cliques.\n"
+            f"Sprites: {(sprites / 'luma.png').as_posix()} e o arquivo rel.html. "
+            f"Também citei `{tmp_path / 'sumiu.html'}` e https://exemplo.com/pagina.html, que não são arquivos daqui.")
+    outputs = gui.turn_outputs(text, tmp_path)
+    assert [(Path(o["path"]).name, o["kind"]) for o in outputs] == [
+        ("index.html", "web"), ("rel.html", "web"), ("luma.png", "image")]       # páginas primeiro
+    assert gui.turn_outputs("Nada criado.", tmp_path) == []

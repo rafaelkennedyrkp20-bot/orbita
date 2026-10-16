@@ -100,6 +100,33 @@ def looks_like_secret(text: str, known_keys: tuple[str, ...] = ()) -> bool:
     return bool(mixed and (longest >= 24 or (_KEY_PREFIX.match(text) and len(text) >= 24)))
 
 
+_OUTPUT_KINDS = {".html": "web", ".htm": "web", ".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image",
+                 ".webp": "image", ".svg": "image", ".mp4": "video", ".webm": "video", ".pdf": "file", ".stl": "file", ".glb": "file", ".gltf": "file", ".blend": "file"}
+_EXT = "|".join(sorted({e.strip().lstrip(".") for e in _OUTPUT_KINDS}, key=len, reverse=True))
+_QUOTED_PATH = re.compile(rf"`([^`\n]+?\.(?:{_EXT}))`", re.I)                  # entre crases aceita espaços
+_BARE_PATH = re.compile(rf"(?<![\w/:.])((?:[A-Za-z]:[\\/]|~?/|\.{{1,2}}[\\/])?[\w\-.\\/À-ÿ]+?\.(?:{_EXT}))(?![\w/])", re.I)
+
+
+def turn_outputs(text: str, workspace: Path, limit: int = 4) -> list[dict]:
+    """Arquivos que existem e foram citados na resposta (página, imagem, vídeo…), para o botão Testar/Abrir."""
+    found: list[Path] = []
+    for match in [*_QUOTED_PATH.finditer(text or ""), *_BARE_PATH.finditer(text or "")]:
+        raw = match.group(1).strip()
+        if "://" in (text or "")[max(0, match.start() - 12):match.start() + 3] or raw.startswith("//"):
+            continue   # URL, não arquivo
+        path = Path(raw).expanduser()
+        path = path if path.is_absolute() else Path(workspace) / path
+        try:
+            path = path.resolve()
+            if path.is_file() and path not in found:
+                found.append(path)
+        except OSError:
+            continue
+    order = {"web": 0, "video": 1, "image": 2, "file": 3}
+    items = [{"path": str(p), "kind": _OUTPUT_KINDS.get(p.suffix.lower(), "file")} for p in found]
+    return sorted(items, key=lambda item: order[item["kind"]])[:limit]
+
+
 def _visible_user_text(text: str) -> str:
     """O que o usuário digitou, sem o anexo de @arquivos nem a nota do modo plano."""
     return text.split(_MENTIONS_MARK, 1)[0].replace(PLAN_NOTE, "")
@@ -1122,8 +1149,12 @@ class MainWindow(QMainWindow):
                 self._close_segment()
             elif not self._streamed_any and text and not text.startswith("⚠️"):
                 push({"type": "seg", "id": uuid.uuid4().hex[:8], "html": render.markdown_html(text), "streaming": False})
+            try:
+                outputs = turn_outputs(text, self.brain.effective_workspace())
+            except Exception:   # o cartão "Testar" nunca atrapalha o fim do turno
+                outputs = []
             push({"type": "turn_end", "conversation_id": self.brain.conversation_id,
-                  "title": self.brain.conversation_title, "plan": bool(data.get("plan"))})
+                  "title": self.brain.conversation_title, "plan": bool(data.get("plan")), "outputs": outputs})
             self.notify("Tarefa concluída", render.speech_text(text, 200) or "O agente terminou.")
         elif kind == "usage":
             push({"type": "usage", "total": data.get("total", 0), "turn": data.get("turn", 0)})

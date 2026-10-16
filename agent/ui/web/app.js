@@ -44,6 +44,7 @@ const ICONS = {
   download: "M12 4v12M6 10l6 6 6-6M4 20h16",
   refresh: "M20 11a8 8 0 0 0-14.6-4.5L4 8M4 3v5h5M4 13a8 8 0 0 0 14.6 4.5L20 16M20 21v-5h-5",
   sparkle: "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z",
+  play: "M7 4.5v15l12-7.5z",
   code: "M8 8l-4 4 4 4M16 8l4 4-4 4M14 5l-4 14",
   user: "M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zM4 21a8 8 0 0 1 16 0",
   mouse: "M12 3a6 6 0 0 1 6 6v6a6 6 0 0 1-12 0V9a6 6 0 0 1 6-6zM12 7v3",
@@ -211,6 +212,7 @@ function bindChrome() {
   });
   $("#conv-search").addEventListener("input", renderConvs);
   $("#conv-list").addEventListener("scroll", closeCtxMenu);
+  watchMessagesScroll();
   const title = $("#conv-title");
   title.addEventListener("keydown", e => {
     if (e.key === "Enter") { e.preventDefault(); title.blur(); }
@@ -893,13 +895,54 @@ function subCard(d, done) {
   el.innerHTML = `${done ? icon("check") : `<span class="spin"></span>`}<span class="nm">${esc(d.agent)}</span><span class="mdl">${esc(d.model || "")}</span><span class="tsk">${esc(done ? `concluído · ${fmt(d.tokens)} tokens` : d.task || "")}</span>`;
   scrollEnd();
 }
+// O que a resposta criou (página, imagem, vídeo…): botões para testar sem caçar o arquivo na pasta.
+function outputsCard(turn, outputs) {
+  const flowEl = turn ? $(".flow", turn) : null;
+  if (!flowEl) return;
+  const label = { web: "Testar no navegador", video: "Assistir", image: "Abrir imagem", file: "Abrir" };
+  const el = document.createElement("div");
+  el.className = "outputs-card";
+  el.innerHTML = `<div class="oc-title">${icon("sparkle")} Criado nesta resposta</div>` + outputs.map((o, i) => `
+    <div class="oc-row">${o.kind === "image" ? `<img class="zoomable" src="${fileUrl(o.path)}" alt="">` : `<span class="oc-ic">${icon(o.kind === "web" ? "globe" : "file")}</span>`}
+      <span class="oc-name" title="${esc(o.path)}">${esc(o.path.split(/[\\/]/).slice(-2).join("/"))}</span>
+      <button class="btn ${i === 0 ? "primary" : ""} small" data-oc-open="${i}">${icon(o.kind === "web" ? "play" : "eye")} ${label[o.kind] || "Abrir"}</button>
+      <button class="btn small" data-oc-folder="${i}" title="Mostrar na pasta">${icon("folder")}</button></div>`).join("");
+  $$("[data-oc-open]", el).forEach(b => b.onclick = () => call("openPath", outputs[+b.dataset.ocOpen].path));
+  $$("[data-oc-folder]", el).forEach(b => b.onclick = () => call("revealPath", outputs[+b.dataset.ocFolder].path));
+  flowEl.appendChild(el);
+  scrollEnd();
+}
 function note(text, cls = "") {
   const el = document.createElement("div"); el.className = "note " + cls; el.textContent = text;
   $("#messages").appendChild(el); scrollEnd();
 }
+// Acompanhar o fim é uma escolha da pessoa, não uma medida feita a cada pedaço do stream: medir na hora
+// falhava quando chegava um bloco grande (raciocínio aberto, várias ações) e a tela parava de acompanhar.
+// Só a pessoa (roda do mouse, barra, toque, teclas) desliga o acompanhamento; voltar ao fim religa.
+let followEnd = true, userScrollUntil = 0;
 function scrollEnd(force) {
   const m = $("#messages");
-  if (force || m.scrollHeight - m.scrollTop - m.clientHeight < 160) m.scrollTop = m.scrollHeight;
+  if (force) followEnd = true;
+  if (followEnd) m.scrollTop = m.scrollHeight;
+  $("#to-end").hidden = followEnd;
+}
+function markUserScroll(ms = 700) { userScrollUntil = Math.max(userScrollUntil, performance.now() + ms); }
+function onMessagesScroll() {
+  const m = $("#messages");
+  const atEnd = m.scrollHeight - m.scrollTop - m.clientHeight < 80;
+  if (atEnd) followEnd = true;
+  else if (performance.now() < userScrollUntil) followEnd = false;
+  $("#to-end").hidden = followEnd;
+}
+function watchMessagesScroll() {
+  const m = $("#messages");
+  m.addEventListener("scroll", onMessagesScroll, { passive: true });
+  m.addEventListener("wheel", e => { markUserScroll(); if (e.deltaY < 0) { followEnd = false; $("#to-end").hidden = false; } }, { passive: true });
+  m.addEventListener("touchstart", () => markUserScroll(1500), { passive: true });
+  m.addEventListener("pointerdown", () => markUserScroll(60000));          // arrastando a barra de rolagem
+  window.addEventListener("pointerup", () => { userScrollUntil = Math.min(userScrollUntil, performance.now() + 300); });
+  document.addEventListener("keydown", e => { if (["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown"].includes(e.key)) markUserScroll(); });
+  $("#to-end").addEventListener("click", () => scrollEnd(true));
 }
 
 // ── Anexos ─────────────────────────────────────────────────────────────────────
@@ -1006,7 +1049,7 @@ function onEvent(e) {
       }
       else toast("error", "A atualização não foi aplicada", e.result.error || "Erro desconhecido. Nada foi alterado.", 0);
       break;
-    case "turn_end": closeTurn(); if (e.plan) planActions(); refreshConvs().then(() => { S.conversation_id = e.conversation_id || S.conversation_id; S.conversation_title = e.title || S.conversation_title; renderTopbar(); renderConvs(); }); break;
+    case "turn_end": { const last = turnEl; closeTurn(); if ((e.outputs || []).length) outputsCard(last, e.outputs); if (e.plan) planActions(); } refreshConvs().then(() => { S.conversation_id = e.conversation_id || S.conversation_id; S.conversation_title = e.title || S.conversation_title; renderTopbar(); renderConvs(); }); break;
     case "error": note("⚠ " + e.message, "err"); toast("error", "Erro", e.message); break;
     case "compacted": note(`Histórico compactado: ${e.messages} mensagens antigas viraram um resumo`); break;
     case "approval": approval(e); break;

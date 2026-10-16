@@ -392,3 +392,11 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   ~100 s vasculhando o PC atrás do nome do DeepSeek; `Settings.remember_models`. Verificado com o Grok real: chamou
   `toolbox_list` pela ponte (7 s) e delegou para `river:deepseek-ai/DeepSeek-V4.1-Flash`, que criou e conferiu o
   arquivo (32 s no total; antes ~120 s). pytest 190 + 2 pulados.
+- **2026-10-16 — Claude Opus 5.5**: relato com o jogo do Grok + equipe: rolagem com bug, sem opção de testar,
+  gráficos ruins. Rolagem reproduzida na janela real (turno simulado: 132 de 133 amostras longe do fim, até 1486 px):
+  `scroll-behavior: smooth` + medir a distância a cada evento perdia o fim quando chegava bloco grande. Agora
+  `followEnd` muda só por ação da pessoa (roda/barra/toque/teclas); depois: máx. 1 px do fim, e rolar para cima não é
+  puxado de volta. `gui.turn_outputs` acha arquivos existentes citados na resposta → cartão com Testar/Abrir
+  (conferido na janela com o `luma-salto` real). Blender FOI usado (`blender/personagens.py`), mas com primitivas e
+  luz padrão; modelo `personagem_toon.py` testado no Blender 4.5.9 local (sprite com contorno e toon). Achado no teste:
+  `//sprite.png` sem .blend salvou em `C:\` — corrigido na skill. pytest 191 + 2 pulados.

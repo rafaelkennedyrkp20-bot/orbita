@@ -13,6 +13,9 @@ O jeito mais leve de fazer jogo: abre com duplo clique no `index.html`, sem inst
 - Sem CDN quando der (o jogo deve abrir offline). Three.js: baixe `three.module.min.js` para `js/vendor/` e importe como módulo
   — módulos ES exigem servidor; se precisar, avise o usuário ou use Canvas 2D.
 
+Personagens e cenário: retângulo colorido só como provisório. Para sprites de verdade use a skill `modelagem-3d`
+(seção "Personagem e sprites de jogo") ou imagens geradas, e confira o visual com `screenshot: true`.
+
 ## Esqueleto do loop (Canvas 2D)
 ```js
 const tela = document.getElementById("tela"), ctx = tela.getContext("2d");
