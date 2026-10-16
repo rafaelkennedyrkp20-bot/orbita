@@ -49,6 +49,11 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   tokens (entrega o que tem como PARTIAL), em vez de gastar o saldo testando sem fim.
 
 ### Corrigido
+- Atualização automática que não "pegava" (relato de usuário no Linux): o programa regravava o ícone `app.ico` ao
+  abrir e o git passava a acusar "alteração local", então a atualização era recusada. O ícone não é mais regravado, o
+  atualizador restaura sozinho os arquivos que o próprio programa gera e ignora mudança só de permissão (`chmod +x`).
+  Pasta do Órbita sem permissão de escrita (instalada com `sudo`) agora mostra o motivo e o comando para liberar, e a
+  atualização não começa pela metade.
 - O terminal do agente não trava mais quando um comando abre um servidor (ex.: `python -m http.server`): servidores
   e comandos que não terminam vão para segundo plano (com PID, porta e log), e no fim do prazo o Órbita encerra o
   comando com tudo o que ele abriu.

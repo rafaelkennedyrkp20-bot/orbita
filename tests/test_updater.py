@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -127,6 +128,49 @@ def test_git_install_refuses_with_local_changes(tmp_path):
     with pytest.raises(RuntimeError, match="não salvas"):
         updater.apply_git(root)
     assert (root / "app.py").read_text(encoding="utf-8") == "mexi\n"
+
+
+def _clone_with_remote(tmp_path):
+    """Clone 'antigo' de um remoto local cujo caminho contém o nome do repositório (o modo git o reconhece)."""
+    run = lambda cwd, *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=cwd,  # noqa: E731
+                                         check=True, capture_output=True)
+    origin = tmp_path / "rafaelkennedyrkp20-bot" / "orbita"
+    (origin / "agent" / "ui" / "web").mkdir(parents=True)
+    (origin / "agent" / "ui" / "web" / "app.ico").write_bytes(b"ICO-original")
+    (origin / "app.py").write_text("v1\n", encoding="utf-8")
+    run(origin, "init", "-q", "-b", "main")
+    run(origin, "add", ".")
+    run(origin, "commit", "-qm", "v1")
+    clone = tmp_path / "clone"
+    run(tmp_path, "clone", "-q", origin.as_posix(), str(clone))
+    (origin / "app.py").write_text("v2\n", encoding="utf-8")
+    run(origin, "commit", "-qam", "v2")
+    return clone
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="git não instalado")
+def test_regenerated_icon_does_not_block_the_update(tmp_path):
+    """Caso real no Linux: o programa regravava o app.ico ao abrir e o git acusava 'alteração local'."""
+    clone = _clone_with_remote(tmp_path)
+    assert updater.install_mode(clone) == "git"
+    (clone / "agent" / "ui" / "web" / "app.ico").write_bytes(b"ICO-regravado-no-linux")
+    assert updater.local_changes(clone) == []                      # não é trabalho da pessoa
+    result = updater.apply_git(clone)
+    assert (clone / "app.py").read_text(encoding="utf-8") == "v2\n" and "app.py" in result["replaced"]
+    assert (clone / "agent" / "ui" / "web" / "app.ico").read_bytes() == b"ICO-original"
+
+
+def test_folder_without_write_permission_is_explained_before_touching_anything(tmp_path, monkeypatch):
+    root = _install(tmp_path)
+    real_access = updater.os.access
+    monkeypatch.setattr(updater.os, "access", lambda p, mode: False if Path(p) == root else real_access(p, mode))
+    problem = updater.write_problem(root, "zip")
+    assert "Sem permissão para gravar" in problem
+    if updater.os.name != "nt":
+        assert "sudo chown -R" in problem
+    with pytest.raises(RuntimeError, match="Sem permissão"):
+        updater.apply(root, sha="b" * 40)
+    assert (root / "agent" / "gui.py").read_text(encoding="utf-8") == "v1\n"   # nada mudou
 
 
 def test_commit_groups():

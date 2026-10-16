@@ -348,3 +348,11 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   2 pulados; instalação real do ImageMagick (3 s) e do OpenSCAD (6 s) com hash conferido e teste do programa; o agente
   (Nemotron) fez um porta-copos 3D no OpenSCAD (STL + prévia) e a miniatura no ImageMagick em 42 s / 131 mil tokens;
   janela real com a seção e o pedido de permissão do Blender capturados.
+- **2026-10-16 — Claude Opus 5.5**: relato de amigo do usuário — atualização não funcionava no Linux. Causas encontradas
+  no código: (1) `brand.ensure_ico()` regravava o `app.ico` (versionado) quando o `.svg` parecia mais novo — datas
+  aleatórias após `git clone` e bytes diferentes por plataforma deixavam o git sujo e o `apply_git` recusava;
+  (2) `chmod +x` virava alteração no Linux; (3) pasta de outro usuário (sudo) falhava sem explicar e, no modo ZIP,
+  podia gravar metade. Correções: ícone só gerado se faltar; `GENERATED` restaurado antes do pull e ignorado no status;
+  `core.fileMode=false`; `write_problem()` no check, no apply e checagem de escrita antes de gravar o ZIP; aviso com
+  quebra de linha. Verificado: pytest 177 + 2 pulados (2 novos: clone com remoto local e ícone regravado; pasta sem
+  escrita). Não verificado num Linux real nesta rodada (Docker Desktop não subiu).

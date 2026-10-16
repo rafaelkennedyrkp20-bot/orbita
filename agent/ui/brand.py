@@ -47,8 +47,11 @@ def app_icon() -> QIcon:
 
 
 def ensure_ico() -> Path:
-    """Gera o .ico (multi-tamanho) a partir do logo SVG, para atalhos e o executável."""
-    if ICON_FILE.exists() and ICON_FILE.stat().st_mtime >= LOGO_SVG.stat().st_mtime:
+    """Gera o .ico (multi-tamanho) a partir do logo SVG, para atalhos e o executável.
+
+    Só se ele não existir: o .ico é versionado, e regravá-lo ao abrir (as datas dos arquivos depois de um
+    `git clone` são aleatórias) deixava o git "sujo" e travava a atualização automática."""
+    if ICON_FILE.exists():
         return ICON_FILE
     images = [render_logo(size) for size in (16, 24, 32, 48, 64, 128, 256)]
     _write_ico(images, ICON_FILE)

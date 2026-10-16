@@ -92,8 +92,9 @@ def same_as_blob(path: Path, sha: str) -> bool:
 
 def _git(root: Path, *args: str, check: bool = True) -> str:
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    result = subprocess.run(["git", *args], cwd=str(root), capture_output=True, env=env, timeout=120,
-                            creationflags=_NO_WINDOW)
+    # core.fileMode=false: no Linux, um `chmod +x` no iniciar_orbita.sh não conta como "alteração local".
+    result = subprocess.run(["git", "-c", "core.fileMode=false", *args], cwd=str(root), capture_output=True,
+                            env=env, timeout=120, creationflags=_NO_WINDOW)
     if check and result.returncode != 0:
         raise RuntimeError(result.stderr.decode("utf-8", "replace").strip() or f"git {args[0]} falhou")
     return result.stdout.decode("utf-8", "replace")
@@ -125,10 +126,42 @@ def local_sha(root: Path = ROOT, mode: Optional[str] = None) -> Optional[str]:
     return manifest(root).get("sha")
 
 
-def local_changes(root: Path) -> list[str]:
-    """Arquivos rastreados com alteração não salva (só no modo git)."""
+# Arquivos versionados que o próprio programa pode regravar (versões antigas regravavam o ícone ao abrir).
+# Não são trabalho da pessoa: voltam ao original antes de atualizar.
+GENERATED = ("agent/ui/web/app.ico",)
+
+
+def _status(root: Path) -> list[str]:
     out = _git(root, "status", "--porcelain", "--untracked-files=no", check=False)
-    return [line[3:].strip() for line in out.splitlines() if line.strip()]
+    return [line[3:].strip().strip('"') for line in out.splitlines() if line.strip()]
+
+
+def local_changes(root: Path) -> list[str]:
+    """Arquivos rastreados alterados pela pessoa (só no modo git; ignora os que o programa gera)."""
+    return [p for p in _status(root) if p not in GENERATED]
+
+
+def write_problem(root: Path = ROOT, mode: Optional[str] = None) -> str:
+    """Por que a atualização não conseguiria gravar na pasta do programa ('' se consegue)."""
+    mode = mode or install_mode(root)
+    targets = [root, root / "agent", root / "agent" / "core"]
+    targets += [root / ".git"] if mode == "git" else [root / "agent" / "__init__.py", root / "agent" / "gui.py"]
+    blocked = [t for t in targets if t.exists() and not os.access(t, os.W_OK)]
+    if not blocked:
+        return ""
+    owner = ""
+    if os.name != "nt":
+        try:
+            import pwd
+            owner = pwd.getpwuid(blocked[0].stat().st_uid).pw_name
+        except (ImportError, KeyError, OSError):
+            owner = ""
+    if os.name == "nt":
+        return (f"Sem permissão para gravar em {blocked[0]}. Mova a pasta do Órbita para dentro da sua pasta de "
+                "usuário (ex.: Documentos) ou abra o Órbita como administrador uma vez para atualizar.")
+    return (f"Sem permissão para gravar em {blocked[0]}" + (f" (a pasta é do usuário '{owner}')" if owner else "")
+            + ". Isso acontece quando o Órbita foi baixado ou instalado com sudo. Para liberar, rode no terminal:\n"
+            f"sudo chown -R \"$USER\": \"{root}\"\ne abra o Órbita de novo.")
 
 
 # ── Verificação ────────────────────────────────────────────────
@@ -218,6 +251,9 @@ def check(root: Path = ROOT) -> dict:
             info["blocked"] = (f"Há alterações locais não salvas em {len(dirty)} arquivo(s) ({shown}). "
                                "Salve (commit) ou descarte e tente de novo.")
 
+    if not info["blocked"]:
+        info["blocked"] = write_problem(root, mode)   # Linux: pasta de outro usuário (instalada com sudo)
+
     files = info["files"]
     touched = files["changed"] + files["added"] + files["removed"]
     info["available"] = bool(touched) or (mode == "git" and bool(titles))
@@ -275,6 +311,16 @@ def apply_zip(root: Path, zip_path: Path, sha: str) -> dict:
     replaced, added, removed = [], [], []
     with zipfile.ZipFile(zip_path) as archive:
         members = _safe_members(archive)
+        # Antes de gravar qualquer coisa: se algum arquivo não puder ser substituído, não mexe em nada
+        # (atualização pela metade é pior que nenhuma).
+        locked = [rel for rel in members if not is_protected(rel)
+                  and (((root / rel).exists() and not os.access(root / rel, os.W_OK))
+                       or (not (root / rel).exists() and _first_existing(root / rel).exists()
+                           and not os.access(_first_existing(root / rel), os.W_OK)))]
+        if locked:
+            raise RuntimeError(write_problem(root, "zip") or
+                               f"Sem permissão para gravar {len(locked)} arquivo(s) do programa (ex.: {locked[0]}). "
+                               "Nada foi alterado.")
         for rel, item in sorted(members.items()):
             if is_protected(rel):
                 continue
@@ -306,9 +352,16 @@ def apply_zip(root: Path, zip_path: Path, sha: str) -> dict:
 
 
 def apply_git(root: Path) -> dict:
+    problem = write_problem(root, "git")
+    if problem:
+        raise RuntimeError(problem)
     dirty = local_changes(root)
     if dirty:
-        raise RuntimeError(f"Alterações locais não salvas em {len(dirty)} arquivo(s); nada foi alterado.")
+        raise RuntimeError(f"Alterações locais não salvas em {len(dirty)} arquivo(s) ({', '.join(dirty[:5])}); "
+                           "nada foi alterado.")
+    generated = [p for p in _status(root) if p in GENERATED]
+    if generated:   # o programa regravou (ex.: o ícone): volta ao original para o pull passar
+        _git(root, "checkout", "--", *generated)
     before = _git(root, "rev-parse", "HEAD").strip()
     _git(root, "fetch", "--quiet", "origin", BRANCH)
     try:
@@ -320,8 +373,19 @@ def apply_git(root: Path) -> dict:
     return {"replaced": changed, "added": [], "removed": [], "backup": ""}
 
 
+def _first_existing(path: Path) -> Path:
+    """A pasta mais próxima que já existe (onde um arquivo novo seria criado)."""
+    for parent in path.parents:
+        if parent.exists():
+            return parent
+    return path.anchor and Path(path.anchor) or path
+
+
 def apply(root: Path = ROOT, sha: Optional[str] = None) -> dict:
     mode = install_mode(root)
+    problem = write_problem(root, mode)
+    if problem:
+        raise RuntimeError(problem)
     if mode == "git":
         return apply_git(root)
     sha = sha or _http_json(f"{API}/commits/{BRANCH}")["sha"]
