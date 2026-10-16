@@ -54,6 +54,8 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   `data/updates/backup-…`; se uma alteração conflitar, fica a versão nova e a sua continua na cópia.
 - Instalação no Linux muito mais leve: o `silero-vad` saiu das dependências (puxava o PyTorch com CUDA, vários GB);
   a voz usa a detecção por volume e o filtro de silêncio do Whisper. Aceita Python 3.10 a 3.14.
+- Instalação no Python 3.14 falhava com "No matching distribution found for kokoro-onnx": o `kokoro-onnx` só
+  existe até o 3.13. Agora ele é instalado só no 3.10–3.13; no 3.14 a fala usa a voz do sistema.
 - Atualização automática que não "pegava" (relato de usuário no Linux): o programa regravava o ícone `app.ico` ao
   abrir e o git passava a acusar "alteração local", então a atualização era recusada. O ícone não é mais regravado, o
   atualizador restaura sozinho os arquivos que o próprio programa gera e ignora mudança só de permissão (`chmod +x`).

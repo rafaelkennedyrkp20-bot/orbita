@@ -364,3 +364,9 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   reaplicação (conflito: fica a versão nova, a do usuário no backup); `check` lista `local_changes` em vez de bloquear;
   botão "Atualizar guardando minhas alterações". Verificado: pytest 179 + 2 pulados (clone real com edição mantida e com
   conflito); janela de atualização capturada. Não verificado num Linux real (Docker Desktop não subiu).
+- **2026-10-16 — Claude Opus 5.5**: amigo do usuário reclonou no Linux com Python 3.14 e o `pip` parou em
+  `kokoro-onnx>=0.5.0` (todas as versões exigem Python <3.14). A checagem anterior com `uv pip compile
+  --python-version 3.14` dizia "ok" porque o uv ignora o limite superior de `Requires-Python` — checagem enganosa.
+  Reproduzido com um Python 3.14 real (`pip install --dry-run`), corrigido com marcador `python_version < "3.14"`;
+  `speaker.py` e `main.py` já importam o kokoro dentro de `try` (cai na voz do sistema). Verificado: instalação real
+  do `requirements.txt` num venv 3.14 + pytest nele.
