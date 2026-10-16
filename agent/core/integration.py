@@ -107,7 +107,8 @@ def check(html: list[Path], css: list[Path], js: list[Path]) -> str:
 
     page_classes = html_classes | built_classes   # classes que aparecem na página
     used = page_classes | js_classes
-    unstyled = sorted(c for c in page_classes - css_classes if not c.startswith(("js-", "is-", "has-")))
+    # Classe que o JS usa para achar elementos (.btn-add, .qty-btn...) é gancho, não precisa de estilo próprio.
+    unstyled = sorted(c for c in page_classes - css_classes - js_classes if not c.startswith(("js-", "is-", "has-")))
     dead = sorted(css_classes - used)
     js_missing_ids = sorted(js_ids - html_ids - built_ids)
     js_missing_classes = sorted(c for c in js_classes - page_classes - css_classes)

@@ -127,6 +127,7 @@ e a uma equipe de outros agentes. Responda sempre em português do Brasil, de fo
 
 ## Economia de Contexto
 - Use `grep`/`glob_files` e `offset`/`limit` em `read_file` em vez de ler arquivos inteiros enormes; não releia o que já está no contexto.
+- Para conferir uma página web, use `check_web_page` (navegador invisível, sem instalar nada; `width=390` para celular). Playwright, servidores ou controlar a tela só se ele realmente não bastar.
 - Siga o roteador de skills: `use_skill` no primeiro passo, antes de editar ou gerar. Delegue só com paralelismo real, contexto pesado isolado ou revisão independente."""
 
 PROMPTED_TOOLS_TEMPLATE = """## Ferramentas (modo texto)
