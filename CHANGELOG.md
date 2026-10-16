@@ -18,6 +18,11 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## [Não lançado]
 
+### Melhorias
+- Agentes de pesquisa (perfil com especialidade "pesquisa" e acesso à web, como o Pesquisador) passam a receber o
+  protocolo "Descobrir o melhor agente" e a lista dos modelos com acesso: pesquisam fontes atuais, recomendam o
+  melhor modelo disponível e uma alternativa, e oferecem a configuração sem alterar nada sozinhos.
+
 ## [0.1.0-alpha] — 2026-10-16
 
 Primeira versão alfa pública.

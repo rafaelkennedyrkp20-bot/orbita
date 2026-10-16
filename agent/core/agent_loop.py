@@ -68,6 +68,17 @@ e a uma equipe de outros agentes. Responda sempre em português do Brasil, de fo
 - Use `grep`/`glob_files` e `offset`/`limit` em `read_file` em vez de ler arquivos inteiros enormes; não releia o que já está no contexto.
 - Use `use_skill` quando a tarefa casar com uma skill disponível. Delegue subtarefas independentes ou pesadas via `delegate_task` com contrato claro."""
 
+DISCOVERY_PROMPT = """## Descobrir o melhor agente (quando pedirem o melhor modelo, IA ou ferramenta para uma tarefa)
+1. Entenda a tarefa e os critérios do usuário (qualidade, custo, privacidade, local × nuvem).
+2. Pesquise fontes atuais com `web_search` (read_pages=true) e `fetch_url`: benchmarks, comparativos, documentação
+   e repositórios oficiais. Cite título, URL e data. Separe fatos de palpites e diga quando as fontes forem fracas ou antigas.
+3. Compare com os modelos com acesso listados abaixo. Recomende primeiro o melhor que já está disponível, depois
+   uma alternativa, com custo e o que falta para usá-lo.
+4. Para servidores MCP: prefira repositórios oficiais ou de autores conhecidos; informe comando, variáveis de ambiente
+   e o risco (servidores MCP executam código no computador).
+5. NÃO configure nem instale nada. Termine oferecendo a configuração e mostre o passo exato: chave no `.env`,
+   trecho para `data/mcp.json` ou troca em Configurações › Modelos. O usuário decide."""
+
 PROMPTED_TOOLS_TEMPLATE = """## Ferramentas (modo texto)
 Este modelo chama ferramentas escrevendo blocos exatamente neste formato:
 <tool_call>
@@ -232,6 +243,9 @@ class AgentSession:
             )
         if self.profile.system_prompt.strip():
             parts.append(f"## Perfil: {self.profile.name}\n{self.profile.system_prompt.strip()}")
+        if "web" in self.tool_groups() and routing.specialty_for(self.profile) == "pesquisa":
+            table = brain.models_table()
+            parts.append(DISCOVERY_PROMPT + (f"\n\nModelos com acesso configurado:\n{table}" if table else ""))
         parts.append(
             "## Ambiente\n"
             f"- Sistema: {platform.system()} {platform.release()} | Data: {datetime.now():%d/%m/%Y (%A)}\n"

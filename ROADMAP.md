@@ -73,7 +73,8 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Lista da equipe e dos modelos com acesso vai no prompt do agente principal
 - [x] Subagentes compartilham botão Parar e orçamento de tokens; profundidade máxima 2
 - [x] Roteamento automático por especialidade (`core/routing.py` + `data/model_catalog.json`): notas por especialidade e custo; escolha muda com o modo de economia e só usa modelos com acesso; tabela de capacidades vai no prompt do principal; `generate_image` escolhe o modelo de imagem sozinho
-- [ ] ⭐ "Descobrir o melhor agente": o Pesquisador consulta a web/benchmarks e sugere o modelo/servidor MCP ideal para uma tarefa, oferecendo configurar
+- [~] ⭐ "Descobrir o melhor agente": o Pesquisador consulta a web/benchmarks e sugere o modelo/servidor MCP ideal para uma tarefa, oferecendo configurar. Feito: protocolo e tabela de modelos com acesso no prompt de agentes de pesquisa (`DISCOVERY_PROMPT` em `core/agent_loop.py`), recomendação sem configurar nada. Falta: configurar após confirmação (item abaixo)
+- [ ] Configurar modelo/servidor MCP sugerido após confirmação explícita do usuário (exige decisão: muda configuração e MCP executa código)
 - [ ] Revisão cruzada automática: ao terminar código, um segundo modelo revisa antes de entregar (opcional por perfil)
 - [ ] Tarefas agendadas e fila em segundo plano com notificação na bandeja
 
@@ -170,3 +171,9 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   Users do disco C:). AGENTS.md reescrito (desenvolvimento x uso, coordenação entre IAs, regras de versão),
   docs/PROMPT_EVOLUCAO.md, CHANGELOG e versão 0.1.0-alpha. Verificado: pyflakes 0 avisos, 60 testes,
   fluxo de criar/abrir projeto testado na janela real.
+- **2026-10-16 — Claude (Haiku 5.5)**: item ⭐ "Descobrir o melhor agente" (escolhido por ser o único ⭐ pendente).
+  Agentes de pesquisa recebem o protocolo `DISCOVERY_PROMPT` e a tabela de modelos com acesso no prompt de sistema
+  (injetado em código, porque perfis já existentes não são sobrescritos). Não configura nada sozinho: a configuração
+  automática ficou como item `[ ]`. Verificado: pyflakes 0 avisos; pytest 62 passando (60 anteriores + 2 novos:
+  protocolo e tabela presentes no Pesquisador; ausentes no Assistente Geral). Não testado com modelo real nem na
+  interface (não há mudança visual).

@@ -297,6 +297,22 @@ def test_reasoning_kept_in_current_turn_and_pruned_in_old(brain, provider):
 
 
 
+def test_research_profile_gets_discovery_protocol_and_models(brain, provider, monkeypatch):
+    monkeypatch.setattr(brain, "models_table", lambda: "- openai:gpt-5 ($$): forte em código")
+    fake = provider([ChatResult(text="ok")])
+    session(brain, profile="pesquisador").run("qual o melhor modelo para código?")
+    system = fake.calls[0]["messages"][0]["content"]
+    assert "Descobrir o melhor agente" in system
+    assert "openai:gpt-5" in system
+    assert "NÃO configure" in system
+
+
+def test_general_profile_has_no_discovery_protocol(brain, provider):
+    fake = provider([ChatResult(text="ok")])
+    session(brain).run("oi")
+    assert "Descobrir o melhor agente" not in fake.calls[0]["messages"][0]["content"]
+
+
 def test_team_verification_runs_once_and_respects_permission(brain, provider):
     from agent.core.tools import Tool, ToolResult
     runs = []
