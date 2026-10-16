@@ -94,8 +94,8 @@ _VERIFICATION_FAILURE_RE = re.compile(
     re.IGNORECASE,
 )
 _VERIFICATION_SUCCESS_RE = re.compile(
-    r"\b(?:passed?|passou|passaram|ok|sucesso|succeeded|aprovad[oa]s?|conclu[ií]d[oa]s?|"
-    r"0\s+(?:errors?|erros?|failures?|falhas?|warnings?|avisos?)|"
+    r"\b(?:pass(?:ed|ou|aram|ando)?|ok|sucesso|succeeded|aprovad[oa]s?|conclu[ií]d[oa]s?|"
+    r"0\s+(?:failed?|failures?|errors?|erros?|falhas?|warnings?|avisos?)|"
     r"exit(?:\s+code)?\s*[:=]?\s*0|código\s+(?:de\s+)?saída\s+0|"
     r"nenhum(?:a)?\s+(?:erro|falha|problema)|não\s+aplicável|not\s+applicable)\b",
     re.IGNORECASE,
@@ -121,10 +121,12 @@ def handoff_note(report: str) -> str:
     if verification is None:
         return "\n\n[Handoff incompleto: falta Verificação. Não trate como pronto.]"
     result = verification.group(1).strip()
-    if (_VERIFICATION_FAILURE_RE.search(result)
+    without_zero_counts = re.sub(
+        r"\b0\s+(?:failed?|failures?|errors?|erros?|falhas?)\b", " ", result, flags=re.IGNORECASE)
+    if (_VERIFICATION_FAILURE_RE.search(without_zero_counts)
             or not _VERIFICATION_SUCCESS_RE.search(result)):
         return ("\n\n[Handoff incompleto: Verificação sem resultado aprovado. "
-                "Não trate como pronto.]" )
+                "Não trate como pronto.]")
     return ""
 
 

@@ -343,6 +343,8 @@ def test_handoff_done_requires_a_successful_verification_result():
     assert "Verificação" in loop.handoff_note("Status: DONE\nVerificação: pytest tests -q")
     assert "Verificação" in loop.handoff_note("Status: DONE\nVerificação: pytest tests -q — 2 failed")
     assert loop.handoff_note("**Status**: DONE\n**Verificação**: pytest tests -q — 65 passed") == ""
+    assert loop.handoff_note("Status: DONE\nVerificação: 65 passed, 0 failed") == ""
+    assert loop.handoff_note("Status: DONE\nVerificação: Quality Gate: [PASS]") == ""
 
 
 def test_general_profile_has_no_discovery_protocol(brain, provider, monkeypatch):
