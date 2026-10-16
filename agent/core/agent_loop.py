@@ -44,9 +44,13 @@ MAX_DEPTH = 2
 COMPACT_AT = 0.85   # compacta quando o histórico passa de 85% do orçamento de contexto
 
 SUMMARY_PROMPT = """Você compacta conversas de um agente de IA. Escreva um resumo denso, em português, que permita \
-continuar o trabalho sem o histórico original. Preserve: objetivo do usuário, decisões tomadas, fatos descobertos, \
-arquivos/caminhos/comandos relevantes e seus resultados, erros encontrados e o que ficou pendente. \
-Não invente nada. Use tópicos curtos, no máximo cerca de 400 palavras."""
+continuar o trabalho sem o histórico original, nesta estrutura (tópicos curtos, no máximo cerca de 450 palavras):
+## Objetivo — o que o usuário quer
+## Feito — o que já foi feito, com arquivos/caminhos/comandos e resultados
+## Decisões — escolhas tomadas e o porquê
+## Estado atual — onde o trabalho está agora, erros abertos
+## Próximos passos — o que falta, na ordem
+Não invente nada; se algo não aparece no histórico, não escreva."""
 
 _OS_NAME = "Windows" if os.name == "nt" else ("macOS" if sys.platform == "darwin" else "Linux")
 _SHELL_NAME = "PowerShell" if _OS_NAME == "Windows" else "bash"
@@ -630,21 +634,27 @@ class AgentSession:
 
     # ── Compactação inteligente ──────────────────────────────
 
-    def _maybe_compact(self, tools: list[Tool]) -> None:
-        """Quando o histórico chega perto do orçamento, resume os turnos antigos em vez de descartá-los."""
-        available = self._history_budget(tools, self.system_prompt(tools))
-        if self._history_size(self.messages) <= available * COMPACT_AT:
-            return
+    def _maybe_compact(self, tools: list[Tool], force: bool = False) -> int:
+        """Quando o histórico chega perto do orçamento, resume os turnos antigos em vez de descartá-los.
+
+        `force` (botão Compactar): resume tudo menos o último pedido, sem esperar o limite.
+        Devolve quantas mensagens viraram resumo (0 = nada a compactar ou falhou).
+        """
+        if not force:
+            available = self._history_budget(tools, self.system_prompt(tools))
+            if self._history_size(self.messages) <= available * COMPACT_AT:
+                return 0
         starts = [i for i, m in enumerate(self.messages) if m["role"] == "user"]
-        if len(starts) < 3:
-            return  # mantém sempre o pedido atual e o anterior intactos
-        cut = starts[-2]
+        if len(starts) < (2 if force else 3):
+            return 0  # automático mantém o pedido atual e o anterior; manual, ao menos o último
+        cut = starts[-1] if force else starts[-2]
         summary = self._summarize(self.messages[:cut])
         if not summary:
-            return  # falhou: o corte simples em _wire_messages continua garantindo o limite
+            return 0  # falhou: o corte simples em _wire_messages continua garantindo o limite
         self.summary = summary
         self.messages = self.messages[cut:]
         self.events("compacted", {"agent": self.label, "messages": cut, "chars": len(summary)})
+        return cut
 
     def _summarize(self, old: list[dict]) -> Optional[str]:
         lines = [f"RESUMO ANTERIOR:\n{self.summary}"] if self.summary else []

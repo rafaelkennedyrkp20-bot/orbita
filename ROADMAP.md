@@ -269,3 +269,14 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   presente/ausente no system prompt); janela real com `QWidget.grab` e `data/settings.json` restaurado (menu de
   contexto, renomear inline, Ctrl+K, apagar a conversa aberta, modal e selo do prompt, busca "CLÁUDE son" → 1 de 6 e
   Enter aplicando o modelo, busca "deepseek r1" no editor de perfil).
+- **2026-10-16 — Claude Opus 5.5**: correção da tela relatada pelo usuário (barra de input sumindo e Ao vivo "bugando").
+  Causa medida na janela real: `#side` sem `min-height:0` fazia a linha da grade crescer com o feed (composer em
+  y=1243 numa janela de 940) e a coluna `1fr` da resposta esticava até 6.357 px com uma linha longa. Correção:
+  `minmax(0,…)` na grade e na resposta, `min-height:0` no painel. Revisão do trabalho não commitado de outra IA (prompt
+  do usuário): mantidos o bloco de raciocínio (reescrito com texto completo, tempo e fechamento automático via evento
+  `reasoning_end`) e o Ao vivo com tipos; desfeitos o botão de ocultar a barra (sumia junto com ela) e a renomeação
+  `#composer` → `#composer-footer` (quebrava o layout); compactação manual refeita no worker (antes chamava o modelo
+  na thread da UI e não fazia nada abaixo de 85%) com `_maybe_compact(force=True)` e resumo estruturado. Arquivos
+  avulsos da outra IA (`test_improvements.py`, `MELHORIAS_*.md`, `RESUMO_*.md`) retirados do repositório.
+  Verificado: pytest 115 + 2 pulados (2 novos de compactação); janela real: composer visível (817–922 de 940),
+  overflow horizontal 0, raciocínio 1.320 caracteres aberto → fechado ao escrever.

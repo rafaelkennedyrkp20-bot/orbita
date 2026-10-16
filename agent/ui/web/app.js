@@ -224,6 +224,7 @@ function bindChrome() {
   $("#chip-project").addEventListener("click", () => projectDialog());
   $("#chip-model").addEventListener("click", () => { settingsSection = "modelos"; go("settings"); });
   $("#chip-perm").addEventListener("click", cyclePermission);
+  $("#compact-btn").addEventListener("click", compactConversation);
   $$(".tab").forEach(t => t.addEventListener("click", () => selectTab(t.dataset.tab)));
   const box = $("#composer-box");
   box.addEventListener("dragover", e => { e.preventDefault(); box.classList.add("drag"); });
@@ -686,6 +687,7 @@ function ensureTurn(model) {
   return el;
 }
 function closeTurn() {
+  endThought();
   if (stepsBox) finishSteps(stepsBox);
   $$(".cursor", turnEl || document).forEach(c => c.classList.remove("cursor"));
   turnEl = null; stepsBox = null;
@@ -701,11 +703,43 @@ function segment(id, html, streaming) {
   el.classList.toggle("cursor", !!streaming);
   scrollEnd();
 }
+// ── Componente de Pensamento expansível ───────────────────────────────────────
+// Bloco de raciocínio: aberto enquanto o modelo pensa (texto completo, rolagem própria);
+// quando ele passa a escrever ou usar ferramenta, vira "Raciocínio · Xs", fechado e expansível.
+let thoughtEl = null;
 function thought(text) {
-  let el = flow().querySelector(".thought:last-child");
-  if (!el) { el = document.createElement("div"); el.className = "thought"; flow().appendChild(el); }
-  el.textContent = text.slice(-600);
+  let el = thoughtEl && thoughtEl.isConnected && !thoughtEl.classList.contains("done") ? thoughtEl : null;
+  if (!el) {
+    if (stepsBox) { finishSteps(stepsBox); stepsBox = null; }
+    el = document.createElement("details");
+    el.className = "thought"; el.open = true; el.dataset.start = Date.now();
+    el.innerHTML = `<summary><span class="thought-label">${icon("brain")}<span class="tl">Pensando…</span><span class="thought-status">0s</span></span><span class="thought-action">${icon("chevright")}</span></summary>
+      <div class="thought-content"></div>
+      <div class="thought-toolbar"><span class="meta"></span><button class="icon-btn" title="Copiar o raciocínio">${icon("clip")}</button></div>`;
+    $(".thought-toolbar button", el).onclick = e => {
+      e.preventDefault(); call("copyText", $(".thought-content", el).textContent);
+      toast("success", "Copiado", "Raciocínio copiado.", 1600);
+    };
+    flow().appendChild(el);
+    thoughtEl = el;
+  }
+  const box = $(".thought-content", el);
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.textContent = text;
+  if (atBottom) box.scrollTop = box.scrollHeight;   // acompanha o stream, a menos que a pessoa tenha rolado para ler
+  $(".thought-status", el).textContent = Math.round((Date.now() - el.dataset.start) / 1000) + "s";
   scrollEnd();
+}
+function endThought() {
+  const el = thoughtEl;
+  if (!el || el.classList.contains("done")) return;
+  const secs = Math.max(1, Math.round((Date.now() - el.dataset.start) / 1000));
+  const words = ($(".thought-content", el).textContent.match(/\S+/g) || []).length;
+  el.classList.add("done"); el.open = false;
+  $(".tl", el).textContent = "Raciocínio";
+  $(".thought-status", el).textContent = `${secs}s`;
+  $(".thought-toolbar .meta", el).textContent = `${words} palavras · ${secs}s pensando`;
+  thoughtEl = null;
 }
 const TOOL_INFO = {
   read_file: ["file", "Lendo arquivo"], write_file: ["edit2", "Escrevendo arquivo"], edit_file: ["edit", "Editando arquivo"],
@@ -790,11 +824,40 @@ function renderAttachments() {
 }
 
 // ── Ao vivo / equipe ───────────────────────────────────────────────────────────
-function feed(kind, html) {
+function feed(kind, html, extra = {}) {
   const box = $("#feed");
   if ($(".empty", box)) box.innerHTML = "";
-  const el = document.createElement("div"); el.className = "feed-item " + kind;
-  el.innerHTML = `<i class="b"></i><div><div class="tm">${now()}</div><div class="tx">${html}</div></div>`;
+  
+  // Tipos de eventos com seus estilos
+  const kindStyles = {
+    "ok": { icon: "check", color: "var(--ok)", label: "Sucesso" },
+    "error": { icon: "alert", color: "var(--err)", label: "Erro" },
+    "sub": { icon: "users", color: "var(--pink)", label: "Sub-agente" },
+    "warning": { icon: "alert", color: "var(--warn)", label: "Aviso" },
+    "info": { icon: "info", color: "var(--accent2)", label: "Info" },
+    "thinking": { icon: "brain", color: "var(--accent)", label: "Pensando" },
+    "tool": { icon: "plug", color: "var(--muted)", label: "Ferramenta" },
+  };
+  
+  const style = kindStyles[kind] || kindStyles["info"];
+  const tokens = extra.tokens ? ` • ${fmt(extra.tokens)} tokens` : "";
+  const duration = extra.duration ? ` • ${extra.duration}ms` : "";
+  
+  const el = document.createElement("div"); 
+  el.className = "feed-item " + kind;
+  el.innerHTML = `<i class="b" style="background:${style.color}"></i><div>
+    <div class="tm">${now()}${duration}</div>
+    <div class="tx"><span class="feed-label">${style.label}</span><span class="feed-status">${html}</span></div>
+  </div>`;
+  
+  // Permitir expandir detalhes se houver
+  if (extra.details) {
+    const details = document.createElement("details");
+    details.className = "feed-details";
+    details.innerHTML = `<summary class="sub">Ver detalhes</summary><pre class="feed-pre">${esc(extra.details)}</pre>`;
+    el.querySelector(".tx").appendChild(details);
+  }
+  
   box.prepend(el);
   while (box.children.length > 300) box.lastChild.remove();
 }
@@ -826,6 +889,11 @@ function onEvent(e) {
     case "turn_start": closeTurn(); ensureTurn(e.model); break;
     case "seg": segment(e.id, e.html, e.streaming); break;
     case "reasoning": thought(e.text); setLive(true, "Raciocinando…"); break;
+    case "reasoning_end": endThought(); if (busy) setLive(true, "Escrevendo…"); break;
+    case "compact_done":
+      if (e.ok) { note(`Conversa compactada: ${e.messages} mensagens viraram um resumo estruturado. O último pedido ficou intacto.`, "tip"); toast("success", "Conversa compactada", "Contexto liberado; o trabalho continua de onde parou."); }
+      else toast("warn", "Compactar", e.error || "Não deu para compactar agora.", 7000);
+      break;
     case "tool":
       toolStep(e);
       if (e.status === "running") { setLive(true, `${toolInfo(e.name)[1]}${e.summary ? " · " + e.summary : ""}`); feed("", `<b>${esc(e.agent || "principal")}</b> → ${esc(toolInfo(e.name)[1])} <span>${esc(e.summary || "")}</span>`); }
@@ -940,6 +1008,7 @@ function palette(initial = "") {
     ["users", "Equipe e perfis", () => go("team")],
     ["plug", "Conexões MCP e skills", () => go("connections")],
     ["panel", "Mostrar/ocultar painel ao vivo", () => action("toggle-side"), "Ctrl+B"],
+    ["layers", "Compactar conversa (resume o histórico)", () => compactConversation()],
     ["shield", "Alternar permissões", () => cyclePermission()],
     ["moon", "Alternar tema claro/escuro", () => action("theme")],
     ["key", "Chaves de API", () => { settingsSection = "chaves"; go("settings"); }],
@@ -951,6 +1020,17 @@ function palette(initial = "") {
     cmds.map((c, i) => `<div class="opt" data-i="${i}">${c[0] ? icon(c[0]) : ""}<span>${esc(c[1])}</span>${c[3] ? `<kbd>${c[3]}</kbd>` : ""}</div>`).join("")}</div></div>`);
   $$(".opt", $("#modal-root")).forEach(o => o.addEventListener("click", () => { closeModal(); if ($("#input").value === "/") $("#input").value = ""; cmds[+o.dataset.i][2](); }));
   filterOpts("#pl-q");
+}
+
+// ── Compactação de sessão ──────────────────────────────────────────────────────
+// O agente já compacta sozinho perto do limite (85%); o botão faz isso na hora, quando a pessoa quiser.
+async function compactConversation() {
+  if (busy) return toast("warn", "Aguarde", "Espere o agente terminar antes de compactar.");
+  if (!(await confirmBox("Compactar a conversa?",
+    "O histórico antigo vira um resumo estruturado (objetivo, o que foi feito, decisões, estado atual e próximos passos) e o último pedido fica inteiro. Libera contexto e deixa o agente mais rápido e barato. As mensagens continuam visíveis na tela.",
+    "Compactar"))) return;
+  const r = await call("compactConversation");   // o resultado chega pelo evento compact_done
+  if (r && r.error) toast("warn", "Compactar", r.error);
 }
 function filterOpts(sel) {
   const input = $(sel);

@@ -179,6 +179,9 @@ class AgentWorker(QThread):
                     self._voice()
                 elif command == "turn":
                     self._turn(*payload)
+                elif command == "compact":
+                    self.events("status", {"text": "Compactando o histórico…"})
+                    self.push({"type": "compact_done", **self.brain.compact_current_session()})
             except Exception as error:
                 logger.exception("Falha no processamento")
                 self.events("error", {"message": f"Falha: {error}"})
@@ -414,6 +417,14 @@ class Api(QObject):
     @pyqtSlot(str, result=str)
     def setPinnedPrompt(self, prompt: str) -> str:
         return json.dumps({"pinned_prompt": self.brain.set_pinned_prompt(prompt)}, ensure_ascii=False)
+
+    @pyqtSlot(result=str)
+    def compactConversation(self) -> str:
+        """Botão Compactar: roda no worker (chama o modelo para resumir); o resultado chega como evento."""
+        if self.win.busy:
+            return json.dumps({"error": "Espere o agente terminar antes de compactar."}, ensure_ascii=False)
+        self.win.worker.commands.put(("compact", None))
+        return "{}"
 
     @pyqtSlot(result=str)
     def listConversations(self) -> str:
@@ -910,7 +921,15 @@ class MainWindow(QMainWindow):
             self.api.push({"type": "seg", "id": self._seg_id, "html": render.markdown_html(self._seg_text), "streaming": True})
         if self._reasoning_dirty:
             self._reasoning_dirty = False
-            self.api.push({"type": "reasoning", "text": self._reasoning[-600:]})
+            self.api.push({"type": "reasoning", "text": self._reasoning[-20000:]})
+
+    def _end_reasoning(self) -> None:
+        """O modelo parou de pensar (vai escrever ou usar ferramenta): fecha o bloco atual de raciocínio."""
+        if self._reasoning:
+            if self._reasoning_dirty:
+                self._flush_stream()
+            self.api.push({"type": "reasoning_end"})
+            self._reasoning = ""
 
     def on_agent_event(self, kind: str, data: dict) -> None:
         agent = data.get("agent", "principal")
@@ -919,15 +938,21 @@ class MainWindow(QMainWindow):
             self._seg_id, self._seg_text, self._reasoning, self._streamed_any = None, "", "", False
             push({"type": "turn_start", "model": _short_model(data.get("model", ""))})
         elif kind == "text":
+            if agent == "principal":
+                self._end_reasoning()
             if self._seg_id is None:
                 self._seg_id = uuid.uuid4().hex[:8]
                 self._seg_text = ""
             self._seg_text += data["text"]
             self._seg_dirty = self._streamed_any = True
         elif kind == "reasoning":
+            if agent != "principal":
+                return   # raciocínio dos subagentes não entra no chat principal
             self._reasoning += data["text"]
             self._reasoning_dirty = True
         elif kind == "tool_start":
+            if agent == "principal":
+                self._end_reasoning()
             self._close_segment()
             push({"type": "tool", "id": data["id"], "name": data["name"], "status": "running", "agent": agent,
                   "summary": _args_summary(data.get("args") or {})})
@@ -953,6 +978,7 @@ class MainWindow(QMainWindow):
         elif kind == "subagent_end":
             push({"type": "sub_end", "agent": data["agent"], "tokens": data.get("tokens", 0), "model": ""})
         elif kind == "turn_end":
+            self._end_reasoning()
             text = data.get("text") or ""
             if self._seg_id is not None:
                 self._close_segment()

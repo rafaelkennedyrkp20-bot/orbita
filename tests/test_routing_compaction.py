@@ -119,6 +119,25 @@ def test_compaction_summarizes_old_turns(brain, monkeypatch):
     assert [u["content"][:8] for u in users] == ["pedido 9", "novo ped"]
 
 
+def test_manual_compaction_runs_below_the_limit_and_keeps_last_request(brain, monkeypatch):
+    fake = install(monkeypatch, [ChatResult(text="## Objetivo\nsite hacker")])
+    session = AgentSession(brain, brain.profiles.get("geral"), "fake", "m1", approve=lambda r: "yes")
+    for i in range(3):   # conversa pequena: o automático (85%) não faria nada
+        session.messages += [{"role": "user", "content": f"pedido {i}"}, {"role": "assistant", "content": f"ok {i}"}]
+    assert session._maybe_compact([]) == 0 and not fake.calls
+    assert session._maybe_compact([], force=True) == 4
+    assert session.summary.startswith("## Objetivo")
+    assert [m["content"] for m in session.messages] == ["pedido 2", "ok 2"]
+    assert "## Próximos passos" in SUMMARY_PROMPT
+
+
+def test_manual_compaction_needs_more_than_one_request(brain, monkeypatch):
+    install(monkeypatch, [])
+    session = AgentSession(brain, brain.profiles.get("geral"), "fake", "m1", approve=lambda r: "yes")
+    session.messages = [{"role": "user", "content": "único"}, {"role": "assistant", "content": "ok"}]
+    assert session._maybe_compact([], force=True) == 0 and session.messages[0]["content"] == "único"
+
+
 def test_compaction_failure_falls_back_to_trimming(brain, monkeypatch):
     install(monkeypatch, [ProviderError("sem rede"), ChatResult(text="ok mesmo assim")])
     session = big_session(brain)

@@ -18,6 +18,16 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## [Não lançado]
 
+### Corrigido
+- A barra de digitar não some mais durante trabalhos longos: o painel Ao vivo crescia e empurrava a página para fora
+  da janela; agora ele rola por dentro. Respostas com linhas longas também não cortam mais o texto à direita.
+- Raciocínio do modelo em bloco expansível: aberto enquanto ele pensa (texto completo, com tempo), fecha sozinho
+  quando ele começa a escrever e pode ser reaberto e copiado. Raciocínio de subagentes não mistura no chat.
+- Botão Compactar (topo do chat ou Ctrl+K): resume o histórico na hora, em segundo plano, num resumo estruturado
+  (objetivo, feito, decisões, estado atual, próximos passos), mantendo o último pedido inteiro. A compactação
+  automática perto do limite continua valendo.
+- Ao vivo mais legível: tipo de evento destacado, horário e itens longos limitados a 3 linhas.
+
 ## [0.2.0-alpha] — 2026-10-16
 
 ### Melhorias

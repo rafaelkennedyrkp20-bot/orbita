@@ -377,6 +377,20 @@ class Brain:
         elif kind == "subagent_start":
             print(f"\n  👥 {data['agent']} ({data['model']}) começou", flush=True)
 
+    def compact_current_session(self) -> dict:
+        """Botão Compactar: resume o histórico (menos o último pedido) e salva a conversa. Chame fora da thread da UI."""
+        session = self.session
+        if session is None or not session.messages:
+            return {"ok": False, "error": "Esta conversa ainda não tem histórico para compactar."}
+        before = len(session.messages)
+        compacted = session._maybe_compact([], force=True)
+        if not compacted:
+            return {"ok": False, "error": "Nada para compactar ainda (é preciso ter mais de um pedido), "
+                                          "ou o modelo não conseguiu gerar o resumo."}
+        self.save_conversation()
+        return {"ok": True, "messages": compacted, "kept": len(session.messages), "before": before,
+                "summary": session.summary or ""}
+
     def run_text_mode(self) -> None:
         provider, model = self.current_model
         print("\n" + "═" * 60)
