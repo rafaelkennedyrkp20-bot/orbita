@@ -54,6 +54,8 @@ class LocalApi:
     def model_list(self) -> dict:
         rows = []
         for name, cfg in self.settings.providers().items():
+            if cfg.get("type") == "grok_cli":  # agente externo: default_chat recusa
+                continue
             for model in cfg.get("models") or []:
                 if isinstance(model, str) and model.strip():
                     rows.append({"id": f"{name}:{model}", "object": "model", "owned_by": "orbita"})
@@ -101,9 +103,12 @@ def default_chat(settings, provider: str, model: str, messages: list, cancel: th
     blocked = refusal(settings, provider, cfg, what="a API local")
     if blocked:
         raise LocalApiError(blocked, 403)
-    result = get_provider(provider, settings).chat(
-        model, messages, tools=None, cancel=cancel, on_text=on_text,
-    )
+    adapter = get_provider(provider, settings)
+    # Um agente externo (Grok Build) roda o turno com as próprias ferramentas: tools=None não o contém.
+    if getattr(adapter, "external_agent", False):
+        raise LocalApiError("Esse modelo é um agente externo com ferramentas próprias. "
+                            "O chat sem ferramentas não o inicia; escolha outro modelo.", 403)
+    result = adapter.chat(model, messages, tools=None, cancel=cancel, on_text=on_text)
     return result.text or ""
 
 

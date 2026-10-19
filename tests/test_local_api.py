@@ -254,3 +254,39 @@ def test_default_chat_refuses_cloud_when_local_only(monkeypatch):
     with pytest.raises(LocalApiError, match="somente local"):
         default_chat(_Settings(policy="local_only"), "nuvem", "eco",
                      [{"role": "user", "content": "oi"}], threading.Event(), None)
+
+
+class _RealSettings(_Settings):
+    """Settings com o que get_provider precisa, para usar adaptadores reais."""
+
+    def __init__(self, policy="open"):
+        super().__init__("on", policy)
+        self._providers["grok"] = {"type": "grok_cli", "models": ["grok-build"]}
+
+    @staticmethod
+    def api_key(cfg):
+        return ""
+
+
+def test_chat_endpoints_refuse_external_agent_without_starting_it(monkeypatch):
+    """#7: Grok Build é um agente com ferramentas próprias; chat sem ferramentas não pode iniciá-lo."""
+    from agent.core.grok_cli import GrokBuildProvider
+
+    started = []
+    monkeypatch.setattr(GrokBuildProvider, "run_agent", lambda self, *a, **k: started.append(k) or ("x", None, {}))
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: started.append(a) or (_ for _ in ()).throw(AssertionError("Popen")))
+    settings = _RealSettings()
+    with pytest.raises(LocalApiError, match="agente externo") as error:
+        default_chat(settings, "grok", "grok-build", [{"role": "user", "content": "só texto"}], threading.Event(), None)
+    assert error.value.status == 403
+
+    api = LocalApi(settings, lambda p, m, msgs, c, t: default_chat(settings, p, m, msgs, c, t), token=TOKEN).start()
+    try:
+        status, body, _raw = _request(api.address[1], "POST", "/v1/chat/completions",
+                                      {"model": "grok:grok-build", "messages": [{"role": "user", "content": "oi"}]},
+                                      token=TOKEN)
+    finally:
+        api.stop()
+    assert status == 404 and "grok:grok-build" not in {row["id"] for row in api.model_list()["data"]}
+    assert started == []
+
