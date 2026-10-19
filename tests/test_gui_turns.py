@@ -315,3 +315,32 @@ def test_turn_outputs_finds_what_was_created_so_the_user_can_test_it(tmp_path):
     assert [(Path(o["path"]).name, o["kind"]) for o in outputs] == [
         ("index.html", "web"), ("rel.html", "web"), ("luma.png", "image")]       # páginas primeiro
     assert gui.turn_outputs("Nada criado.", tmp_path) == []
+
+
+def _bridge_window(tmp_path, pushed):
+    return SimpleNamespace(
+        api=SimpleNamespace(push=pushed.append), _seg_id=None, _streamed_any=True,
+        _end_reasoning=lambda: None, _close_segment=lambda: None, notify=lambda *a: None,
+        brain=SimpleNamespace(conversation_id="c1", conversation_title="t", effective_workspace=lambda: tmp_path))
+
+
+def test_helper_report_reaches_the_team_panel_sanitized(tmp_path):
+    # O painel flutuante da equipe mostra o relatório de cada ajudante; texto de modelo só entra sanitizado.
+    pushed = []
+    report = "**Status**: DONE\n<script>alert(1)</script>\n- Arquivos: app.js"
+    gui.MainWindow.on_agent_event(_bridge_window(tmp_path, pushed), "subagent_end",
+                                  {"agent": "Programador #1", "tokens": 1200, "report": report})
+    end = next(p for p in pushed if p["type"] == "sub_end")
+    assert end["tokens"] == 1200 and "<strong>Status</strong>" in end["report_html"]
+    assert "<script" not in end["report_html"]
+
+
+def test_interface_zoom_is_clamped_and_applied(tmp_path):
+    applied = []
+    api = SimpleNamespace(brain=SimpleNamespace(settings=Settings(tmp_path / "s.json")),
+                          win=SimpleNamespace(apply_zoom=lambda: applied.append(1), refresh_network=lambda: None),
+                          _state_json=lambda: "{}")
+    gui.Api.setSetting(api, "ui_zoom", json.dumps("3"))
+    assert api.brain.settings.get("ui_zoom") == 1.6 and applied
+    gui.Api.setSetting(api, "ui_zoom", json.dumps("1.1"))
+    assert api.brain.settings.get("ui_zoom") == 1.1

@@ -54,7 +54,8 @@ SETTABLE = {"theme", "user_name", "default_workspace", "native_notifications", "
             "cheap_model", "image_model", "image_backend", "comfyui_url", "comfyui_checkpoint",
             "ollama_num_ctx", "ollama_keep_alive", "checkpoints", "update_check",
             "team_model", "stt_model", "stt_engine", "team_max_parallel", "execution_policy",
-            "file_scope", "staged_writes", "local_api", "remote_access"}
+            "file_scope", "staged_writes", "local_api", "remote_access", "ui_zoom"}
+ZOOM_RANGE = (0.7, 1.6)
 # Modo plano: vai junto da mensagem; as ferramentas que alteram algo ficam bloqueadas no turno.
 PLAN_NOTE = ("\n\n[Modo plano] Ainda NÃO execute: não crie, edite nem apague arquivos e não rode comandos que "
              "alterem algo — essas ferramentas estão bloqueadas neste turno. Leia e pesquise o que precisar e "
@@ -700,9 +701,16 @@ class Api(QObject):
                 value = str(value or "").strip()[:512]
             elif key in ("local_api", "remote_access"):
                 value = "on" if value == "on" else "off"
+            elif key == "ui_zoom":
+                try:
+                    value = round(min(max(float(value), ZOOM_RANGE[0]), ZOOM_RANGE[1]), 2)
+                except (TypeError, ValueError):
+                    value = 1.0
             self.brain.settings.set(key, value)
             if key in ("local_api", "remote_access"):
                 self.win.refresh_network()
+            elif key == "ui_zoom":
+                self.win.apply_zoom()
         return self._state_json()
 
     @pyqtSlot(result=str)
@@ -1429,6 +1437,7 @@ class MainWindow(QMainWindow):
         self.view.page().setWebChannel(self.channel)
         self.view.load(QUrl.fromLocalFile(str(WEB_INDEX)))
         self.setCentralWidget(self.view)
+        self.apply_zoom()
 
         # Estado do streaming do turno atual
         self._seg_id: Optional[str] = None
@@ -1560,7 +1569,8 @@ class MainWindow(QMainWindow):
             self._close_segment()
             push({"type": "sub_start", "agent": data["agent"], "model": data.get("model", ""), "task": data.get("task", "")})
         elif kind == "subagent_end":
-            push({"type": "sub_end", "agent": data["agent"], "tokens": data.get("tokens", 0), "model": ""})
+            push({"type": "sub_end", "agent": data["agent"], "tokens": data.get("tokens", 0), "model": "",
+                  "report_html": render.markdown_html(str(data.get("report") or "")[:6000])})
         elif kind == "turn_end":
             self._end_reasoning()
             text = data.get("text") or ""
@@ -1629,6 +1639,14 @@ class MainWindow(QMainWindow):
                 server.stop()
             except Exception:
                 logger.warning("Não consegui parar um serviço de rede.", exc_info=True)
+
+    def apply_zoom(self) -> None:
+        """Tamanho da interface inteira (fontes, botões e painéis), escolhido em Configurações ou por Ctrl + / -."""
+        try:
+            zoom = float(self.brain.settings.get("ui_zoom") or 1.0)
+        except (TypeError, ValueError):
+            zoom = 1.0
+        self.view.setZoomFactor(min(max(zoom, ZOOM_RANGE[0]), ZOOM_RANGE[1]))
 
     def refresh_network(self) -> None:
         """Religa os serviços opcionais. Desligados, não abrem porta."""

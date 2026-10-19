@@ -216,11 +216,15 @@ function bindChrome() {
     else if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); action("new"); }
     else if (e.ctrlKey && e.key.toLowerCase() === "b") { e.preventDefault(); action("toggle-side"); }
     else if (e.ctrlKey && e.key === ",") { e.preventDefault(); go("settings"); }
+    else if (e.ctrlKey && (e.key === "=" || e.key === "+")) { e.preventDefault(); zoomBy(0.1); }
+    else if (e.ctrlKey && e.key === "-") { e.preventDefault(); zoomBy(-0.1); }
+    else if (e.ctrlKey && e.key === "0") { e.preventDefault(); zoomBy(0); }
     else if (e.key === "Escape" && dict) { e.preventDefault(); cancelDictation(); }
     else if (e.ctrlKey && e.key.toLowerCase() === "m") { e.preventDefault(); toggleDictation(); }
     else if (e.key === "Escape") { if ($("#ctx-menu").innerHTML) closeCtxMenu(); else if ($("#modal-root").innerHTML) closeModal(); else if (engineBusy || flushing) requestStop(); }
   });
   $("#conv-search").addEventListener("input", renderConvs);
+  panelResizers();
   $("#conv-list").addEventListener("scroll", closeCtxMenu);
   watchMessagesScroll();
   const title = $("#conv-title");
@@ -1044,14 +1048,124 @@ function mcpWarm(e) {
   clearInterval(warmTimers[e.id]);
   warmTimers[e.id] = setInterval(paint, 1000);
 }
-function subCard(d, done) {
-  const id = "sub-" + d.agent;
-  let el = document.getElementById(id);
-  if (!el) {
-    el = document.createElement("div"); el.className = "sub-card"; el.id = id; flow().appendChild(el);
+// ── Painel flutuante da equipe ───────────────────────────────
+// Os ajudantes trabalham fora do chat: um cartão por ajudante (tarefa, ação atual, passos e relatório), num painel
+// que dá para arrastar, recolher e fechar. No chat fica só o "Delegar" do agente principal.
+const store = {
+  get: k => { try { return JSON.parse(localStorage.getItem("orbita." + k)); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem("orbita." + k, JSON.stringify(v)); } catch { /* sem armazenamento */ } },
+};
+const dock = { el: null, agents: {} };
+function teamDock() {
+  if (dock.el) return dock.el;
+  const el = document.createElement("div");
+  el.id = "team-dock"; el.hidden = true;
+  el.innerHTML = `<div class="td-head" title="Arraste para mover">${icon("users")}<b>Equipe</b><span class="td-count"></span><span class="grow"></span>
+      <button class="td-btn" data-td="min" title="Recolher ou abrir">${icon("chevdown")}</button>
+      <button class="td-btn" data-td="close" title="Fechar (volta quando a equipe começar de novo)">${icon("x")}</button></div>
+    <div class="td-body"></div>`;
+  document.body.appendChild(el);
+  if (store.get("dock-min")) el.classList.add("min");
+  $("[data-td=min]", el).addEventListener("click", () => { el.classList.toggle("min"); store.set("dock-min", el.classList.contains("min")); });
+  $("[data-td=close]", el).addEventListener("click", () => { el.hidden = true; });
+  const head = $(".td-head", el);
+  head.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || e.target.closest(".td-btn")) return;
+    const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    head.setPointerCapture(e.pointerId); el.classList.add("dragging");
+    const move = ev => placeDock(ev.clientX - dx, ev.clientY - dy);
+    head.addEventListener("pointermove", move);
+    head.addEventListener("pointerup", () => {
+      head.removeEventListener("pointermove", move); el.classList.remove("dragging");
+      const b = el.getBoundingClientRect(); store.set("dock-pos", { x: b.left, y: b.top });
+    }, { once: true });
+  });
+  dock.el = el;
+  return el;
+}
+function placeDock(x, y) {
+  const el = dock.el;
+  x = Math.min(Math.max(8, x), Math.max(8, innerWidth - el.offsetWidth - 8));
+  y = Math.min(Math.max(8, y), Math.max(8, innerHeight - 48));
+  Object.assign(el.style, { left: x + "px", top: y + "px", right: "auto", bottom: "auto" });
+}
+addEventListener("resize", () => { if (dock.el && dock.el.style.left) placeDock(parseFloat(dock.el.style.left), parseFloat(dock.el.style.top)); });
+function dockCount() {
+  const all = Object.values(dock.agents), running = all.filter(a => !a.done).length;
+  $(".td-count", dock.el).textContent = running ? `${running} trabalhando · ${all.length - running}/${all.length} prontos`
+    : `${all.length} ${all.length === 1 ? "concluído" : "concluídos"}`;
+  dock.el.classList.toggle("busy", running > 0);
+}
+function dockSubStart(e) {
+  const el = teamDock();
+  if (!Object.values(dock.agents).some(a => !a.done)) { dock.agents = {}; $(".td-body", el).innerHTML = ""; }   // nova leva
+  const card = document.createElement("details");
+  card.className = "td-agent";
+  card.innerHTML = `<summary><span class="td-st"><span class="spin"></span></span><span class="td-nm">${esc(e.agent)}</span>
+      <span class="td-mdl">${esc(e.model || "")}</span><span class="td-task">${esc(e.task || "")}</span>
+      <span class="td-now">começando…</span></summary><div class="td-steps"></div><div class="td-report prose"></div>`;
+  $(".td-body", el).appendChild(card);
+  dock.agents[e.agent] = { card, done: false, steps: {}, count: 0 };
+  el.hidden = false;
+  const pos = store.get("dock-pos");
+  if (pos && !el.style.left) placeDock(pos.x, pos.y);
+  dockCount();
+}
+function dockTool(e) {
+  const a = dock.agents[e.agent];
+  if (!a) return;
+  const [ic, label] = toolInfo(e.name);
+  let row = a.steps[e.id];
+  if (!row) {
+    row = document.createElement("div"); row.className = "td-step";
+    row.innerHTML = `${icon(ic)}<b>${esc(label)}</b><span class="arg">${esc(e.summary || "")}</span><span class="st"><span class="spin"></span></span>`;
+    $(".td-steps", a.card).appendChild(row);
+    a.steps[e.id] = row; a.count++;
   }
-  el.innerHTML = `${done ? icon("check") : `<span class="spin"></span>`}<span class="nm">${esc(d.agent)}</span><span class="mdl">${esc(d.model || "")}</span><span class="tsk">${esc(done ? `concluído · ${fmt(d.tokens)} tokens` : d.task || "")}</span>`;
-  scrollEnd();
+  if (e.status === "running") $(".td-now", a.card).textContent = `${label}${e.summary ? " · " + e.summary : ""}`;
+  else { const st = $(".st", row); st.className = "st " + e.status; st.innerHTML = icon(e.status === "ok" ? "check" : "alert"); }
+}
+function dockSubEnd(e) {
+  const a = dock.agents[e.agent];
+  if (!a) return;
+  a.done = true;
+  const report = $(".td-report", a.card);
+  if (e.report_html) report.innerHTML = e.report_html;   // já sanitizado pelo render.markdown_html
+  const short = /Status\W*(PARTIAL|PARCIAL|BLOCKED|BLOQUEADO)|Handoff incompleto|não é entrega/i.test(report.textContent);
+  a.card.classList.add("done"); a.card.classList.toggle("warn", short);
+  $(".td-st", a.card).innerHTML = icon(short ? "alert" : "check");
+  $(".td-now", a.card).textContent = `${short ? "entrega incompleta" : "pronto"} · ${a.count} ${a.count === 1 ? "ação" : "ações"} · ${fmt(e.tokens)} tokens`;
+  dockCount();
+}
+
+// ── Tamanho da interface e largura dos painéis ───────────────
+function zoomBy(step) {
+  const now = +(S.settings && S.settings.ui_zoom) || 1;
+  const next = step ? Math.round(Math.min(1.6, Math.max(0.7, now + step)) * 10) / 10 : 1;
+  setSetting("ui_zoom", next, true).then(() => toast("info", "Tamanho da interface", Math.round(next * 100) + "%", 1200));
+}
+function panelResizers() {
+  const sizes = { convs: ["--convs-w", 200, 480, 1], side: ["--side-w", 260, 640, -1] };
+  for (const [id, [prop, min, max, dir]] of Object.entries(sizes)) {
+    const panel = document.getElementById(id);
+    if (!panel) continue;
+    const saved = store.get(prop);
+    if (saved) document.documentElement.style.setProperty(prop, saved + "px");
+    const grip = document.createElement("div");
+    grip.className = "panel-grip " + (dir > 0 ? "right" : "left"); grip.title = "Arraste para mudar a largura (duplo clique volta ao padrão)";
+    panel.appendChild(grip);
+    grip.addEventListener("dblclick", () => { document.documentElement.style.removeProperty(prop); store.set(prop, null); });
+    grip.addEventListener("pointerdown", e => {
+      const start = e.clientX, width = panel.getBoundingClientRect().width;
+      grip.setPointerCapture(e.pointerId); document.body.classList.add("resizing");
+      const move = ev => {
+        const w = Math.round(Math.min(max, Math.max(min, width + (ev.clientX - start) * dir)));
+        document.documentElement.style.setProperty(prop, w + "px"); store.set(prop, w);
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", () => { grip.removeEventListener("pointermove", move); document.body.classList.remove("resizing"); }, { once: true });
+    });
+  }
 }
 // O que a resposta criou (página, imagem, vídeo…): botões para testar sem caçar o arquivo na pasta.
 function outputsCard(turn, outputs) {
@@ -1197,15 +1311,20 @@ function onEvent(e) {
       if (e.ok) { note(`Conversa compactada: ${e.messages} mensagens viraram um resumo estruturado. O último pedido ficou intacto.`, "tip"); toast("success", "Conversa compactada", "Contexto liberado; o trabalho continua de onde parou."); }
       else toast("warn", "Compactar", e.error || "Não deu para compactar agora.", 7000);
       break;
-    case "tool":
-      toolStep(e);
-      if (e.status === "running") { setLive(true, `${toolInfo(e.name)[1]}${e.summary ? " · " + e.summary : ""}`); feed("", `<b>${esc(e.agent || "principal")}</b> → ${esc(toolInfo(e.name)[1])} <span>${esc(e.summary || "")}</span>`); }
+    case "tool": {
+      const helper = e.agent && e.agent !== "principal";   // ajudante: painel da equipe, fora do chat
+      if (helper) dockTool(e); else toolStep(e);
+      if (e.status === "running") {
+        if (!helper) setLive(true, `${toolInfo(e.name)[1]}${e.summary ? " · " + e.summary : ""}`);
+        feed("", `<b>${esc(e.agent || "principal")}</b> → ${esc(toolInfo(e.name)[1])} <span>${esc(e.summary || "")}</span>`);
+      }
       else feed(e.status, `${e.status === "ok" ? "✓" : "✗"} ${esc(toolInfo(e.name)[1])}`);
       if ((e.images || []).length) preview({ path: e.images[0], kind: "image" });
       break;
+    }
     case "mcp_progress": mcpWarm(e); break;
-    case "sub_start": subCard(e, false); feed("sub", `<b>${esc(e.agent)}</b> começou com <b>${esc(e.model)}</b>`); renderAgents({ [e.agent.replace(/ #\d+$/, "")]: true }); break;
-    case "sub_end": subCard(e, true); feed("ok", `✓ <b>${esc(e.agent)}</b> terminou (${fmt(e.tokens)} tokens)`); renderAgents(); break;
+    case "sub_start": dockSubStart(e); feed("sub", `<b>${esc(e.agent)}</b> começou com <b>${esc(e.model)}</b>`); renderAgents({ [e.agent.replace(/ #\d+$/, "")]: true }); break;
+    case "sub_end": dockSubEnd(e); feed("ok", `✓ <b>${esc(e.agent)}</b> terminou (${fmt(e.tokens)} tokens)`); renderAgents(); break;
     case "status": setLive(true, e.text); break;
     case "usage": S.conversation_tokens = e.total; updateMeter(e.total); break;
     case "checkpoint": checkpointCard(e); break;
@@ -1629,6 +1748,7 @@ function renderSettings() {
         ${field("Seu nome", "O agente usa para se dirigir a você.", `<input class="inp" data-text="user_name" value="${esc(st.user_name || "")}">`)}
         ${field("Projeto aberto", esc(S.workspace_set ? S.workspace : "Nenhuma pasta escolhida. O agente usa a sua pasta de usuário."), `<button class="btn primary" id="open-project">${icon("folder")} Abrir ou criar</button>`)}
         ${field("Tema", "Aparência da janela.", seg("theme", [["dark", "Escuro"], ["light", "Claro"]], st.theme || "dark"))}
+        ${field("Tamanho da interface", "Letras, botões e painéis. Atalhos: Ctrl + e Ctrl − (Ctrl 0 volta a 100%). A largura das barras laterais muda arrastando a borda.", seg("ui_zoom", [["0.9", "90%"], ["1", "100%"], ["1.1", "110%"], ["1.25", "125%"], ["1.4", "140%"]], String(+st.ui_zoom || 1)))}
         ${field("Notificações do Windows", "Avisa no canto da tela quando uma tarefa termina e a janela não está em foco.", toggle("native_notifications", st.native_notifications !== false))}
         ${field("Mostrar raciocínio", "Exibe o pensamento de modelos que raciocinam (DeepSeek-R1, Qwen3…).", toggle("show_reasoning", st.show_reasoning))}
         ${field("Assistente de primeira execução", "Refaça a configuração inicial guiada.", `<button class="btn small" id="re-onb">${icon("sparkle")} Abrir assistente</button>`)}
@@ -1694,7 +1814,7 @@ function renderSettings() {
       const usage = S.usage || {};
       const max = Math.max(1, ...Object.values(usage).map(u => u.input + u.output));
       html = `<h1>Economia de tokens</h1><p class="lead">Produtividade sem gastar tudo de uma vez: o agente pausa e pergunta antes de passar dos limites.</p>
-        <div class="group">${field("Modo", "Máximo: contexto enxuto e modelos baratos. Livre: mais contexto e os melhores modelos.", seg("economy_mode", [["maximo", "Máxima"], ["equilibrado", "Equilibrado"], ["livre", "Livre"]], st.economy_mode))}
+        <div class="group">${field("Modo", "Máxima: contexto enxuto (24 mil tokens) e modelos baratos. Equilibrado e Livre: até 1 milhão de tokens nos modelos que aceitam; o Livre também mostra saídas maiores das ferramentas.", seg("economy_mode", [["maximo", "Máxima"], ["equilibrado", "Equilibrado"], ["livre", "Livre"]], st.economy_mode))}
         ${field("Orçamento por tarefa", "Tokens antes de pausar e perguntar (0 = sem limite).", `<input class="inp" type="number" step="50000" data-num="turn_token_budget" value="${st.turn_token_budget}">`)}
         ${field("Orçamento diário (nuvem)", "Modelos locais não contam (0 = sem limite).", `<input class="inp" type="number" step="100000" data-num="daily_token_budget" value="${st.daily_token_budget}">`)}</div>
         <div class="group"><h3>Uso de hoje</h3>${Object.entries(usage).map(([k, u]) => `<div class="usage-row"><span class="mono" style="font-family:var(--mono);font-size:12px">${esc(k)}</span><div class="bar"><i style="width:${(u.input + u.output) / max * 100}%"></i></div><span>${fmt(u.input + u.output)}</span></div>`).join("") || `<div class="empty">Nada usado hoje ainda.</div>`}</div>`;

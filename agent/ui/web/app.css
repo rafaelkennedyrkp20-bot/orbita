@@ -48,7 +48,7 @@ svg.i { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-widt
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 /* ── Página de chat ─────────────────────────── */
-#page-chat { grid-template-columns: 270px minmax(0, 1fr) auto; grid-template-rows: minmax(0, 100vh); }
+#page-chat { grid-template-columns: var(--convs-w, 270px) minmax(0, 1fr) auto; grid-template-rows: minmax(0, 100vh); }
 /* Nada dentro do chat pode esticar a página: o painel Ao vivo e respostas largas rolam por dentro. */
 #page-chat > * { min-height: 0; }
 #side { min-height: 0; overflow: hidden; }
@@ -227,11 +227,50 @@ svg.i { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-widt
   background: var(--line); 
   color: var(--text);
 }
-.sub-card { display: flex; align-items: center; gap: 10px; padding: 9px 12px; margin: 8px 0; border-radius: 12px; background: var(--grad-soft); border: 1px solid var(--line2); font-size: 12.5px; }
-.sub-card .nm { font-weight: 650; }
-.sub-card .mdl { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-.sub-card .tsk { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.sub-card .mdl { min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Painel flutuante da equipe (ajudantes fora do chat) */
+#team-dock { position: fixed; right: 24px; bottom: 120px; width: min(380px, calc(100vw - 32px)); max-height: min(560px, calc(100vh - 32px)); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line2); border-radius: var(--radius); box-shadow: var(--shadow); z-index: 40; overflow: hidden; animation: rise .2s ease; }
+#team-dock[hidden] { display: none; }
+#team-dock.dragging { opacity: .92; user-select: none; }
+#team-dock .td-head { display: flex; align-items: center; gap: 8px; padding: 9px 10px 9px 12px; background: var(--grad-soft); border-bottom: 1px solid var(--line); cursor: grab; font-size: 13px; touch-action: none; user-select: none; }
+#team-dock.dragging .td-head { cursor: grabbing; }
+#team-dock .td-head .grow { flex: 1; }
+#team-dock .td-count { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+#team-dock.busy .td-head > svg.i { color: var(--accent2); animation: pulse 1.6s ease-in-out infinite; }
+#team-dock .td-btn { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; }
+#team-dock .td-btn:hover { background: var(--panel3); color: var(--text); }
+#team-dock .td-btn svg.i { width: 15px; height: 15px; transition: transform .2s; }
+#team-dock.min .td-body { display: none; }
+#team-dock.min [data-td=min] svg.i { transform: rotate(180deg); }
+#team-dock .td-body { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.td-agent { border: 1px solid var(--line); border-radius: 10px; background: var(--panel2); }
+.td-agent > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; padding: 8px 10px; font-size: 12.5px; }
+.td-agent > summary::-webkit-details-marker { display: none; }
+.td-agent .td-st { display: grid; place-items: center; color: var(--ok); }
+.td-agent.warn .td-st { color: var(--warn); }
+.td-agent .td-st svg.i { width: 15px; height: 15px; }
+.td-agent .td-nm { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-agent .td-mdl { font-family: var(--mono); font-size: 10.5px; color: var(--dim); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-agent .td-task, .td-agent .td-now { grid-column: 2 / 4; color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-agent .td-now { color: var(--accent2); font-family: var(--mono); font-size: 11px; }
+.td-agent.done .td-now { color: var(--dim); }
+.td-agent[open] .td-task { white-space: normal; }
+.td-steps { border-top: 1px solid var(--line); padding: 4px 0; max-height: 180px; overflow-y: auto; }
+.td-steps:empty, .td-report:empty { display: none; }
+.td-step { display: grid; grid-template-columns: 16px auto minmax(0, 1fr) 16px; gap: 6px; align-items: center; padding: 3px 10px; font-size: 11.5px; }
+.td-step svg.i { width: 14px; height: 14px; color: var(--muted); }
+.td-step .arg { color: var(--dim); font-family: var(--mono); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-step .st { display: grid; place-items: center; }
+.td-step .st.ok svg.i { color: var(--ok); } .td-step .st.error svg.i { color: var(--err); }
+.td-step .spin { width: 12px; height: 12px; }
+.td-report { border-top: 1px solid var(--line); padding: 8px 12px; font-size: 12px; max-height: 220px; overflow-y: auto; }
+.td-report > :first-child { margin-top: 0; } .td-report > :last-child { margin-bottom: 0; }
+@keyframes pulse { 50% { opacity: .45; } }
+/* Alças para mudar a largura das barras laterais */
+#convs, #side { position: relative; }
+.panel-grip { position: absolute; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 5; }
+.panel-grip.right { right: -3px; } .panel-grip.left { left: -3px; }
+.panel-grip:hover, body.resizing .panel-grip { background: linear-gradient(90deg, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px); }
+body.resizing { cursor: col-resize; user-select: none; }
 .step .lbl { min-width: 0; }
 .note { text-align: center; font-size: 12px; color: var(--dim); margin: 14px 0; }
 .note.err { color: var(--err); } .note.warn { color: var(--warn); }
@@ -420,7 +459,7 @@ pre.diff .f { color: var(--text); font-weight: 700; background: var(--panel2); b
 .suggest button:hover { color: var(--text); border-color: var(--line2); }
 
 /* Painel lateral */
-#side { width: 340px; background: var(--bg2); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+#side { width: var(--side-w, 340px); background: var(--bg2); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
 #side.hidden { display: none; }
 .tabs { display: flex; gap: 4px; padding: 12px 12px 0; border-bottom: 1px solid var(--line); }
 .tab { border: 0; background: transparent; color: var(--muted); padding: 8px 10px; cursor: pointer; border-bottom: 2px solid transparent; font-weight: 600; font-size: 12.5px; }

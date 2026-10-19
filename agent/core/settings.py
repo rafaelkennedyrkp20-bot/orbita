@@ -114,6 +114,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "default_workspace": "",          # pasta de trabalho quando o perfil não define uma
     "recent_workspaces": [],          # projetos abertos recentemente (diálogo "Projeto")
     "theme": "dark",
+    "ui_zoom": 1.0,                   # tamanho da interface (0.7 a 1.6); Ctrl + / Ctrl - / Ctrl 0
     "native_notifications": True,     # avisos do Windows quando a janela não está em foco
     "active_profile": "geral",
     # perguntar: confirma tudo que altera algo | auto: confirma só execução/controle do PC
