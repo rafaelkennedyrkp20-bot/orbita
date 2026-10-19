@@ -1036,3 +1036,12 @@ def test_unmasked_native_turn_is_sent_as_is(brain):
     wire = s._wire_messages(s.visible_tools())
     assistant = next(m for m in wire if m["role"] == "assistant")
     assert assistant["_native"]["content"][0]["signature"] == "assinatura"
+
+
+def test_stopped_stream_keeps_partial_answer_in_conversation(brain, provider):
+    """#22: o que foi mostrado antes de Parar continua na conversa; nada roda depois."""
+    provider([ChatResult(text="parcial", stop_reason="cancelled",
+                         tool_calls=[]), ChatResult(text="nunca")])
+    s = session(brain)
+    assert s.run("x") == "parcial"
+    assert s.messages[-1] == {"role": "assistant", "content": "parcial"}

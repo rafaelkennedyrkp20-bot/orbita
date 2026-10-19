@@ -733,6 +733,7 @@ class AnthropicProvider(Provider):
         else:
             manager = client.messages.stream(**params)
         result = ChatResult()
+        texts, thoughts = [], []   # o que já foi mostrado: fica no resultado se a pessoa parar
         with manager as stream:
             for event in stream:
                 if cancel is not None and cancel.is_set():
@@ -740,11 +741,17 @@ class AnthropicProvider(Provider):
                     break
                 if event.type == "content_block_delta":
                     delta = event.delta
-                    if delta.type == "text_delta" and on_text:
-                        on_text(delta.text)
-                    elif delta.type == "thinking_delta" and on_reasoning and delta.thinking:
-                        on_reasoning(delta.thinking)
+                    if delta.type == "text_delta":
+                        texts.append(delta.text)
+                        if on_text:
+                            on_text(delta.text)
+                    elif delta.type == "thinking_delta" and delta.thinking:
+                        thoughts.append(delta.thinking)
+                        if on_reasoning:
+                            on_reasoning(delta.thinking)
             if result.stop_reason == "cancelled":
+                # Só o texto e o raciocínio parciais; uma ferramenta pela metade nunca vira chamada.
+                result.text, result.reasoning = "".join(texts), "".join(thoughts)
                 return result
             final = stream.get_final_message()
 

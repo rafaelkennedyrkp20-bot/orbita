@@ -181,3 +181,94 @@ def test_http_error_list_still_explains_authentication():
     assert "HTTP 401" in str(error)
     assert "Verifique a chave de API" in str(error)
 
+
+
+class _Delta:
+    def __init__(self, kind, **fields):
+        self.type = kind
+        self.__dict__.update(fields)
+
+
+class _Event:
+    def __init__(self, delta):
+        self.type = "content_block_delta"
+        self.delta = delta
+
+
+class _FakeAnthropicStream:
+    def __init__(self, events):
+        self.events = events
+
+    def __enter__(self):
+        return iter(self.events)
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _anthropic_with(events):
+    from types import SimpleNamespace
+
+    from agent.core.providers import AnthropicProvider
+
+    client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **params: _FakeAnthropicStream(events)))
+    return AnthropicProvider("claude", {"type": "anthropic"}), client
+
+
+def test_cancelled_claude_stream_keeps_partial_text():
+    """#22: o texto já mostrado sumia do resultado (e do histórico) ao parar o streaming."""
+    import threading
+
+    cancel = threading.Event()
+    shown = []
+
+    def on_text(piece):
+        shown.append(piece)
+        cancel.set()
+
+    provider, client = _anthropic_with([
+        _Event(_Delta("thinking_delta", thinking="pensando")),
+        _Event(_Delta("text_delta", text="parcial")),
+        _Event(_Delta("text_delta", text=" nunca mostrado")),
+    ])
+    result = provider._stream(client, {"model": "claude-opus-5-5", "messages": []}, False, on_text, None, cancel)
+    assert result.stop_reason == "cancelled"
+    assert result.text == "".join(shown) == "parcial"
+    assert result.reasoning == "pensando" and result.tool_calls == [] and result.native is None
+
+
+def test_cancel_before_first_delta_and_during_partial_tool():
+    import threading
+
+    cancel = threading.Event()
+    cancel.set()
+    provider, client = _anthropic_with([_Event(_Delta("text_delta", text="x"))])
+    result = provider._stream(client, {"model": "m", "messages": []}, False, None, None, cancel)
+    assert result.text == "" and result.stop_reason == "cancelled"
+
+    cancel = threading.Event()
+    events = [_Event(_Delta("text_delta", text="vou gravar")),
+              _Event(_Delta("input_json_delta", partial_json='{"path": "a.t')),
+              _Event(_Delta("input_json_delta", partial_json='xt"}'))]
+    provider, client = _anthropic_with(events)
+    seen = []
+
+    def on_text(piece):
+        seen.append(piece)
+
+    original = events[1].delta
+    events[1] = _Event(original)
+    result = provider._stream(client, {"model": "m", "messages": []}, False, on_text, None,
+                              _CancelAfter(cancel, 2))
+    assert result.text == "vou gravar" and result.tool_calls == [] and result.native is None
+
+
+class _CancelAfter:
+    """Evento que fica marcado depois de N consultas (no meio da ferramenta parcial)."""
+
+    def __init__(self, event, after):
+        self.event, self.after, self.checks = event, after, 0
+
+    def is_set(self):
+        self.checks += 1
+        return self.checks > self.after
