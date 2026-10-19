@@ -62,6 +62,13 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   tokens (entrega o que tem como PARTIAL), em vez de gastar o saldo testando sem fim.
 
 ### Corrigido
+- **Linux: o Órbita não abria.** Num Ubuntu/Debian sem `libxkbfile1` (e outras bibliotecas da janela), o programa
+  fechava com um erro técnico antes de aparecer, e por isso nem dava para pôr a chave de API. Agora ele diz qual
+  biblioteca falta e o comando para instalar, ao abrir e no `./iniciar_orbita.sh --check`; o README lista o comando.
+- Ponte do Grok com `ORBITA_HOME` definido (pacote, CI) apontava o `PYTHONPATH` para a pasta de dados, e o módulo da
+  ponte não carregava. Agora aponta para a pasta do código. O mesmo vale para os links de ROADMAP e licença no Sobre.
+- O CI no GitHub não rodava desde que entrou (`runner.temp` no env do job invalidava o arquivo inteiro).
+- O `--check` não conta mais o Silero VAD como falha: ele é opcional e o ditado detecta a fala pelo volume.
 - Perfil sem o grupo MCP, ou limitado a alguns servidores, não roda mais ferramenta MCP chamada pelo nome, e
   `find_tools` não ativa ferramenta de servidor fora do perfil.
 - Em tarefa longa, a skill carregada não é mais encurtada no meio do caminho (antes o protocolo sumia e
