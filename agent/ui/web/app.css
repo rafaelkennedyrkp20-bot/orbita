@@ -102,7 +102,11 @@ svg.i { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-widt
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .msg.user { display: flex; justify-content: flex-end; }
 .bubble { background: var(--user); color: #fff; padding: 11px 15px; border-radius: 18px 18px 6px 18px; max-width: 78%; white-space: pre-wrap; word-wrap: break-word; box-shadow: 0 6px 22px rgba(79,70,229,.28); }
-.bubble img { display: block; max-width: 260px; border-radius: 10px; margin-top: 8px; }
+.bubble .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; white-space: normal; }
+.bubble .thumbs figure { position: relative; margin: 0; }
+.bubble .thumbs img { display: block; width: 260px; max-width: 100%; max-height: 320px; object-fit: cover; object-position: top; border-radius: 10px; cursor: zoom-in; }
+.bubble .thumbs.many img { width: 72px; height: 100px; }
+.bubble .thumbs figcaption { position: absolute; left: 4px; bottom: 4px; padding: 0 6px; border-radius: 6px; background: rgba(0,0,0,.65); font: 600 11px var(--mono); }
 .msg.bot { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; }
 .bot-body, .flow { min-width: 0; }
 .prose pre, .code pre { max-width: 100%; overflow-x: auto; }
@@ -632,6 +636,8 @@ select.inp { appearance: none; background-image: linear-gradient(45deg, transpar
 .choice .ci { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--panel3); color: var(--accent2); }
 .choice b { display: block; } .choice span { color: var(--muted); font-size: 12.5px; }
 .lightbox img { max-width: 92vw; max-height: 88vh; border-radius: 12px; box-shadow: var(--shadow); }
+.lightbox.tall { max-height: 92vh; overflow-y: auto; border-radius: 12px; }
+.lightbox.tall img { width: min(720px, 92vw); max-height: none; border-radius: 0; }
 
 /* Ajustes finos */
 #conv-title { min-width: 140px; }

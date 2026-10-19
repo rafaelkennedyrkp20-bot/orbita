@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import logging
 import math
@@ -30,7 +31,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
-from functools import wraps
+from functools import lru_cache, wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
@@ -120,6 +121,54 @@ def _image_b64(path: str) -> tuple[str, str]:
     data = Path(path).read_bytes()
     mime = mimetypes.guess_type(path)[0] or "image/png"
     return mime, base64.b64encode(data).decode("ascii")
+
+
+SLICE_MIN_PX = 1600   # parte de imagem alta: 3× a largura, no mínimo isto
+SLICE_OVERLAP = 6     # cada parte repete 1/6 da largura do fim da anterior (balão no corte aparece inteiro)
+
+
+@lru_cache(maxsize=32)
+def _image_pieces(path: str, _mtime: float, _size: int) -> tuple[tuple[str, str], ...]:
+    """(mime, base64) de uma imagem; página alta (manhwa de 720×15.000) vai em partes de cima para baixo.
+    Inteira, a API reduz a página a ~900 tokens e o modelo inventa o texto; em partes de 720×2.160 ele lê.
+    O Claude também recusa imagem com mais de 8.000 px. Mtime e tamanho entram na chave do cache."""
+    try:
+        from PIL import Image
+
+        with Image.open(path) as image:
+            width, height = image.size
+            step = max(width * 3, SLICE_MIN_PX)
+            if height > step * 1.5:
+                pieces, top = [], 0
+                while True:
+                    bottom = min(height, top + step)
+                    buffer = io.BytesIO()
+                    image.crop((0, top, width, bottom)).convert("RGB").save(buffer, "JPEG", quality=90)
+                    pieces.append(("image/jpeg", base64.b64encode(buffer.getvalue()).decode("ascii")))
+                    if bottom >= height:
+                        return tuple(pieces)
+                    top = bottom - width // SLICE_OVERLAP
+    except Exception as error:   # formato que o Pillow não abre: vai o arquivo como está
+        logger.debug("Imagem enviada sem fatiar (%s): %s", path, error)
+    return (_image_b64(path),)
+
+
+def _image_inputs(paths: list[str] | None) -> list[tuple[str, str, str]]:
+    """(rótulo, mime, base64) das imagens que existem, na ordem. Com mais de uma imagem ou parte, cada uma leva
+    "Imagem N de T: nome, parte P de Q", para o modelo seguir a ordem e citar a página certa."""
+    found = [p for p in paths or [] if Path(p).is_file()]
+    out = []
+    for i, path in enumerate(found, 1):
+        stat = Path(path).stat()
+        pieces = _image_pieces(path, stat.st_mtime, stat.st_size)
+        for j, (mime, data) in enumerate(pieces, 1):
+            label = f"Imagem {i} de {len(found)}: {Path(path).name}" if len(found) > 1 else Path(path).name
+            if len(pieces) > 1:
+                label += f", parte {j} de {len(pieces)} (de cima para baixo)"
+            elif len(found) == 1:
+                label = ""   # uma imagem inteira dispensa rótulo
+            out.append((label, mime, data))
+    return out
 
 
 def _parse_args(raw: Any) -> dict:
@@ -265,7 +314,11 @@ class OllamaProvider(Provider):
                 item["tool_name"] = msg.get("name", "")
             if msg.get("images"):
                 if vision:
-                    item["images"] = [_image_b64(p)[1] for p in msg["images"] if Path(p).is_file()]
+                    inputs = _image_inputs(msg["images"])
+                    item["images"] = [data for _, _, data in inputs]
+                    if len(inputs) > 1:
+                        item["content"] += "\n[Imagens anexadas, nesta ordem: " + "; ".join(
+                            label for label, _, _ in inputs) + "]"
                 else:
                     item["content"] += "\n[imagem anexada não enviada: este modelo não tem visão]"
             out.append(item)
@@ -383,14 +436,18 @@ class OpenAICompatProvider(Provider):
         out: list[dict] = []
         pending_images: list[str] = []
 
+        def image_parts(paths: list[str]) -> list[dict]:
+            parts: list[dict] = []
+            for label, mime, data in _image_inputs(paths):
+                if label:
+                    parts.append({"type": "text", "text": label})
+                parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}})
+            return parts
+
         def flush_images():
             if pending_images and vision:
-                parts = [{"type": "text", "text": "Imagens retornadas pelas ferramentas acima:"}]
-                for path in pending_images:
-                    if Path(path).is_file():
-                        mime, data = _image_b64(path)
-                        parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}})
-                out.append({"role": "user", "content": parts})
+                out.append({"role": "user", "content": [{"type": "text", "text": "Imagens retornadas pelas ferramentas acima:"}]
+                            + image_parts(pending_images)})
             pending_images.clear()
 
         for msg in messages:
@@ -411,12 +468,8 @@ class OpenAICompatProvider(Provider):
                 out.append({"role": "tool", "tool_call_id": msg.get("tool_call_id", ""), "content": msg.get("content") or ""})
                 pending_images.extend(msg.get("images") or [])
             elif role == "user" and msg.get("images") and vision:
-                parts = [{"type": "text", "text": msg.get("content") or ""}]
-                for path in msg["images"]:
-                    if Path(path).is_file():
-                        mime, data = _image_b64(path)
-                        parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}})
-                out.append({"role": "user", "content": parts})
+                out.append({"role": "user", "content": [{"type": "text", "text": msg.get("content") or ""}]
+                            + image_parts(msg["images"])})
             elif role == "user" and msg.get("images"):
                 out.append({"role": "user", "content": (msg.get("content") or "")
                             + "\n[imagem anexada não enviada: este modelo não tem visão]"})
@@ -582,9 +635,13 @@ class AnthropicProvider(Provider):
         return anthropic, self._client
 
     @staticmethod
-    def _image_block(path: str) -> dict:
-        mime, data = _image_b64(path)
-        return {"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}
+    def _image_blocks(paths: list[str] | None) -> list[dict]:
+        blocks: list[dict] = []
+        for label, mime, data in _image_inputs(paths):
+            if label:
+                blocks.append({"type": "text", "text": label})
+            blocks.append({"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}})
+        return blocks
 
     def _convert(self, model: str, messages: list[dict], tools: list[dict] | None = None) -> tuple[str, list[dict]]:
         system = "\n\n".join(msg.get("content") or "" for msg in messages if msg["role"] == "system")
@@ -602,7 +659,7 @@ class AnthropicProvider(Provider):
         for msg in messages:
             role = msg["role"]
             if role == "user":
-                blocks = [self._image_block(p) for p in msg.get("images") or [] if Path(p).is_file()]
+                blocks = self._image_blocks(msg.get("images"))
                 blocks.append({"type": "text", "text": msg.get("content") or "(vazio)"})
                 push("user", blocks)
             elif role == "assistant":
@@ -625,7 +682,7 @@ class AnthropicProvider(Provider):
                 push("assistant", blocks or [{"type": "text", "text": "(sem texto)"}])
             elif role == "tool":
                 content: list[dict] = [{"type": "text", "text": msg.get("content") or "(sem saída)"}]
-                content += [self._image_block(p) for p in msg.get("images") or [] if Path(p).is_file()]
+                content += self._image_blocks(msg.get("images"))
                 block = {"type": "tool_result", "tool_use_id": msg.get("tool_call_id", ""), "content": content}
                 if msg.get("is_error"):
                     block["is_error"] = True

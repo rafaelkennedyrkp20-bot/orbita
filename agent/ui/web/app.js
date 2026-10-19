@@ -694,9 +694,15 @@ function addUser(text, images = [], plan = false) {
   closeTurn();
   const el = document.createElement("div");
   el.className = "msg user";
-  el.innerHTML = `<div class="bubble">${plan ? `<span class="plan-tag">${icon("map")} só planejar</span>` : ""}${esc(text)}${(images || []).map(p => `<img class="zoomable" src="${fileUrl(p)}">`).join("")}</div>`;
+  el.innerHTML = `<div class="bubble">${plan ? `<span class="plan-tag">${icon("map")} só planejar</span>` : ""}${esc(text)}${userThumbs(images || [])}</div>`;
   $("#messages").appendChild(el);
   scrollEnd(true);
+}
+// Anexos do usuário: miniaturas recortadas do topo (uma página de 15.000 px não ocupa a tela); clique abre inteira.
+function userThumbs(images) {
+  if (!images.length) return "";
+  const many = images.length > 1;
+  return `<div class="thumbs${many ? " many" : ""}">${images.map((p, i) => `<figure title="${esc(p.split(/[\\/]/).pop())}"><img class="zoomable" src="${fileUrl(p)}" loading="lazy">${many ? `<figcaption>${i + 1}</figcaption>` : ""}</figure>`).join("")}</div>`;
 }
 function maybeLongHint() {
   if (longHintShown || $$(".msg.user").length < 14) return;
@@ -1219,7 +1225,10 @@ function watchMessagesScroll() {
 
 // ── Anexos ─────────────────────────────────────────────────────────────────────
 function addAttachments(paths) {
-  const imgs = paths.filter(p => /\.(png|jpe?g|gif|webp|bmp)$/i.test(p));
+  // Um lote (diálogo ou arrastar) chega na ordem do clique; páginas numeradas vão na ordem do nome (2 antes de 10).
+  const name = p => p.split(/[\\/]/).pop();
+  const imgs = paths.filter(p => /\.(png|jpe?g|gif|webp|bmp)$/i.test(p))
+    .sort((a, b) => name(a).localeCompare(name(b), undefined, { numeric: true, sensitivity: "base" }));
   const others = paths.filter(p => !imgs.includes(p));
   attachments.push(...imgs);
   if (others.length) { const i = $("#input"); i.value += (i.value ? " " : "") + others.join(" "); autosize(); }
@@ -1400,7 +1409,13 @@ function preview(e) {
   $("#pv-folder").onclick = () => call("revealPath", e.path);
   selectTab("preview");
 }
-function lightbox(src) { openModal(`<div class="lightbox"><img src="${src}"></div>`, true); }
+function lightbox(src) {
+  openModal(`<div class="lightbox"><img src="${src}"></div>`, true);
+  // Página alta (manhwa): em vez de encolher até virar uma tira, mostra na largura e rola.
+  const img = $("#modal-root .lightbox img");
+  const fit = () => { if (img.naturalHeight > img.naturalWidth * 3) img.parentElement.classList.add("tall"); };
+  if (img.complete) fit(); else img.addEventListener("load", fit);
+}
 
 // ── Notificações ───────────────────────────────────────────────────────────────
 function toast(kind = "info", title = "", text = "", ms = 4200, act = null) {

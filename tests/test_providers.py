@@ -1,3 +1,5 @@
+import base64
+import io
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 
@@ -55,6 +57,42 @@ def test_deepseek_v4_sends_images(tmp_path):
     for model in ("deepseek-chat", "deepseek-reasoner", "deepseek-ai/DeepSeek-R1", "deepseek-v3.2", "deepseek-coder"):
         assert not p.supports_vision(model)
     assert p.supports_vision("deepseek-ai/deepseek-vl2")
+
+
+def test_several_attached_images_go_labeled_in_order(tmp_path):
+    """Caso real: 9 páginas numeradas chegaram sem identificação e o modelo traduziu na ordem errada."""
+    paths = []
+    for name in ("01.png", "02.png"):
+        (tmp_path / name).write_bytes(b"\x89PNG\r\n\x1a\n")
+        paths.append(str(tmp_path / name))
+    history = [{"role": "user", "content": "traduza", "images": paths}]
+    parts = OpenAICompatProvider("x", {"base_url": "http://x"})._convert("gpt", history)[0]["content"]
+    assert [p["type"] for p in parts] == ["text", "text", "image_url", "text", "image_url"]
+    assert parts[1]["text"] == "Imagem 1 de 2: 01.png" and parts[3]["text"] == "Imagem 2 de 2: 02.png"
+    _, out = AnthropicProvider("a", {})._convert("m", history)
+    blocks = out[0]["content"]
+    assert [b.get("text") for b in blocks if b["type"] == "text"] == ["Imagem 1 de 2: 01.png", "Imagem 2 de 2: 02.png",
+                                                                     "traduza"]
+    item = OllamaProvider("o", {"vision": True})._convert("m", history)[0]
+    assert "[Imagens anexadas, nesta ordem: Imagem 1 de 2: 01.png; Imagem 2 de 2: 02.png]" in item["content"]
+
+
+def test_tall_page_goes_in_overlapping_slices(tmp_path):
+    """Caso real: página de manhwa 720×14.290 inteira chega reduzida a ~900 tokens e o modelo inventa o texto;
+    em partes de 720×2.160 os dois DeepSeek do river leram os balões."""
+    from PIL import Image
+
+    tall, small = tmp_path / "02.webp", tmp_path / "tela.png"
+    Image.new("RGB", (720, 14290), "white").save(tall)
+    Image.new("RGB", (1920, 1080), "white").save(small)
+    inputs = providers._image_inputs([str(tall)])
+    assert len(inputs) == 7 and {mime for _, mime, _ in inputs} == {"image/jpeg"}
+    assert inputs[0][0] == "02.webp, parte 1 de 7 (de cima para baixo)"
+    heights = [Image.open(io.BytesIO(base64.b64decode(data))).size for _, _, data in inputs]
+    assert heights[0] == (720, 2160) and sum(h for _, h in heights) - 6 * 120 == 14290
+    assert providers._image_inputs([str(small)]) == [("", "image/png", providers._image_b64(str(small))[1])]
+    labels = [label for label, _, _ in providers._image_inputs([str(small), str(tall)])]
+    assert labels[:2] == ["Imagem 1 de 2: tela.png", "Imagem 2 de 2: 02.webp, parte 1 de 7 (de cima para baixo)"]
 
 
 def test_anthropic_groups_tool_results_in_one_user_turn():

@@ -21,6 +21,9 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ### Correções
 - **DeepSeek V4 enxerga imagem**: a imagem anexada não chegava ao `DeepSeek-V4.1-Flash` (ex.: pelo river), e o modelo
   respondia que nada tinha sido enviado. Agora ela vai; nos DeepSeek só-texto, o modelo é avisado de que havia imagem.
+- **Capítulo inteiro de manhwa no chat**: várias imagens anexadas de uma vez seguem a ordem do nome (01, 02… 10) e
+  chegam ao modelo numeradas. Página muito alta vai em partes, e o modelo lê o texto em vez de inventar. No chat, as
+  imagens viram miniaturas pequenas lado a lado; o clique abre a página inteira com rolagem.
 
 ## [0.3.0-alpha] — 2026-10-19
 
