@@ -2,8 +2,8 @@
 
 Um endereço em localhost não prova que a inferência é local. Só Ollama e
 LM Studio (ou a mesma API na porta conhecida desses motores) em loopback
-recebem o selo local. Terminal, web e MCP ficam de fora dessa promessa:
-o Órbita não controla a saída deles.
+recebem o selo local. Terminal, web, navegador invisível e MCP ficam de fora
+dessa promessa: o Órbita não controla a saída deles.
 """
 
 from __future__ import annotations
@@ -14,12 +14,15 @@ from agent.core.local_engines import is_loopback_url
 
 _CLOUD_TYPES = {"anthropic", "grok_cli"}
 _KNOWN_PORTS = {11434, 1234}
-_BLOCKED_TOOLS = {"run_shell", "web_search", "fetch_url"}
+# check_web_page: até um .html local carrega scripts e subrecursos externos, e o
+# navegador não tem isolamento de rede confiável. Bloqueia antes de abrir.
+_BLOCKED_TOOLS = {"run_shell", "web_search", "fetch_url", "check_web_page"}
 _BLOCKED = (
     "Modo somente local: esta ação pode sair do computador e o Órbita não "
-    "controla o destino desses dados. Terminal, pesquisa na web e servidores "
-    "MCP ficam bloqueados nesse modo. Downloads e atualizações do programa "
-    "continuam sendo pedidos explícitos seus."
+    "controla o destino desses dados. Terminal, pesquisa na web, verificação "
+    "de páginas no navegador invisível e servidores MCP ficam bloqueados nesse "
+    "modo. Downloads e atualizações do programa continuam sendo pedidos "
+    "explícitos seus."
 )
 
 
