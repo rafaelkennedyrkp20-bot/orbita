@@ -96,3 +96,44 @@ def test_stop_between_runner_start_and_session_run_prevents_all_calls(brain, mon
         time.sleep(0.02)
     assert store.get(job["id"])["state"] == "cancelled"
     assert calls == [] and not (tmp_path / "marcador.txt").exists()
+
+
+def test_job_writes_only_to_its_saved_project(brain, monkeypatch, tmp_path):
+    """#19: o trabalho lia o projeto aberto na hora; trocar de projeto mudava onde ele gravava."""
+    import pytest
+
+    import agent.core.agent_loop as loop
+    from agent.core.jobs import job_session
+    from agent.core.providers import ChatResult
+
+    a, b = tmp_path / "A", tmp_path / "B"
+    a.mkdir()
+    b.mkdir()
+    brain.profile = brain.profiles.get("geral")
+    brain.settings.set("default_workspace", str(a), save=False)
+    brain.settings.set("file_scope", "project", save=False)
+    brain.settings.set("permission_mode", "livre", save=False)
+
+    class Writer:
+        supports_native_tools = True
+
+        def supports_vision(self, model):
+            return True
+
+        def chat(self, model, messages, tools=None, **kwargs):
+            if not any(m["role"] == "tool" for m in messages):
+                brain.settings.set("default_workspace", str(b), save=False)   # troca durante o trabalho
+                brain.profile.workspace = str(b)                               # set_workspace muda o perfil
+                return ChatResult(tool_calls=[{"id": "c1", "name": "write_file",
+                                               "arguments": {"path": "audit.txt", "content": "x"}}])
+            return ChatResult(text="feito")
+
+    monkeypatch.setattr(loop, "get_provider", lambda name, settings: Writer())
+    job = {"id": "j1", "prompt": "grave", "project": str(a)}
+    brain.settings.set("default_workspace", str(b), save=False)               # troca antes do início
+    session = job_session(brain, job, "fake", "m1", cancel=threading.Event())
+    assert session.run("grave") == "feito"
+    assert (a / "audit.txt").exists() and not (b / "audit.txt").exists()
+
+    with pytest.raises(ValueError, match="projeto"):
+        job_session(brain, {**job, "project": str(tmp_path / "sumiu")}, "fake", "m1", cancel=threading.Event())

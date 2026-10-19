@@ -10,6 +10,7 @@ import json
 import os
 import threading
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -176,6 +177,19 @@ class JobStore:
                     job["note"] = "O app fechou. Este trabalho não foi repetido."
                     job["updated"] = _now()
             self._write(self._jobs)
+
+
+def job_session(brain, job: dict, provider: str, model: str, *, cancel, events=None, approve=None):
+    """Sessão do trabalho presa ao projeto salvo nele. Trocar de projeto depois não muda o destino."""
+    from agent.core.agent_loop import AgentSession
+
+    project = (job.get("project") or "").strip()
+    folder = Path(project).expanduser() if project else None
+    if folder is None or not folder.is_dir():
+        raise ValueError(f"O projeto deste trabalho não existe mais: {project or '(nenhum)'}. Nada foi feito.")
+    profile = replace(brain.profile, workspace=str(folder.resolve()))   # cópia: set_workspace não a alcança
+    return AgentSession(brain, profile, provider, model, events=events, approve=approve,
+                        label="tarefa", cancel=cancel)
 
 
 def get_store(runner=None) -> JobStore:

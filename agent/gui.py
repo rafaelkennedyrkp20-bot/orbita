@@ -954,7 +954,7 @@ class Api(QObject):
         return self._jobs
 
     def _run_job(self, job: dict, cancel) -> dict:
-        from agent.core.agent_loop import AgentSession
+        from agent.core.jobs import job_session
 
         provider, model = self.brain.current_model
 
@@ -969,10 +969,7 @@ class Api(QObject):
         def events(kind, data):
             self.push({"type": "job_event", "id": job["id"], "kind": kind})
 
-        session = AgentSession(
-            self.brain, self.brain.profile, provider, model,
-            events=events, approve=approve, label="tarefa", cancel=cancel,
-        )
+        session = job_session(self.brain, job, provider, model, cancel=cancel, events=events, approve=approve)
         text = session.run(job.get("prompt") or "")
         return {"output": text, "tokens": session.turn_tokens, "cost_usd": None}
 
