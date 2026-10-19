@@ -36,7 +36,7 @@ from agent.core.profiles import Profile
 from agent.core.providers import ChatResult, ProviderError, ToolsUnsupported, get_provider, new_call_id
 from agent.core.settings import resolve_workspace
 from agent.core.tools import Tool, ToolContext, ToolResult
-from agent.core.usage import EconomyPolicy, estimate_tokens
+from agent.core.usage import CACHE_INPUT_KEYS, EconomyPolicy, estimate_tokens, input_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -897,14 +897,15 @@ class AgentSession:
             result.tool_calls = salvage_text_tool_calls(result.text, {t.name for t in tools})
 
         usage = result.usage or {}
-        used_in = usage.get("input_tokens") or estimate_tokens(json.dumps(wire, ensure_ascii=False, default=str))
+        used_in = input_tokens(usage) or estimate_tokens(json.dumps(wire, ensure_ascii=False, default=str))
         used_out = usage.get("output_tokens") or estimate_tokens(result.text + result.reasoning)
         self.brain.usage.record(self.provider_name, self.model, used_in, used_out)
         with self._lock:
             self.turn_tokens += used_in + used_out
             self.total_tokens += used_in + used_out
         self.events("usage", {"agent": self.label, "input": used_in, "output": used_out,
-                              "turn": self.turn_tokens, "total": self.total_tokens})
+                              "turn": self.turn_tokens, "total": self.total_tokens,
+                              **{key: usage[key] for key in CACHE_INPUT_KEYS if usage.get(key)}})
         return result
 
     def _inference_event(self, data: dict):
@@ -1051,7 +1052,7 @@ class AgentSession:
                     logger.warning("Resumo com %s:%s falhou (%s).", provider_name, model, error)
                     break
                 usage = result.usage or {}
-                used_in = usage.get("input_tokens") or estimate_tokens(transcript)
+                used_in = input_tokens(usage) or estimate_tokens(transcript)
                 used_out = usage.get("output_tokens") or estimate_tokens(result.text + result.reasoning)
                 self.brain.usage.record(provider_name, model, used_in, used_out)
                 with self._lock:

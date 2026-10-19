@@ -960,3 +960,35 @@ def test_cancelled_agent_releases_mcp_reservation(brain, provider):
     other = session(brain)
     provider([ChatResult(tool_calls=[call("mcp__s__binary_overview")]), ChatResult(text="ok")])
     assert other.run("y") == "ok"                        # outro agente usa o servidor em seguida
+
+
+_CACHED = {"input_tokens": 100, "output_tokens": 10,
+           "cache_read_input_tokens": 100_000, "cache_creation_input_tokens": 5_000}
+
+
+def test_anthropic_cache_tokens_count_in_task_day_and_brake(brain, provider):
+    """#20: só input+output entravam no total; 105.110 tokens apareciam como 110 e o freio não agia."""
+    brain.settings.set("turn_token_budget", 1000, save=False)
+    provider([ChatResult(tool_calls=[call("list_dir")], usage=dict(_CACHED)), ChatResult(text="nunca chega")])
+    s = session(brain)
+    assert "Pausado" in s.run("x")
+    assert s.turn_tokens == 105_110
+    assert brain.usage.today_total() == 105_110
+
+
+def test_cache_tokens_missing_or_other_providers_are_not_doubled(brain, provider):
+    provider([ChatResult(text="ok", usage={"input_tokens": 40, "output_tokens": 2})])
+    s = session(brain)
+    s.run("x")
+    assert s.turn_tokens == 42
+    provider([ChatResult(text="ok", usage={"input_tokens": 40, "output_tokens": 2,
+                                           "cache_creation_input_tokens": 300})])
+    s.run("y")
+    assert s.turn_tokens == 342
+
+
+def test_compaction_model_counts_cache_tokens(brain, provider):
+    provider([ChatResult(text="## Objetivo\nresumo", usage=dict(_CACHED))])
+    s = session(brain)
+    s._summarize([{"role": "user", "content": "antigo"}, {"role": "assistant", "content": "resposta"}])
+    assert s.turn_tokens == 105_110 and brain.usage.today_total() == 105_110

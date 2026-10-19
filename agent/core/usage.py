@@ -54,6 +54,15 @@ def estimate_tokens(text: str) -> int:
     return int(len(text) / 3.5) + 1
 
 
+CACHE_INPUT_KEYS = ("cache_read_input_tokens", "cache_creation_input_tokens")
+
+
+def input_tokens(usage: dict) -> int:
+    """Entrada efetiva da chamada. A Anthropic informa o cache à parte (lido e gravado); os três somam.
+    As categorias continuam no dict do provedor para preço e telemetria."""
+    return sum(int(usage.get(key) or 0) for key in ("input_tokens", *CACHE_INPUT_KEYS))
+
+
 class UsageTracker:
     """Acumula tokens por dia e por provedor:modelo em `data/usage.json`."""
 
