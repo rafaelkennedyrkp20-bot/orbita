@@ -938,6 +938,25 @@ class AgentSession:
             return tool.risk == "exec"
         return tool.risk in ("write", "exec")
 
+    def _authorize(self, tool: Tool, args: dict, denied: str = "") -> Optional[ToolResult]:
+        """Único caminho de autorização (loop, ponte do Grok, verificação da equipe). None = pode rodar."""
+        from agent.core.local_policy import tool_block
+        from agent.core.staged_writes import staged_block
+
+        blocked = tool_block(self.settings, tool) or staged_block(self.settings, tool)
+        if blocked:
+            return ToolResult.error(blocked)
+        if not self._needs_approval(tool):
+            return None
+        answer = (self.approve({"type": "tool", "tool": tool.name, "risk": tool.risk, "args": args,
+                                "agent": self.label}) if self.approve else "no")
+        if answer == "always":
+            self.always_allowed.add(tool.name)
+        elif answer != "yes":
+            return ToolResult.error(denied or "O usuário NEGOU esta ação. Não tente de novo da mesma forma; "
+                                              "pergunte ou siga outro caminho.")
+        return None
+
     def _context(self) -> ToolContext:
         def emit(kind, data):
             self.events(kind, {**data, "agent": self.label})
@@ -957,26 +976,8 @@ class AgentSession:
                 return ToolResult.error("Cancelado pelo usuário.")
             if tool is None:
                 return ToolResult.error(f"Ferramenta '{call['name']}' não existe ou não está liberada neste perfil.")
-            from agent.core.local_policy import tool_block
-
-            blocked = tool_block(self.settings, tool)
-            if blocked:
-                return ToolResult.error(blocked)
-            from agent.core.staged_writes import staged_block
-
-            blocked = staged_block(self.settings, tool)
-            if blocked:
-                return ToolResult.error(blocked)
-            if self._needs_approval(tool):
-                answer = (self.approve({"type": "tool", "tool": tool.name, "risk": tool.risk,
-                                        "args": call.get("arguments", {}), "agent": self.label})
-                          if self.approve else "no")
-                if answer == "always":
-                    self.always_allowed.add(tool.name)
-                elif answer != "yes":
-                    return ToolResult.error("O usuário NEGOU esta ação. Não tente de novo da mesma forma; "
-                                            "pergunte ou siga outro caminho.")
-            return tool.run(call.get("arguments") or {}, ctx)
+            args = call.get("arguments") or {}
+            return self._authorize(tool, args) or tool.run(args, ctx)
 
         for call, tool in runnable:
             self.events("tool_start", {"id": call["id"], "name": call["name"], "args": call.get("arguments", {}),
@@ -1092,7 +1093,8 @@ class AgentSession:
         if verifier is not None and any(spec.get("verify") for spec in tasks) and not self.cancel.is_set():
             # Uma verificação só, depois que TODOS terminaram (em paralelo disputariam a mesma pasta),
             # passando pela mesma permissão de qualquer chamada do agente.
-            result = self._run_checked(verifier, {})
+            result = (self._authorize(verifier, {}, denied="Verificação não autorizada pelo usuário.")
+                      or verifier.run({}, self._context()))
             verified = (not result.is_error and result.text.startswith("Quality Gate: PASS\n")
                         and "[PASS]" in result.text and "[SKIP]" not in result.text)
             reports.append(f"## Verificação automática da equipe\n{result.text[:2000]}")
@@ -1136,35 +1138,10 @@ class AgentSession:
             return ToolResult.error("Cancelado pelo usuário.")
         call_id = new_call_id()
         self.events("tool_start", {"id": call_id, "name": name, "args": args, "agent": self.label})
-        answer = "yes"
-        if self._needs_approval(tool):
-            answer = (self.approve({"type": "tool", "tool": name, "risk": tool.risk, "args": args, "agent": self.label})
-                      if self.approve else "no")
-            if answer == "always":
-                self.always_allowed.add(name)
-        if answer in ("yes", "always"):
-            result = tool.run(args, self._context())
-        else:
-            result = ToolResult.error("O usuário NEGOU esta ação. Não tente de novo da mesma forma.")
+        result = self._authorize(tool, args) or tool.run(args, self._context())
         self.events("tool_end", {"id": call_id, "name": name, "result": result.text[:4000],
                                  "is_error": result.is_error, "images": result.images, "agent": self.label})
         return result
-
-    def _run_checked(self, tool: Tool, args: dict) -> ToolResult:
-        """Executa uma ferramenta fora do fluxo do modelo, respeitando o modo de permissão."""
-        from agent.core.local_policy import tool_block
-
-        blocked = tool_block(self.settings, tool)
-        if blocked:
-            return ToolResult.error(blocked)
-        if self._needs_approval(tool):
-            answer = (self.approve({"type": "tool", "tool": tool.name, "risk": tool.risk, "args": args,
-                                    "agent": self.label}) if self.approve else "no")
-            if answer == "always":
-                self.always_allowed.add(tool.name)
-            elif answer != "yes":
-                return ToolResult.error("Verificação não autorizada pelo usuário.")
-        return tool.run(args, self._context())
 
     def _forward_events(self, kind: str, data: dict) -> None:
         if kind in ("tool_start", "tool_end", "preview", "subagent_start", "subagent_end", "error", "status",

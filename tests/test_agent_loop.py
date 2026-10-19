@@ -345,6 +345,24 @@ def test_loaded_skill_is_not_masked_in_long_turn(brain, provider, tmp_path):
     assert body.strip() in sent["content"]
 
 
+def test_bridge_tools_obey_local_only_and_staged_writes(brain, tmp_path, monkeypatch):
+    # A ponte do Grok passa pela mesma autorização do loop: a próxima ferramenta exposta não herda furo.
+    from agent.core import grok_bridge
+
+    monkeypatch.setattr(grok_bridge, "EXPOSED", grok_bridge.EXPOSED + ("run_shell",))
+    marker = tmp_path / "ran.txt"
+    command = {"command": f"Set-Content -Path '{marker}' -Value vazou"}
+    chat = session(brain, mode="livre")
+    brain.settings.set("execution_policy", "local_only", save=False)
+    local = chat.run_bridge_tool("run_shell", command)
+    brain.settings.set("execution_policy", "", save=False)
+    brain.settings.set("staged_writes", "on", save=False)
+    staged = chat.run_bridge_tool("run_shell", command)
+    assert local.is_error and "somente local" in local.text.lower()
+    assert staged.is_error and "terminal" in staged.text.lower()
+    assert not marker.exists()
+
+
 def test_find_tools_stays_inside_profile_servers(brain):
     from agent.core.tools import Tool
 
