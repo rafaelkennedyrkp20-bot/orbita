@@ -24,6 +24,8 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 - **Capítulo inteiro de manhwa no chat**: várias imagens anexadas de uma vez seguem a ordem do nome (01, 02… 10) e
   chegam ao modelo numeradas. Página muito alta vai em partes, e o modelo lê o texto em vez de inventar. No chat, as
   imagens viram miniaturas pequenas lado a lado; o clique abre a página inteira com rolagem.
+- **Grok Build enxerga imagem**: a imagem anexada sumia do turno do Grok Build. Agora o pedido leva o caminho
+  do arquivo e o Grok o abre com a ferramenta de leitura dele.
 
 ## [0.3.0-alpha] — 2026-10-19
 

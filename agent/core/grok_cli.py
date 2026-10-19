@@ -114,6 +114,15 @@ def install() -> None:
                       "-ExecutionPolicy", "Bypass", "-Command", INSTALL_COMMAND])
 
 
+def with_images(text: str, images: Optional[list[str]]) -> str:
+    """O CLI do Grok não recebe imagem na linha de comando, mas o read_file dele abre e enxerga o arquivo."""
+    found = [str(Path(path)) for path in images or () if Path(path).is_file()]
+    if not found:
+        return text
+    listed = "\n".join(f"- {path}" for path in found)
+    return f"{text}\n\n[Imagens anexadas pelo usuário — abra cada uma com read_file para ver:\n{listed}]"
+
+
 class GrokBuildProvider(Provider):
     """Provedor "agente externo": o Grok Build executa o turno inteiro com as próprias ferramentas."""
 
@@ -145,7 +154,8 @@ class GrokBuildProvider(Provider):
 
     def chat(self, model, messages, tools=None, **kwargs) -> ChatResult:
         # Uso direto (sem sessão): manda a última mensagem do usuário como um turno isolado.
-        prompt = next((m.get("content", "") for m in reversed(messages) if m["role"] == "user"), "")
+        last = next((m for m in reversed(messages) if m["role"] == "user"), {})
+        prompt = with_images(last.get("content", ""), last.get("images"))
         text, _, usage = self.run_agent(prompt, model=model, cwd=str(Path.home()),
                                         on_text=kwargs.get("on_text"), on_reasoning=kwargs.get("on_reasoning"),
                                         cancel=kwargs.get("cancel"))
