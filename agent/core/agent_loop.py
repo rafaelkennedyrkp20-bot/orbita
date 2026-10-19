@@ -983,6 +983,7 @@ class AgentSession:
             if tool is None:
                 return ToolResult.error(f"Ferramenta '{call['name']}' não existe ou não está liberada neste perfil.")
             args = call.get("arguments") or {}
+            ctx.call_id = call["id"]   # liga o progresso da ferramenta (ex.: aquecimento do REA) a este passo
             return self._authorize(tool, args) or tool.run(args, ctx)
 
         for call, tool in runnable:
@@ -1151,7 +1152,7 @@ class AgentSession:
 
     def _forward_events(self, kind: str, data: dict) -> None:
         if kind in ("tool_start", "tool_end", "preview", "subagent_start", "subagent_end", "error", "status",
-                    "model_start", "file_changed", "inference_queue"):
+                    "model_start", "file_changed", "inference_queue", "mcp_progress"):
             self.events(kind, data)
 
     def reset(self) -> None:

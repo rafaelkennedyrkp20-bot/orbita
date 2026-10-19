@@ -1493,6 +1493,9 @@ class MainWindow(QMainWindow):
             push({"type": "tool", "id": data["id"], "name": data["name"], "agent": agent,
                   "status": "error" if data.get("is_error") else "ok", "result": data.get("result", "")[:3000],
                   "images": data.get("images") or []})
+        elif kind == "mcp_progress":
+            push({"type": "mcp_progress", "id": data.get("id"), "elapsed": data.get("elapsed", 0),
+                  "message": data.get("message", "")})
         elif kind == "preview":
             path = data.get("path", "")
             if Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}:

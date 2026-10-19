@@ -34,6 +34,7 @@ import os
 import re
 import shutil
 import threading
+import time
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,6 +65,7 @@ MCP_CONFIG = DATA_DIR / "mcp.json"
 DEFERRED_THRESHOLD = 12
 CONNECT_TIMEOUT = 180  # npx pode baixar o pacote na primeira vez
 CALL_TIMEOUT = 600
+READY_CHECK_TIMEOUT = 45  # tempo máximo do check-in de prontidão logo após conectar
 
 DEFAULT_MCP_CONFIG: dict[str, Any] = {
     "mcpServers": {
@@ -73,6 +75,8 @@ DEFAULT_MCP_CONFIG: dict[str, Any] = {
             "args": ["-y", "rea-agents@6.5.0", "mcp"],
             "enabled": True,
             "tools_mode": "deferred",
+            # Check-in de prontidão após conectar: binary_session não dispara análise, só relata estado.
+            "ready_check": "binary_session",
             "always_load": ["open_binary", "close_binary", "binary_overview", "inspect_artifact",
                             "list_procedures", "procedure_pseudo_code", "search_strings",
                             "analyze_javascript_application"],
@@ -157,6 +161,8 @@ class ServerState:
     stop: Optional[asyncio.Event] = None
     future: Any = None
     generation: int = 0
+    ready: Optional[bool] = None    # resultado do check-in de prontidão (None = ainda não checado)
+    ready_note: str = ""
 
 
 def _safe_name(server: str, tool: str) -> str:
@@ -358,6 +364,7 @@ class MCPHub:
         state.future = None
         self.registry.unregister_source(f"mcp:{state.name}")
         state.tool_names, state.session, state.status = [], None, "desligado"
+        state.ready, state.ready_note = None, ""
 
     def _notify(self) -> None:
         for listener in list(self.listeners):
@@ -407,6 +414,7 @@ class MCPHub:
                 state.status = "conectado"
                 logger.info("MCP '%s' conectado (%d ferramentas)", state.name, len(tools))
                 self._notify()
+                await self._ready_check(state, session, generation)
                 await stop.wait()
         except Exception as error:
             message = error_text(error)
@@ -469,16 +477,57 @@ class MCPHub:
 
     def _make_caller(self, server: str, tool_name: str):
         def call(args: dict, ctx) -> ToolResult:
-            return self.call(server, tool_name, args, cancel=getattr(ctx, "cancel", None))
+            return self.call(server, tool_name, args, cancel=getattr(ctx, "cancel", None),
+                             emit=getattr(ctx, "emit", None), call_id=getattr(ctx, "call_id", None))
         return call
+
+    async def _ready_check(self, state: ServerState, session, generation: int) -> None:
+        """Check-in de prontidão logo após conectar: chama uma tool read-only (ex.: REA binary_session)
+        que relata o estado SEM disparar análise. Registra se o servidor respondeu; nunca derruba a
+        conexão se falhar."""
+        name = state.cfg.get("ready_check")
+        if not name:
+            return
+        aio = _asyncio()
+        try:
+            result = await aio.wait_for(session.call_tool(name, {}), READY_CHECK_TIMEOUT)
+        except Exception as error:
+            if state.generation == generation:
+                state.ready, state.ready_note = False, error_text(error)[:300]
+                self._notify()
+            return
+        if state.generation != generation:
+            return
+        converted = self._convert_result(result)
+        state.ready = not converted.is_error
+        state.ready_note = (converted.text or "").strip()[:300]
+        self._notify()
+
+    def _progress_callback(self, emit: Callable, server: str, tool_name: str, call_id):
+        """Encaminha as notificações de progresso do MCP (ex.: o REA avisa a cada ~10s enquanto o Ghidra
+        aquece) para a interface, ligadas ao passo desta chamada."""
+        start = time.monotonic()
+
+        async def on_progress(progress: float, total, message) -> None:
+            try:
+                emit("mcp_progress", {"id": call_id, "server": server, "tool": tool_name,
+                                      "elapsed": int(time.monotonic() - start),
+                                      "message": (message or "")[:160]})
+            except Exception:
+                logger.debug("emit de progresso MCP falhou", exc_info=True)
+
+        return on_progress
 
     # ── Chamadas ─────────────────────────────────────────────
 
-    def call(self, server: str, tool_name: str, args: dict, cancel: Optional[threading.Event] = None) -> ToolResult:
+    def call(self, server: str, tool_name: str, args: dict, cancel: Optional[threading.Event] = None,
+             emit: Optional[Callable] = None, call_id: Optional[str] = None) -> ToolResult:
         state = self.servers.get(server)
         if state is None or state.session is None or self._loop is None:
             return ToolResult.error(f"Servidor MCP '{server}' não está conectado.")
-        future = _asyncio().run_coroutine_threadsafe(state.session.call_tool(tool_name, args or {}), self._loop)
+        progress_cb = self._progress_callback(emit, server, tool_name, call_id) if emit else None
+        future = _asyncio().run_coroutine_threadsafe(
+            state.session.call_tool(tool_name, args or {}, progress_callback=progress_cb), self._loop)
         waited = 0.0
         while True:
             try:
@@ -532,6 +581,9 @@ class MCPHub:
                 "description": s.cfg.get("description", ""),
                 "deferred": bool(s.tool_names) and all(
                     (t := self.registry.get(n)) is not None and t.deferred for n in s.tool_names),
+                "ready": s.ready,
+                "ready_note": s.ready_note,
+                "warm": bool(s.cfg.get("ready_check")),
             } for s in self.servers.values()]
 
     def connected(self) -> list[str]:
@@ -543,5 +595,9 @@ class MCPHub:
             if item["status"] != "conectado" or (allowed is not None and item["name"] not in allowed):
                 continue
             how = "use find_tools para ativar" if item["deferred"] else "ferramentas já disponíveis"
-            lines.append(f"- {item['name']} ({item['tools']} ferramentas, {how}): {item['description']}")
+            line = f"- {item['name']} ({item['tools']} ferramentas, {how}): {item['description']}"
+            if item.get("warm"):
+                line += (" — a 1ª análise profunda aquece o motor (pode levar minutos); aguarde o resultado, "
+                         "não repita a chamada achando que travou")
+            lines.append(line)
         return "\n".join(lines)

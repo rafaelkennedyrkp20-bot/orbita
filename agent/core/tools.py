@@ -43,6 +43,7 @@ class ToolContext:
     session: Any = None                  # AgentSession que chamou (para subagentes)
     cancel: Optional[threading.Event] = None
     emit: Callable[[str, dict], None] = lambda kind, data: None
+    call_id: Optional[str] = None        # id da chamada atual (liga o progresso ao passo na interface)
 
     def resolve(self, path: str) -> Path:
         candidate = Path(path).expanduser()

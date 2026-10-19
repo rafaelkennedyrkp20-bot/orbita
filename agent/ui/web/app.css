@@ -151,6 +151,13 @@ svg.i { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-widt
 .step details summary { cursor: pointer; color: var(--dim); font-size: 11.5px; }
 .step pre { white-space: pre-wrap; max-height: 240px; overflow: auto; background: var(--bg2); border-radius: 8px; padding: 8px 10px; font: 11.5px/1.5 var(--mono); color: var(--muted); margin: 6px 0 2px; }
 .step img { max-width: 320px; border-radius: 8px; margin-top: 6px; cursor: zoom-in; border: 1px solid var(--line); }
+.step .warm { grid-column: 2 / 4; display: flex; align-items: center; gap: 8px; margin-top: 5px; color: var(--accent2); font-size: 11.5px; }
+.step .warm-bar { position: relative; flex: 0 0 72px; height: 4px; border-radius: 3px; background: rgba(34,211,238,.20); overflow: hidden; }
+.step .warm-bar i { position: absolute; left: -40%; top: 0; width: 40%; height: 100%; border-radius: 3px; background: var(--accent2); animation: warmslide 1.1s ease-in-out infinite; }
+@keyframes warmslide { from { left: -40%; } to { left: 100%; } }
+.step .warm-tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-ready { margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+.mcp-ready.ok { color: var(--ok); } .mcp-ready.bad { color: var(--warn); }
 .spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--line2); border-top-color: var(--accent2); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* ── Componente de pensamento expansível ────────────────────────────────────── */

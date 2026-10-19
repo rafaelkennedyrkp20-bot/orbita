@@ -126,7 +126,7 @@ const now = () => new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minu
 let api = null;
 let S = {};              // estado vindo do Python
 let busy = false, attachments = [], liveTimer = null, liveStart = 0, planMode = false, longHintShown = false;
-let turnEl = null, segEls = {}, stepEls = {}, stepsBox = null;
+let turnEl = null, segEls = {}, stepEls = {}, stepsBox = null, warmTimers = {};
 let settingsSection = "geral";
 
 function call(method, ...args) {
@@ -551,6 +551,7 @@ async function openConversation(id) {
 // ── Chat ───────────────────────────────────────────────────────────────────────
 function resetChat(welcome = true) {
   $("#messages").innerHTML = ""; turnEl = null; segEls = {}; stepEls = {}; stepsBox = null; longHintShown = false; undoNote = "";
+  Object.values(warmTimers).forEach(clearInterval); warmTimers = {};
   S.conversation_id = null; S.conversation_title = ""; S.pinned_prompt = ""; S.goal = ""; S.conversation_tokens = 0;
   outQueue = []; renderQueue();
   $("#feed").innerHTML = `<div class="empty">As ações do agente aparecem aqui em tempo real.</div>`;
@@ -1000,6 +1001,8 @@ function toolStep(d) {
     updateStepsSummary(stepsBox);
   }
   if (d.status && d.status !== "running") {
+    clearInterval(warmTimers[d.id]); delete warmTimers[d.id];
+    const w = el.querySelector(".warm"); if (w) w.remove();
     const st = el.querySelector(".st");
     st.className = "st " + d.status;
     st.innerHTML = icon(d.status === "ok" ? "check" : "alert");
@@ -1019,6 +1022,28 @@ function updateStepsSummary(box) {
   box.querySelector(".sum").textContent = done < all ? `Trabalhando… ${done}/${all} ações` : `${all} ${all === 1 ? "ação" : "ações"}${errs ? ` · ${errs} com erro` : ""}`;
 }
 function finishSteps(box) { updateStepsSummary(box); if (!$$(".st.error", box).length && $$(".step", box).length > 2) box.open = false; }
+// Barra "aquecendo… (Xs)": o REA avisa a cada ~10s enquanto o Ghidra sobe; o relógio corre localmente entre os avisos.
+function mcpWarm(e) {
+  const el = stepEls[e.id];
+  if (!el) return;
+  let w = el.querySelector(".warm");
+  if (!w) {
+    w = document.createElement("div"); w.className = "warm";
+    w.innerHTML = `<span class="warm-bar"><i></i></span><span class="warm-tx"></span>`;
+    el.querySelector(".lbl").appendChild(w);
+  }
+  w.dataset.base = e.elapsed || 0;
+  w.dataset.at = Date.now();
+  const msg = e.message || "";
+  const paint = () => {
+    const s = (+w.dataset.base || 0) + Math.round((Date.now() - (+w.dataset.at)) / 1000);
+    const tx = w.querySelector(".warm-tx");
+    if (tx) tx.textContent = `aquecendo o motor… ${s}s${msg ? " · " + msg : ""}`;
+  };
+  paint();
+  clearInterval(warmTimers[e.id]);
+  warmTimers[e.id] = setInterval(paint, 1000);
+}
 function subCard(d, done) {
   const id = "sub-" + d.agent;
   let el = document.getElementById(id);
@@ -1178,6 +1203,7 @@ function onEvent(e) {
       else feed(e.status, `${e.status === "ok" ? "✓" : "✗"} ${esc(toolInfo(e.name)[1])}`);
       if ((e.images || []).length) preview({ path: e.images[0], kind: "image" });
       break;
+    case "mcp_progress": mcpWarm(e); break;
     case "sub_start": subCard(e, false); feed("sub", `<b>${esc(e.agent)}</b> começou com <b>${esc(e.model)}</b>`); renderAgents({ [e.agent.replace(/ #\d+$/, "")]: true }); break;
     case "sub_end": subCard(e, true); feed("ok", `✓ <b>${esc(e.agent)}</b> terminou (${fmt(e.tokens)} tokens)`); renderAgents(); break;
     case "status": setLive(true, e.text); break;
@@ -1484,7 +1510,7 @@ function renderConnections() {
     <div class="row" style="margin-bottom:18px"><button class="btn" id="mc-reload">${icon("refresh")} Reconectar</button><button class="btn" id="mc-import">${icon("download")} Importar do Claude/Cursor</button><button class="btn" id="mc-edit">${icon("code")} Editar mcp.json</button></div>
     <div class="grid">${servers.map(s => `<div class="tile ${s.status === "indisponivel" ? "off" : ""}"><div class="top"><div class="em">${icon("plug")}</div><div style="flex:1"><h3>${esc(s.name)}</h3><span class="status ${s.status}"><i></i>${esc(MCP_STATUS[s.status] || s.status)}${s.status === "conectado" ? ` · ${s.tools} ferramentas${s.deferred ? " (sob demanda)" : ""}` : ""}</span></div>
       <label class="toggle"><input type="checkbox" data-mcp="${esc(s.name)}" ${s.enabled ? "checked" : ""} ${s.status === "indisponivel" ? "disabled" : ""}><span></span></label></div>
-      <div class="desc">${esc(s.description || "")}${s.error ? `<div class="mcp-err ${s.status}">${esc(s.error)}</div>` : ""}</div></div>`).join("")}</div>
+      <div class="desc">${esc(s.description || "")}${s.error ? `<div class="mcp-err ${s.status}">${esc(s.error)}</div>` : ""}${s.status === "conectado" && s.warm ? `<div class="mcp-ready ${s.ready === false ? "bad" : s.ready ? "ok" : ""}">${s.ready === false ? "⚠ check-in: " + esc((s.ready_note || "sem resposta").slice(0, 120)) : s.ready ? "✓ check-in ok · a 1ª análise profunda aquece o motor (pode levar minutos)" : "verificando prontidão…"}</div>` : ""}</div></div>`).join("")}</div>
     <h1 style="margin-top:34px">Skills</h1><p class="lead">Instruções especializadas no padrão <b>SKILL.md</b>, lidas de <code>skills/</code>, plugins e das pastas do Claude/Codex.</p>
     <div class="grid">${(S.skills || []).map(k => `<div class="tile"><div class="top"><div class="em">${icon("book")}</div><div><h3>${esc(k.name)}</h3><span class="tag">${esc(k.origin)}</span></div></div><div class="desc">${esc(k.description)}</div></div>`).join("") || `<div class="empty">Nenhuma skill encontrada.</div>`}</div>`;
   $$("[data-mcp]", $("#conn-body")).forEach(t => t.addEventListener("change", () => { call("mcpToggle", t.dataset.mcp, t.checked); toast("info", "MCP", `${t.dataset.mcp} ${t.checked ? "ligando…" : "desligado"}`); }));
