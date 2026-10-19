@@ -26,6 +26,7 @@ chamam de forma síncrona e segura entre threads.
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -64,8 +65,18 @@ def __getattr__(name: str):
 MCP_CONFIG = DATA_DIR / "mcp.json"
 DEFERRED_THRESHOLD = 12
 CONNECT_TIMEOUT = 180  # npx pode baixar o pacote na primeira vez
-CALL_TIMEOUT = 600
+CALL_TIMEOUT = 180  # chamada comum (servidor sem aquecimento)
 READY_CHECK_TIMEOUT = 45  # tempo máximo do check-in de prontidão logo após conectar
+# Servidores com `ready_check` (REA) têm motor de partida lenta. O Ghidra do REA só sobe junto com um
+# binário (`analyzeHeadless -import <alvo>`), então nenhuma tool o aquece "a seco": o handshake dispara o
+# check-in em segundo plano e cada chamada pesada roda como execução de fundo. Se não termina em
+# DETACH_AFTER, a tool devolve `warming_up` e a mesma chamada, repetida, reaproveita a execução pendente.
+DETACH_AFTER = 5.0
+WARMUP_TIMEOUT = 600   # teto da execução em segundo plano (cold start do Ghidra pode levar minutos)
+RETRY_AFTER_MS = 5000
+# O modelo não tem como esperar: repete na hora. A mesma chamada repetida aguarda a execução pendente até
+# REPEAT_WAIT antes de devolver `warming_up` de novo, para não gastar um passo do modelo por segundo.
+REPEAT_WAIT = 30.0
 
 DEFAULT_MCP_CONFIG: dict[str, Any] = {
     "mcpServers": {
@@ -75,12 +86,12 @@ DEFAULT_MCP_CONFIG: dict[str, Any] = {
             "args": ["-y", "rea-agents@6.5.0", "mcp"],
             "enabled": True,
             "tools_mode": "deferred",
-            # Check-in de prontidão após conectar: binary_session não dispara análise, só relata estado.
+            # Check-in após conectar (binary_session só relata estado); liga o aquecimento em segundo plano.
             "ready_check": "binary_session",
             "always_load": ["open_binary", "close_binary", "binary_overview", "inspect_artifact",
                             "list_procedures", "procedure_pseudo_code", "search_strings",
                             "analyze_javascript_application"],
-            # Motores de análise nativa (instale o Ghidra e defina GHIDRA_INSTALL_DIR no .env)
+            # Motores de análise nativa (o Órbita instala o Ghidra e aponta GHIDRA_INSTALL_DIR sozinho)
             "inherit_env": ["GHIDRA_INSTALL_DIR", "HOPPER_LAUNCHER_PATH", "JAVA_HOME", "REA_*"],
         },
         "playwright": {
@@ -161,8 +172,29 @@ class ServerState:
     stop: Optional[asyncio.Event] = None
     future: Any = None
     generation: int = 0
-    ready: Optional[bool] = None    # resultado do check-in de prontidão (None = ainda não checado)
-    ready_note: str = ""
+    warm: str = ""                  # motor: "" (sem aquecimento) | aquecendo | pronto | erro
+    warm_since: float = 0.0         # time.monotonic() do início do aquecimento atual
+    warm_progress: Optional[int] = None
+    warm_note: str = ""
+    job: Any = None                 # chamada pesada rodando em segundo plano (_Job)
+
+
+@dataclass
+class _Job:
+    key: str            # ferramenta + argumentos: a mesma chamada repetida reaproveita a execução
+    tool: str
+    generation: int
+    started: float
+    future: Any = None
+    detached: bool = False   # quem chamou já recebeu `warming_up`
+    finished: bool = False
+
+    def done(self) -> bool:
+        return self.finished or (self.future is not None and self.future.done())
+
+
+def _result_is_error(result) -> bool:
+    return bool(getattr(result, "is_error", None) or getattr(result, "isError", False))
 
 
 def _safe_name(server: str, tool: str) -> str:
@@ -205,6 +237,8 @@ class MCPHub:
         self._ready = threading.Event()
         self._stopped = False
         self._lock = threading.RLock()
+        # Rodam antes de subir cada servidor (rápidos; ex.: apontar GHIDRA_INSTALL_DIR para o REA)
+        self.prepare_hooks: list[Callable[[ServerState], None]] = []
 
     # ── Configuração ─────────────────────────────────────────
 
@@ -330,6 +364,11 @@ class MCPHub:
             if missing:
                 state.status, state.error = "falta", missing
             else:
+                for hook in list(self.prepare_hooks):
+                    try:
+                        hook(state)
+                    except Exception:
+                        logger.warning("Preparação do MCP '%s' falhou", state.name, exc_info=True)
                 self._connect(state)
 
     def restart(self, name: str) -> None:
@@ -364,7 +403,7 @@ class MCPHub:
         state.future = None
         self.registry.unregister_source(f"mcp:{state.name}")
         state.tool_names, state.session, state.status = [], None, "desligado"
-        state.ready, state.ready_note = None, ""
+        state.warm, state.warm_since, state.warm_progress, state.warm_note, state.job = "", 0.0, None, "", None
 
     def _notify(self) -> None:
         for listener in list(self.listeners):
@@ -414,7 +453,7 @@ class MCPHub:
                 state.status = "conectado"
                 logger.info("MCP '%s' conectado (%d ferramentas)", state.name, len(tools))
                 self._notify()
-                await self._ready_check(state, session, generation)
+                self._start_warmup(state, session, generation)
                 await stop.wait()
         except Exception as error:
             message = error_text(error)
@@ -481,65 +520,179 @@ class MCPHub:
                              emit=getattr(ctx, "emit", None), call_id=getattr(ctx, "call_id", None))
         return call
 
-    async def _ready_check(self, state: ServerState, session, generation: int) -> None:
-        """Check-in de prontidão logo após conectar: chama uma tool read-only (ex.: REA binary_session)
-        que relata o estado SEM disparar análise. Registra se o servidor respondeu; nunca derruba a
-        conexão se falhar."""
-        name = state.cfg.get("ready_check")
-        if not name:
+    # ── Aquecimento do motor ─────────────────────────────────
+
+    def _start_warmup(self, state: ServerState, session, generation: int) -> None:
+        """Logo após o handshake: dispara o check-in em segundo plano (não segura a conexão)."""
+        if not state.cfg.get("ready_check") or self._loop is None:
             return
-        aio = _asyncio()
-        try:
-            result = await aio.wait_for(session.call_tool(name, {}), READY_CHECK_TIMEOUT)
-        except Exception as error:
-            if state.generation == generation:
-                state.ready, state.ready_note = False, error_text(error)[:300]
-                self._notify()
-            return
-        if state.generation != generation:
-            return
-        converted = self._convert_result(result)
-        state.ready = not converted.is_error
-        state.ready_note = (converted.text or "").strip()[:300]
+        state.warm, state.warm_since, state.warm_progress, state.warm_note = "aquecendo", time.monotonic(), None, ""
+        _asyncio().run_coroutine_threadsafe(self._warmup(state, session, generation), self._loop)
         self._notify()
 
-    def _progress_callback(self, emit: Callable, server: str, tool_name: str, call_id):
-        """Encaminha as notificações de progresso do MCP (ex.: o REA avisa a cada ~10s enquanto o Ghidra
-        aquece) para a interface, ligadas ao passo desta chamada."""
-        start = time.monotonic()
+    async def _warmup(self, state: ServerState, session, generation: int) -> None:
+        aio = _asyncio()
+        try:
+            result = await aio.wait_for(session.call_tool(state.cfg["ready_check"], {}), READY_CHECK_TIMEOUT)
+            ok, note = not _result_is_error(result), self._convert_result(result).text
+        except Exception as error:
+            ok, note = False, error_text(error)
+        if state.generation == generation:   # reconectou no meio: resultado velho é descartado
+            self._settle(state, ok, note)
+
+    def _settle(self, state: ServerState, ok: bool, note: str) -> None:
+        """Fim de um aquecimento: pronto ou erro (registrado no servidor; a conexão continua de pé)."""
+        state.warm, state.warm_progress = ("pronto" if ok else "erro"), None
+        state.warm_note = (note or "").strip()[:300]
+        self._notify()
+
+    def _progress_callback(self, emit: Optional[Callable], state: ServerState, tool_name: str, call_id,
+                           started: Optional[float] = None, job: Optional[_Job] = None):
+        """Progresso do MCP (o REA avisa a cada ~10s enquanto o Ghidra sobe): vai para o estado do servidor
+        e, enquanto quem chamou ainda espera, para o passo na interface — com o tempo medido aqui."""
+        start = time.monotonic() if started is None else started
 
         async def on_progress(progress: float, total, message) -> None:
+            state.warm_progress = int(progress * 100 / total) if total else None
+            if message:
+                state.warm_note = message[:160]
+            if state.warm == "aquecendo":
+                self._notify()
+            if emit is None or (job is not None and job.detached):
+                return
             try:
-                emit("mcp_progress", {"id": call_id, "server": server, "tool": tool_name,
-                                      "elapsed": int(time.monotonic() - start),
-                                      "message": (message or "")[:160]})
+                emit("mcp_progress", {"id": call_id, "server": state.name, "tool": tool_name,
+                                      "elapsed": int(time.monotonic() - start), "message": (message or "")[:160]})
             except Exception:
                 logger.debug("emit de progresso MCP falhou", exc_info=True)
 
         return on_progress
+
+    async def _run_job(self, state: ServerState, session, job: _Job, args: dict, progress_cb):
+        """Execução de fundo de uma chamada pesada; ao terminar destacada, fecha o aquecimento."""
+        aio = _asyncio()
+        result, error = None, None
+        try:
+            result = await aio.wait_for(session.call_tool(job.tool, args, progress_callback=progress_cb),
+                                        WARMUP_TIMEOUT)
+            ok, note = not _result_is_error(result), self._convert_result(result).text
+        except aio.TimeoutError:
+            error = TimeoutError(f"o motor não respondeu em {WARMUP_TIMEOUT} s")
+            ok, note = False, str(error)
+        except Exception as caught:
+            error, ok, note = caught, False, error_text(caught)
+        with self._lock:
+            job.finished = True
+            settle = state.generation == job.generation and (job.detached or ok)
+        if settle:
+            self._settle(state, ok, note)
+        if error is not None:
+            raise error
+        return result
+
+    def _warming(self, state: ServerState, job: Optional[_Job], tool: str) -> ToolResult:
+        """Resposta imediata enquanto o motor aquece: estado estruturado, não é erro."""
+        pending = job.tool if job else state.cfg.get("ready_check", "")
+        since = job.started if job else (state.warm_since or time.monotonic())
+        data = {"status": "warming_up", "server": state.name, "pending_tool": pending, "retry_after_ms": RETRY_AFTER_MS,
+                "progress": state.warm_progress, "elapsed_s": int(time.monotonic() - since),
+                "message": state.warm_note}
+        hint = (f"O motor de '{state.name}' está aquecendo em segundo plano (não é erro). Aguarde uns "
+                f"{RETRY_AFTER_MS // 1000} s e repita a mesma chamada ({tool}) para receber o resultado; "
+                "outras análises deste servidor esperam ela terminar.")
+        return ToolResult(text=json.dumps(data, ensure_ascii=False) + "\n" + hint)
 
     # ── Chamadas ─────────────────────────────────────────────
 
     def call(self, server: str, tool_name: str, args: dict, cancel: Optional[threading.Event] = None,
              emit: Optional[Callable] = None, call_id: Optional[str] = None) -> ToolResult:
         state = self.servers.get(server)
-        if state is None or state.session is None or self._loop is None:
+        session = state.session if state else None
+        if state is None or session is None or self._loop is None:
             return ToolResult.error(f"Servidor MCP '{server}' não está conectado.")
-        progress_cb = self._progress_callback(emit, server, tool_name, call_id) if emit else None
+        args = args or {}
+        ready_check = state.cfg.get("ready_check")
+        if ready_check and tool_name != ready_check:
+            return self._call_warm(state, session, tool_name, args, cancel, emit, call_id)
+        progress_cb = self._progress_callback(emit, state, tool_name, call_id) if emit else None
         future = _asyncio().run_coroutine_threadsafe(
-            state.session.call_tool(tool_name, args or {}, progress_callback=progress_cb), self._loop)
-        waited = 0.0
+            session.call_tool(tool_name, args, progress_callback=progress_cb), self._loop)
+        outcome = self._await(future, cancel, READY_CHECK_TIMEOUT if ready_check else CALL_TIMEOUT)
+        if outcome != "done":
+            future.cancel()
+            return ToolResult.error("Chamada MCP cancelada." if outcome == "cancel" else "Chamada MCP excedeu o tempo.")
+        return self._finish(future)
+
+    def _call_warm(self, state: ServerState, session, tool_name: str, args: dict,
+                   cancel: Optional[threading.Event], emit: Optional[Callable], call_id) -> ToolResult:
+        """Servidor de motor lento: a tool call do modelo nunca fica presa minutos esperando o motor."""
+        key = json.dumps([tool_name, args], sort_keys=True, ensure_ascii=False, default=str)
+
+        def live_job() -> Optional[_Job]:
+            job = state.job
+            return job if job is not None and job.generation == state.generation else None
+
+        with self._lock:
+            pending = live_job()
+            if pending is not None and not pending.done() and pending.key != key:
+                return self._warming(state, pending, tool_name)
+        if pending is not None and pending.key == key and not pending.done():
+            self._await(pending.future, cancel, REPEAT_WAIT)   # repetição: espera a execução pendente
+        with self._lock:
+            pending = live_job()
+            if pending is not None and not pending.done():
+                return self._warming(state, pending, tool_name)
+            state.job = None   # terminou (ou é de uma conexão velha): entrega se for a mesma chamada, senão descarta
+            if pending is not None and pending.key == key:
+                collected = pending
+            elif state.warm == "aquecendo":
+                return self._warming(state, None, tool_name)
+            else:
+                collected = None
+                job = state.job = _Job(key, tool_name, state.generation, time.monotonic())
+                progress_cb = self._progress_callback(emit, state, tool_name, call_id, started=job.started, job=job)
+                job.future = _asyncio().run_coroutine_threadsafe(
+                    self._run_job(state, session, job, args, progress_cb), self._loop)
+        if collected is not None:
+            return self._finish(collected.future)   # a execução pendente terminou: entrega o resultado dela
+        outcome = self._await(job.future, cancel, DETACH_AFTER)
+        with self._lock:
+            finished = job.done()
+            if finished and state.job is job:
+                state.job = None
+            if not finished:
+                job.detached = True
+                if job.generation == state.generation:
+                    state.warm, state.warm_since = "aquecendo", job.started
+        if finished:
+            return self._finish(job.future)
+        self._notify()
+        if outcome == "cancel":
+            return ToolResult.error("Chamada MCP cancelada; o motor segue aquecendo em segundo plano.")
+        return self._warming(state, job, tool_name)
+
+    @staticmethod
+    def _await(future, cancel: Optional[threading.Event], limit: float) -> str:
+        """Espera em passos curtos: "done", "cancel" ou "timeout". (No Python 3.10 o TimeoutError de
+        concurrent.futures não é o embutido: pegá-lo como TimeoutError virava "Erro MCP" em 0,5 s.)"""
+        end = time.monotonic() + limit
         while True:
             try:
-                result = future.result(timeout=0.5)
-                break
-            except TimeoutError:
-                waited += 0.5
-                if (cancel is not None and cancel.is_set()) or waited > CALL_TIMEOUT:
-                    future.cancel()
-                    return ToolResult.error("Chamada MCP cancelada." if cancel and cancel.is_set() else "Chamada MCP excedeu o tempo.")
-            except Exception as error:
-                return ToolResult.error(f"Erro MCP: {error}")
+                future.result(timeout=max(0.0, min(0.25, end - time.monotonic())))
+                return "done"
+            except concurrent.futures.TimeoutError:
+                if cancel is not None and cancel.is_set():
+                    return "cancel"
+                if time.monotonic() >= end:
+                    return "timeout"
+            except Exception:
+                return "done"   # a exceção fica no future; _finish a converte
+
+    def _finish(self, future) -> ToolResult:
+        try:
+            result = future.result(timeout=5)   # `finished` vem um instante antes do future concluir
+        except Exception as error:
+            return ToolResult.error(f"Erro MCP: {error_text(error)}")
         return self._convert_result(result)
 
     @staticmethod
@@ -581,9 +734,12 @@ class MCPHub:
                 "description": s.cfg.get("description", ""),
                 "deferred": bool(s.tool_names) and all(
                     (t := self.registry.get(n)) is not None and t.deferred for n in s.tool_names),
-                "ready": s.ready,
-                "ready_note": s.ready_note,
-                "warm": bool(s.cfg.get("ready_check")),
+                "warmable": bool(s.cfg.get("ready_check")),
+                "warm": s.warm,
+                "warm_note": s.warm_note,
+                "warm_progress": s.warm_progress,
+                "warm_elapsed": int(time.monotonic() - s.warm_since) if s.warm == "aquecendo" and s.warm_since else 0,
+                "pending_tool": s.job.tool if s.job is not None and not s.job.done() else "",
             } for s in self.servers.values()]
 
     def connected(self) -> list[str]:
@@ -595,9 +751,5 @@ class MCPHub:
             if item["status"] != "conectado" or (allowed is not None and item["name"] not in allowed):
                 continue
             how = "use find_tools para ativar" if item["deferred"] else "ferramentas já disponíveis"
-            line = f"- {item['name']} ({item['tools']} ferramentas, {how}): {item['description']}"
-            if item.get("warm"):
-                line += (" — a 1ª análise profunda aquece o motor (pode levar minutos); aguarde o resultado, "
-                         "não repita a chamada achando que travou")
-            lines.append(line)
+            lines.append(f"- {item['name']} ({item['tools']} ferramentas, {how}): {item['description']}")
         return "\n".join(lines)

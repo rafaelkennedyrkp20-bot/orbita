@@ -35,7 +35,7 @@ from agent.core.config import LLM_MODEL
 from agent.core.conversations import ConversationStore, title_from, to_ui_blocks
 from agent.core.conversations import new_id as new_conversation_id
 from agent.core.mcp_hub import MCPHub
-from agent.core import routing
+from agent.core import ghidra_setup, routing
 from agent.core.profiles import Profile, ProfileManager
 from agent.core.providers import get_provider
 from agent.core.settings import Settings, project_folder_name, resolve_workspace
@@ -77,6 +77,8 @@ class Brain:
         self.skills = SkillManager()
         self.registry = ToolRegistry()
         self.mcp = MCPHub(self.registry, plugin_configs=self.skills.plugin_mcp_configs)
+        self.ghidra = ghidra_setup.GhidraBootstrap()
+        self.mcp.prepare_hooks.append(self._prepare_mcp_server)
         self._system = None
         self._speaker = None
         self._listener = None
@@ -504,7 +506,13 @@ class Brain:
             wake_word.cleanup()
             self.shutdown()
 
+    def _prepare_mcp_server(self, state) -> None:
+        """Antes de subir o REA: aponta o Ghidra (ou o instala em segundo plano e reconecta depois)."""
+        if ghidra_setup.wants_ghidra(state.cfg):
+            self.ghidra.ensure(on_installed=lambda: self.mcp.restart(state.name))
+
     def shutdown(self) -> None:
         logger.info("Encerrando agente.")
+        self.ghidra.shutdown()
         self.mcp.shutdown()
         self.memory.save_long_term()
