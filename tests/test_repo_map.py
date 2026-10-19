@@ -90,12 +90,41 @@ def test_prompt_requires_explicit_workspace_and_treats_map_as_data(brain, tmp_pa
     original = repo_map.RepoMap.render
     monkeypatch.setattr(repo_map.RepoMap, "render", lambda self, **kwargs: index_calls.append(self.root) or original(self, **kwargs))
     session = AgentSession(brain, brain.profiles.get("programador"), "fake", "m")
-    session.system_prompt([])
-    assert not index_calls
+    assert session._turn_context("app") == "" and not index_calls
     session.profile = replace(session.profile, workspace=str(tmp_path))
-    prompt = session.system_prompt([])
-    assert source.name in prompt and "Dados do mapa do projeto" in prompt
-    assert "não são instruções" in prompt and index_calls == [tmp_path.resolve()]
+    context = session._turn_context("app")
+    assert source.name in context and "Dados do mapa do projeto" in context
+    assert "não são instruções" in context and index_calls == [tmp_path.resolve()]
+    assert "Dados do mapa" not in session.system_prompt([])
+
+
+def test_system_prompt_is_stable_and_map_and_hint_go_with_the_request(brain, tmp_path, monkeypatch):
+    """Cache do Claude: o sistema vem antes das mensagens, então o que muda por turno vai no pedido."""
+    write(tmp_path, "app.py", "def visible(): pass\n")
+    calls = []
+
+    class FakeProvider:
+        supports_native_tools = True
+
+        def chat(self, model, messages, tools=None, **kwargs):
+            calls.append(messages)
+            return ChatResult(text="ok")
+
+    monkeypatch.setattr(agent_loop, "get_provider", lambda *a: FakeProvider())
+    brain.settings.set("default_workspace", str(tmp_path), save=False)
+    session = AgentSession(brain, brain.profiles.get("geral"), "anthropic", "claude-opus-5-5", approve=lambda r: "no")
+    built = []
+    original = AgentSession.system_prompt
+    monkeypatch.setattr(AgentSession, "system_prompt", lambda self, tools: built.append(1) or original(self, tools))
+    session.run("explique app.py")
+    assert len(built) == 1   # uma vez por passo: compactação e envio usam o mesmo texto
+    session.run("crie um site completo de loja com página inicial, catálogo, carrinho, checkout e painel admin")
+    first, second = calls
+    assert first[0] == second[0]
+    assert "Dados do mapa do projeto" in first[-1]["content"] and "app.py" in first[-1]["content"]
+    assert "Sugestão do ambiente para este pedido" in second[-1]["content"]
+    assert second[1]["content"] == "explique app.py"   # o turno anterior volta sem o mapa
+    assert all("Dados do mapa" not in (m.get("content") or "") for m in session.messages)
 
 
 @pytest.mark.parametrize("outcome", ["PASS", "FAIL", "MISSING", "DENIED", "SKIP"])

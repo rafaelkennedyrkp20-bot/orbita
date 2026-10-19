@@ -641,7 +641,10 @@ class AnthropicProvider(Provider):
         blocks = [block.model_dump(exclude_none=True) for block in final.content]
         result.native = {"provider": "anthropic", "model": params["model"], "content": blocks}
         result.stop_reason = final.stop_reason or ""
-        result.usage = {"input_tokens": final.usage.input_tokens, "output_tokens": final.usage.output_tokens}
+        result.usage = {"input_tokens": final.usage.input_tokens, "output_tokens": final.usage.output_tokens,
+                        # O cache fica fora de input_tokens: lido custa ~10%, gravado ~125% do preço de entrada.
+                        "cache_read_input_tokens": getattr(final.usage, "cache_read_input_tokens", 0) or 0,
+                        "cache_creation_input_tokens": getattr(final.usage, "cache_creation_input_tokens", 0) or 0}
         texts = []
         for block in final.content:
             if block.type == "text":
