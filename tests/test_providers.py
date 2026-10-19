@@ -54,11 +54,16 @@ def test_anthropic_groups_tool_results_in_one_user_turn():
 
 
 def test_anthropic_replays_native_blocks():
-    native = {"provider": "anthropic", "content": [{"type": "thinking", "thinking": "", "signature": "s"},
-                                                    {"type": "text", "text": "oi"}]}
-    _, out = AnthropicProvider("a", {})._convert("m", [{"role": "user", "content": "x"},
-                                                       {"role": "assistant", "content": "oi", "_native": native}])
+    request = [{"role": "user", "content": "x"}]
+    prefix = providers._Prefix("", None).add("user", [{"type": "text", "text": "x"}]).digest()
+    native = {"provider": "anthropic", "prefix": prefix,
+              "content": [{"type": "thinking", "thinking": "", "signature": "s"}, {"type": "text", "text": "oi"}]}
+    _, out = AnthropicProvider("a", {})._convert("m", request + [{"role": "assistant", "content": "oi", "_native": native}])
     assert out[1]["content"] == native["content"]
+    # Prefixo desconhecido (sessão antiga) ou editado: o pensamento fica fora, o texto vai.
+    for stale in ({**native, "prefix": "outro"}, {k: v for k, v in native.items() if k != "prefix"}):
+        _, out = AnthropicProvider("a", {})._convert("m", request + [{"role": "assistant", "content": "oi", "_native": stale}])
+        assert out[1]["content"] == [{"type": "text", "text": "oi"}]
 
 
 def test_ollama_conversion_and_vision_hint():

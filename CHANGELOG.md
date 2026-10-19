@@ -18,6 +18,11 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## [Não lançado]
 
+### Corrigido
+- **Claude Opus 5.5 / Fable 5.1 em contas novas**: numa tarefa longa, o encurtamento de resultados antigos fazia o Claude
+  recusar a requisição (HTTP 400). O pensamento de um passo agora só é reenviado quando o histórico antes dele
+  não mudou.
+
 ## [0.3.0-alpha] — 2026-10-19
 
 ### Melhorias

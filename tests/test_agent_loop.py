@@ -514,6 +514,85 @@ def test_reasoning_kept_in_current_turn_and_pruned_in_old(brain, provider):
     assert all("reasoning" not in m for m in old_assistants)
 
 
+class _Block:
+    def __init__(self, **data):
+        self.__dict__.update(data)
+
+    def model_dump(self, exclude_none=True):
+        return dict(self.__dict__)
+
+
+class _FakeClaudeStream:
+    def __init__(self, message):
+        self.message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __iter__(self):
+        return iter(())
+
+    def get_final_message(self):
+        return self.message
+
+
+class _FakeClaude:
+    """Cliente Anthropic falso: guarda cada requisição e responde com um bloco de pensamento assinado."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.requests = []
+        self.messages = self
+        self.beta = self
+
+    def stream(self, betas=None, fallbacks=None, **params):
+        import copy as copy_module
+
+        self.requests.append(copy_module.deepcopy(params))
+        step = len(self.requests) - 1
+        blocks = [_Block(type="thinking", thinking="", signature=f"sig{step}")] + self.replies.pop(0)
+        usage = _Block(input_tokens=1, output_tokens=1, cache_read_input_tokens=0, cache_creation_input_tokens=0)
+        stop = "tool_use" if any(b.type == "tool_use" for b in blocks) else "end_turn"
+        return _FakeClaudeStream(_Block(content=blocks, stop_reason=stop, usage=usage, stop_details=None))
+
+
+def test_claude_thinking_is_replayed_only_with_the_prefix_that_produced_it(brain, monkeypatch, tmp_path):
+    # Opus 5.5 / Fable 5.1: o bloco de pensamento só vale com o histórico exato que o gerou (contas novas: HTTP
+    # 400). O encurtamento do turno longo edita resultados antigos; o pensamento posterior não pode ir junto.
+    from agent.core.providers import AnthropicProvider
+
+    big = tmp_path / "grande.txt"
+    big.write_text("linha de dados\n" * 400, encoding="utf-8")   # 6.000 caracteres: acima do encurtamento
+    reads = 10
+    replies = [[_Block(type="tool_use", id=f"r{i}", name="read_file", input={"path": str(big)})]
+               for i in range(reads)] + [[_Block(type="text", text="fim")]]
+    client = _FakeClaude(replies)
+    claude = AnthropicProvider("anthropic", {"type": "anthropic"})
+    monkeypatch.setattr(claude, "_sdk", lambda: (None, client))
+    monkeypatch.setattr(loop, "get_provider", lambda name, settings: claude)
+    brain.settings.set("permission_mode", "livre", save=False)
+    s = AgentSession(brain, brain.profiles.get("geral"), "anthropic", "claude-opus-5-5", approve=lambda r: "yes")
+    assert s.run("leia o arquivo várias vezes") == "fim"
+
+    produced = {f"sig{n}": request for n, request in enumerate(client.requests)}
+    replayed = 0
+    for request in client.requests:
+        for i, message in enumerate(request["messages"]):
+            for j, block in enumerate(message["content"]):
+                if block.get("type") != "thinking":
+                    continue
+                origin = produced[block["signature"]]
+                assert j == 0 and request["messages"][:i] == origin["messages"], \
+                    f"{block['signature']} reenviado depois de um trecho editado"
+                assert request.get("system") == origin.get("system") and request.get("tools") == origin.get("tools")
+                replayed += 1
+    assert replayed, "o pensamento continua indo quando o histórico antes dele não mudou"
+    assert "encurtado" in str(client.requests[-1]["messages"])   # o encurtamento aconteceu de fato
+
+
 
 def _project_skills(brain, monkeypatch):
     """Catálogo do projeto, sem skills do usuário (o teste não pode depender da máquina)."""
