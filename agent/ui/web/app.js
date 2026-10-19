@@ -1238,6 +1238,7 @@ function onEvent(e) {
       break;
     case "dictation": onDictation(e); break;
     case "toolbox": onToolbox(e); break;
+    case "ghidra": onGhidra(e); break;
     case "voice_gpu":
       if (e.state === "done") { toast("success", "Ditado", "Pronto: o ditado agora usa a placa de vídeo."); renderVoiceGpu({ cuda: true, libs: true }); }
       else if (e.state === "error") { toast("error", "Placa de vídeo", "A instalação falhou: " + (e.message || ""), 10000); renderVoiceGpu({ cuda: true, libs: false }); }
@@ -1511,6 +1512,7 @@ function renderConnections() {
     <div class="grid">${servers.map(s => `<div class="tile ${s.status === "indisponivel" ? "off" : ""}"><div class="top"><div class="em">${icon("plug")}</div><div style="flex:1"><h3>${esc(s.name)}</h3><span class="status ${s.status}"><i></i>${esc(MCP_STATUS[s.status] || s.status)}${s.status === "conectado" ? ` · ${s.tools} ferramentas${s.deferred ? " (sob demanda)" : ""}` : ""}</span></div>
       <label class="toggle"><input type="checkbox" data-mcp="${esc(s.name)}" ${s.enabled ? "checked" : ""} ${s.status === "indisponivel" ? "disabled" : ""}><span></span></label></div>
       <div class="desc">${esc(s.description || "")}${s.error ? `<div class="mcp-err ${s.status}">${esc(s.error)}</div>` : ""}${s.status === "conectado" && s.warm ? `<div class="mcp-ready ${s.ready === false ? "bad" : s.ready ? "ok" : ""}">${s.ready === false ? "⚠ check-in: " + esc((s.ready_note || "sem resposta").slice(0, 120)) : s.ready ? "✓ check-in ok · a 1ª análise profunda aquece o motor (pode levar minutos)" : "verificando prontidão…"}</div>` : ""}</div></div>`).join("")}</div>
+    <div id="ghidra-box" class="ghidra-box"></div>
     <h1 style="margin-top:34px">Skills</h1><p class="lead">Instruções especializadas no padrão <b>SKILL.md</b>, lidas de <code>skills/</code>, plugins e das pastas do Claude/Codex.</p>
     <div class="grid">${(S.skills || []).map(k => `<div class="tile"><div class="top"><div class="em">${icon("book")}</div><div><h3>${esc(k.name)}</h3><span class="tag">${esc(k.origin)}</span></div></div><div class="desc">${esc(k.description)}</div></div>`).join("") || `<div class="empty">Nenhuma skill encontrada.</div>`}</div>`;
   $$("[data-mcp]", $("#conn-body")).forEach(t => t.addEventListener("change", () => { call("mcpToggle", t.dataset.mcp, t.checked); toast("info", "MCP", `${t.dataset.mcp} ${t.checked ? "ligando…" : "desligado"}`); }));
@@ -1518,6 +1520,46 @@ function renderConnections() {
   $("#mc-import").onclick = async () => { const r = await call("mcpImport"); toast(r.length ? "success" : "info", "Importação MCP", r.length ? `Importados (desligados): ${r.join(", ")}` : "Nenhum servidor novo encontrado."); };
   $("#mc-edit").onclick = () => call("openPath", "mcp");
   renderToolbox();
+  renderGhidra();
+}
+// Motor nativo do REA: baixar/instalar o Ghidra de dentro do app (fonte oficial, SHA-256 conferido).
+async function renderGhidra() {
+  const box = $("#ghidra-box");
+  if (!box) return;
+  const g = await call("ghidraStatus");
+  if (!g) { box.innerHTML = ""; return; }
+  if (g.installed) {
+    box.innerHTML = `<div class="tile ghidra"><div class="top"><div class="em">${icon("check")}</div><div style="flex:1"><h3>Motor de análise — Ghidra ${esc(g.version)}</h3><span class="status conectado"><i></i>instalado</span></div></div>
+      <div class="desc">O REA usa este motor para desmontar e descompilar binários nativos.<div class="mcp-ready ok">✓ ${esc(g.dir)}</div></div></div>`;
+    return;
+  }
+  const java = g.java_ok ? "" : `<div class="mcp-ready bad">⚠ ${esc(g.java_reason || "Instale o JDK 21+ para o Ghidra rodar.")}</div>`;
+  box.innerHTML = `<div class="tile ghidra"><div class="top"><div class="em">${icon("download")}</div><div style="flex:1"><h3>Motor de análise — Ghidra ${esc(g.version)}</h3><span class="status erro"><i></i>não instalado</span></div></div>
+    <div class="desc">O REA precisa do Ghidra para o overview, as funções e as strings de binários nativos. Sem ele, só a leitura básica funciona.${java}
+      <div class="ghidra-prog" hidden><span class="warm-bar"><i></i></span><span class="warm-tx"></span><button class="btn small" id="gh-cancel">Cancelar</button></div>
+      <div class="row" style="margin-top:10px"><button class="btn primary" id="gh-install">${icon("download")} Baixar e instalar (${esc(g.size_label)})</button><span class="sub" style="align-self:center">fonte: ${esc(g.source)} · SHA-256 conferido</span></div>
+    </div></div>`;
+  $("#gh-install").onclick = () => { call("installGhidra"); onGhidra({ state: "downloading", pct: 0 }); };
+  const c = $("#gh-cancel"); if (c) c.onclick = () => call("cancelGhidra");
+}
+function onGhidra(e) {
+  const box = $("#ghidra-box");
+  if (!box) return;
+  if (["installed", "done", "error", "cancelled"].includes(e.state)) {
+    if (e.state === "error") toast("error", "Ghidra", e.message || "Falha ao instalar.", 8000);
+    else if (e.state === "installed") toast("success", "Ghidra", "Instalado. REA reconectado com o motor nativo.");
+    else if (e.state === "cancelled") toast("warn", "Ghidra", "Instalação cancelada.");
+    if (e.state !== "done") renderGhidra();
+    return;
+  }
+  const install = $("#gh-install"); if (install) install.disabled = true;
+  const prog = box.querySelector(".ghidra-prog");
+  if (prog) {
+    prog.hidden = false;
+    const label = { downloading: "baixando", verifying: "conferindo integridade", extracting: "extraindo" }[e.state] || e.state;
+    const mb = e.state === "downloading" && e.total ? ` ${Math.round((e.done || 0) / 1048576)}/${Math.round(e.total / 1048576)} MB (${e.pct || 0}%)` : "";
+    const tx = prog.querySelector(".warm-tx"); if (tx) tx.textContent = `${label}…${mb}`;
+  }
 }
 
 // ── Caixa de ferramentas (programas opcionais) ─────────────────────────────────

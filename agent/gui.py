@@ -35,7 +35,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMainWindow, QMenu, QSystemTrayIcon
 
 from agent import __version__
-from agent.core import checkpoints, grok_cli, mentions, routing, toolbox, updater
+from agent.core import checkpoints, ghidra_setup, grok_cli, mentions, routing, toolbox, updater
 from agent.core.brain import Brain
 from agent.core.config import (
     DATA_DIR, GUI_VOICE_MAX_RECORD_SECONDS, GUI_VOICE_NO_SPEECH_TIMEOUT, GUI_VOICE_SILENCE_SECONDS, LOGS_DIR,
@@ -1194,6 +1194,42 @@ class Api(QObject):
     @pyqtSlot(result=str)
     def mcpImport(self) -> str:
         return json.dumps(self.brain.mcp.import_external())
+
+    @pyqtSlot(result=str)
+    def ghidraStatus(self) -> str:
+        """Estado do Ghidra (motor nativo do REA) para o painel Conexões."""
+        return json.dumps(ghidra_setup.status(), ensure_ascii=False)
+
+    @pyqtSlot()
+    def installGhidra(self) -> None:
+        """Clique do usuário em Baixar: o clique é a permissão. Baixa só a URL oficial fixa, confere o SHA-256,
+        aponta o GHIDRA_INSTALL_DIR e reconecta o REA."""
+        if getattr(self, "_ghidra_busy", False):
+            return
+        self._ghidra_busy = True
+        self._ghidra_cancel = threading.Event()
+
+        def work():
+            try:
+                ghidra_setup.install(on_progress=lambda data: self.push({"type": "ghidra", **data}),
+                                     cancel=self._ghidra_cancel)
+                self.brain.mcp.restart("rea")   # reconecta já com o GHIDRA_INSTALL_DIR no ambiente
+                self.push({"type": "ghidra", "state": "installed", **ghidra_setup.status()})
+            except InterruptedError:
+                self.push({"type": "ghidra", "state": "cancelled"})
+            except Exception as error:
+                logger.warning("Instalação do Ghidra falhou: %s", error)
+                self.push({"type": "ghidra", "state": "error", "message": str(error)})
+            finally:
+                self._ghidra_busy = False
+
+        threading.Thread(target=work, name="ghidra-install", daemon=True).start()
+
+    @pyqtSlot()
+    def cancelGhidra(self) -> None:
+        cancel = getattr(self, "_ghidra_cancel", None)
+        if cancel is not None:
+            cancel.set()
 
     # ── Caixa de ferramentas (programas opcionais) ───────────
 
