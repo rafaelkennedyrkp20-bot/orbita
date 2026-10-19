@@ -18,6 +18,8 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## [Não lançado]
 
+## [0.3.0-alpha] — 2026-10-19
+
 ### Melhorias
 - **Equipe fora do chat**: os ajudantes trabalham num painel flutuante "Equipe", com um cartão por ajudante
   (tarefa, ação atual, passos e relatório). Dá para arrastar, recolher e fechar; ele lembra o lugar e volta quando a
