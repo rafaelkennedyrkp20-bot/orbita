@@ -24,3 +24,6 @@ __pycache__/
 *.safetensors
 
 temp/
+
+# Estado local do Claude Code (worktrees, launch.json com caminhos desta máquina)
+.claude/
