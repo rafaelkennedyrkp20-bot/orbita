@@ -170,8 +170,9 @@ class GrokBuildProvider(Provider):
                   env: Optional[dict] = None) -> tuple[str, Optional[str], dict]:
         """Executa um turno do Grok Build. Devolve (texto, id da sessão, uso de tokens)."""
         from agent.core.local_policy import refusal
+        from agent.core.staged_writes import external_agent_block
 
-        blocked = refusal(self.settings, self.name, self.cfg)
+        blocked = refusal(self.settings, self.name, self.cfg) or external_agent_block(self.settings)
         if blocked:
             raise ProviderError(blocked)
         exe = executable()

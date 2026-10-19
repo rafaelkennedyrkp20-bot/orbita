@@ -197,3 +197,11 @@ def staged_block(settings, tool) -> str | None:
         return ("A revisão antes de gravar está ligada. O terminal e o MCP ficam bloqueados "
                 "porque podem alterar arquivos sem passar pela proposta.")
     return None
+
+
+def external_agent_block(settings) -> str | None:
+    """Agente externo (Grok Build) grava pelas próprias ferramentas, sem proposta: fica fechado com a revisão."""
+    if settings is None or settings.get("staged_writes") != "on":
+        return None
+    return ("A revisão antes de gravar está ligada. O Grok Build grava pelas próprias ferramentas, "
+            "sem passar pela proposta, então não é iniciado. Desligue a revisão ou escolha outro modelo.")

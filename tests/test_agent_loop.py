@@ -784,3 +784,48 @@ def test_team_verification_runs_once_and_respects_permission(brain, provider):
     s.run("divida")
     tool_msg = next(m for m in s.messages if m["role"] == "tool")
     assert runs == [] and "não autorizada" in tool_msg["content"]
+
+
+class _FakeGrokProcess:
+    returncode = 0
+
+    def __init__(self, command, **kwargs):
+        import io
+        self.command = command
+        self.stdout = io.StringIO('{"type": "text", "data": "ok"}\n{"type": "end", "sessionId": "s1"}\n')
+        self.stderr = io.StringIO("")
+
+    def poll(self):
+        return 0
+
+    def wait(self):
+        return 0
+
+    def kill(self):
+        pass
+
+
+@pytest.mark.parametrize("depth", [0, 1])
+def test_grok_build_does_not_start_while_staged_writes_is_on(brain, monkeypatch, depth):
+    """#9: com revisão antes de gravar, o CLI do Grok gravava direto (bypassPermissions) sem proposta."""
+    from agent.core import grok_cli
+
+    started = []
+    monkeypatch.setattr(grok_cli, "executable", lambda: "grok")
+    monkeypatch.setattr(grok_cli, "is_logged_in", lambda: True)
+    monkeypatch.setattr(grok_cli.subprocess, "Popen", lambda command, **kw: started.append(command) or _FakeGrokProcess(command))
+    brain.settings.set("staged_writes", "on", save=False)
+    grok = grok_cli.GrokBuildProvider("grok", {"type": "grok_cli"}, brain.settings)
+    monkeypatch.setattr(grok, "bridge_ready", lambda: False)
+    monkeypatch.setattr(loop, "get_provider", lambda name, settings: grok)
+    s = session(brain, mode="livre", profile="grok_build")
+    s.depth = depth
+    answer = s.run("crie arquivos")
+    assert "revisão antes de gravar" in answer
+    with pytest.raises(grok_cli.ProviderError, match="revisão antes de gravar"):
+        grok.chat("grok-build", [{"role": "user", "content": "oi"}])
+    assert started == []
+
+    brain.settings.set("staged_writes", "off", save=False)
+    s.run("agora pode")
+    assert len(started) == 1 and started[0][started[0].index("--permission-mode") + 1] == "bypassPermissions"
