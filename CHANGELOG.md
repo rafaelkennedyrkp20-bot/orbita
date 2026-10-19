@@ -26,6 +26,13 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   imagens viram miniaturas pequenas lado a lado; o clique abre a página inteira com rolagem.
 - **Grok Build enxerga imagem**: a imagem anexada sumia do turno do Grok Build. Agora o pedido leva o caminho
   do arquivo e o Grok o abre com a ferramenta de leitura dele.
+- **Tarefa longa em modelo local** (issue #5): quando o turno não cabe na janela, sobra uma folga para o erro da contagem;
+  os passos antigos viram uma linha (ferramenta, tamanho, erro) em vez de sumir, e o agente não repete o que já fez;
+  resultado encurtado guarda o começo e o fim, onde ficam os erros.
+
+### Documentação
+- **Plano de modelos locais** (issue #6): o documento mostra o estado real de cada cartão (7 feitos, 13 parciais),
+  com o arquivo, os testes e o que falta. O ROADMAP foi corrigido onde marcava como feito o que é parcial.
 
 ## [0.3.0-alpha] — 2026-10-19
 
