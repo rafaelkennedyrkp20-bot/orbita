@@ -224,6 +224,37 @@ def test_context_trimming_keeps_recent_turns(brain, provider):
     assert sum(len(m["content"]) for m in wire) / 3.5 < 24_000
 
 
+@pytest.mark.parametrize("steps", [8, 120])
+def test_long_turn_fits_local_context(brain, steps):
+    # Ollama com 16k: um turno só, sem turno anterior para descartar. Antes ia 6x acima do orçamento.
+    s = AgentSession(brain, brain.profiles.get("geral"), "ollama", "qwen3:8b", approve=lambda r: "yes")
+    s.messages.append({"role": "user", "content": "analise o projeto"})
+    for i in range(steps):
+        s.messages.append({"role": "assistant", "content": "",
+                           "tool_calls": [{"id": f"r{i}", "name": "read_file", "arguments": {"path": f"f{i}"}}]})
+        s.messages.append({"role": "tool", "tool_call_id": f"r{i}", "name": "read_file", "content": "x" * 20000})
+    tools = s.visible_tools()
+    wire = s._wire_messages(tools)
+    assert s._history_size(wire[1:]) <= s._history_budget(tools, wire[0]["content"])
+    assert wire[1]["content"].startswith("analise o projeto")
+    assert wire[-1]["tool_call_id"] == f"r{steps - 1}"
+    assert tool_pairs_intact(wire[1:])
+
+
+def test_system_note_does_not_start_a_turn(brain):
+    # O aviso "(Sistema: ...)" entra como mensagem de usuário, mas o pedido real do turno não pode sumir.
+    s = AgentSession(brain, brain.profiles.get("geral"), "ollama", "qwen3:8b", approve=lambda r: "yes")
+    s.messages += [{"role": "user", "content": "pedido real"},
+                   {"role": "assistant", "content": "vou verificar"},
+                   {"role": "user", "content": "(Sistema: você anunciou uma ação mas não chamou nenhuma ferramenta.)"}]
+    for i in range(6):
+        s.messages.append({"role": "assistant", "content": "",
+                           "tool_calls": [{"id": f"r{i}", "name": "read_file", "arguments": {"path": f"f{i}"}}]})
+        s.messages.append({"role": "tool", "tool_call_id": f"r{i}", "name": "read_file", "content": "y" * 20000})
+    wire = s._wire_messages(s.visible_tools())
+    assert wire[1]["content"].startswith("pedido real")
+
+
 def test_parse_prompted_tool_calls_variants():
     text = ('a <tool_call>{"name": "x", "arguments": {"k": 1}}</tool_call> b '
             '<tool_call>```json\n{"name": "y", "parameters": "{\\"z\\": 2}"}\n```</tool_call>')

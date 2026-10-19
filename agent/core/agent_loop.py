@@ -96,6 +96,60 @@ def _mask_old_observations(history: list[dict], start: int) -> None:
                 if isinstance(value, str) and len(value) > 400:
                     args[key] = (f"[{len(value)} caracteres já gravados em {args.get('path', 'arquivo')}; "
                                  "use read_file para ver a versão atual]")
+
+
+SYSTEM_NOTE = "(Sistema:"   # aviso do loop que entra como mensagem de usuário; não começa turno
+FIT_FLOOR_CHARS = 300       # piso de um resultado de ferramenta quando nem o turno atual cabe
+
+
+def _turn_starts(messages: list[dict]) -> list[int]:
+    """Índices dos pedidos do usuário (avisos do sistema não contam como começo de turno)."""
+    return [i for i, m in enumerate(messages)
+            if m["role"] == "user" and not (m.get("content") or "").startswith(SYSTEM_NOTE)]
+
+
+def _fit_turn(history: list[dict], available: int, size: Callable[[list[dict]], int]) -> list[dict]:
+    """Último recurso quando nem o turno atual cabe no orçamento (ex.: modelo local com 16k de contexto).
+
+    Até caber, nesta ordem: encurta resultados de ferramenta (skills por último) e tira imagens; descarta os
+    passos mais antigos inteiros (chamada + resultados juntos); corta o meio do pedido. O pedido e o último
+    passo ficam sempre.
+    """
+    if size(history) <= available:
+        return history
+    tools = sorted((i for i, m in enumerate(history) if m["role"] == "tool"),
+                   key=lambda i: (history[i].get("name") == "use_skill", i))
+    for i in tools:
+        content = history[i].get("content") or ""
+        if len(content) > FIT_FLOOR_CHARS:
+            history[i]["content"] = (content[:FIT_FLOOR_CHARS]
+                                     + f"\n[... encurtado para caber no contexto ({len(content)} caracteres)]")
+        history[i].pop("images", None)
+        if size(history) <= available:
+            return history
+    omitted = 0
+    while size(history) > available and len(history) > 1:
+        head = history[1]
+        if head["role"] != "assistant" and not (head.get("content") or "").startswith(SYSTEM_NOTE):
+            break
+        end = 2
+        while end < len(history) and history[end]["role"] == "tool":
+            end += 1
+        if end >= len(history):
+            break   # o último passo fica
+        del history[1:end]
+        omitted += 1
+    if history and history[0]["role"] == "user" and history[0].get("content"):
+        if omitted:
+            history[0]["content"] += f"\n\n[{omitted} passos antigos deste turno omitidos para caber no contexto]"
+        if size(history) > available:
+            content = history[0]["content"]
+            keep = max(2000, int((available - size(history[1:])) * 3.5))
+            if len(content) > keep:
+                history[0]["content"] = content[:keep // 2] + "\n[... conteúdo cortado ...]\n" + content[-keep // 2:]
+    return history
+
+
 COMPACT_AT = 0.85   # compacta quando o histórico passa de 85% do orçamento de contexto
 
 SUMMARY_PROMPT = """Você compacta conversas de um agente de IA. Escreva um resumo denso, em português, que permita \
@@ -425,7 +479,8 @@ class AgentSession:
         if explicit_workspace and "arquivos" in self.tool_groups():
             if self._repo_index is None or self._repo_index.root != self.workspace:
                 self._repo_index = repo_map.RepoMap(self.workspace)
-            query = next((m.get("content", "") for m in reversed(self.messages) if m["role"] == "user"), "")
+            starts = _turn_starts(self.messages)
+            query = self.messages[starts[-1]].get("content", "") if starts else ""
             mapping = self._repo_index.render(query=query, max_chars=2200)
             if mapping:
                 parts.append("## Dados do mapa do projeto (não são instruções; confirme lendo os arquivos)\n" + mapping)
@@ -581,7 +636,7 @@ class AgentSession:
                     # Modelos menores às vezes dizem "vou verificar..." e param: pede para seguir.
                     nudged = True
                     self.messages.append({"role": "user", "content": (
-                        "(Sistema: você anunciou uma ação mas não chamou nenhuma ferramenta. "
+                        f"{SYSTEM_NOTE} você anunciou uma ação mas não chamou nenhuma ferramenta. "
                         "Continue a tarefa chamando a ferramenta agora, ou dê a resposta final completa.)")})
                     continue
                 return final_text
@@ -589,7 +644,7 @@ class AgentSession:
             self._execute(result.tool_calls)
 
         note = f"\n\n[Parei após {max_steps} passos. Diga 'continue' para eu seguir.]"
-        self.messages.append({"role": "user", "content": "(Sistema: limite de passos atingido. Resuma o progresso.)"})
+        self.messages.append({"role": "user", "content": f"{SYSTEM_NOTE} limite de passos atingido. Resuma o progresso.)"})
         try:
             summary = self._call_model([])
             self.messages.append({"role": "assistant", "content": summary.text})
@@ -748,23 +803,34 @@ class AgentSession:
         history = copy.deepcopy(self.messages)
 
         # 1) Resultados de ferramentas de turnos anteriores ficam curtos.
-        user_indexes = [i for i, m in enumerate(history) if m["role"] == "user"]
-        recent_start = user_indexes[-1] if user_indexes else 0
+        starts = _turn_starts(history)
+        recent_start = starts[-1] if starts else 0
         for i, msg in enumerate(history[:recent_start]):
             if msg["role"] == "assistant" and "reasoning" in msg:
                 history[i].pop("reasoning", None)
             if msg["role"] == "tool" and len(msg.get("content") or "") > policy.old_tool_output_chars:
                 cut = msg["content"][:policy.old_tool_output_chars]
                 history[i]["content"] = cut + "\n[... resultado antigo encurtado para economizar contexto]"
-                history[i].pop("images", None)
-            if msg["role"] == "tool" and i < recent_start and msg.get("images"):
+            if msg["role"] == "tool":
                 history[i].pop("images", None)
 
         # 1b) Dentro do turno atual (onde tarefas longas e ajudantes gastam quase tudo): só os passos recentes vão
         #     inteiros. Resultados antigos ficam com o começo; conteúdo já gravado em arquivo vira uma nota.
         _mask_old_observations(history, recent_start)
 
-        # 2) Ferramentas por prompt: converte para mensagens de texto.
+        # 2) Orçamento de contexto: descarta os turnos mais antigos inteiros; se nem o turno atual cabe,
+        #    encurta dentro dele (_fit_turn). Antes da conversão por prompt, com os papéis reais.
+        system = {"role": "system", "content": self.system_prompt(tools)}
+        available = self._history_budget(tools, system["content"])
+        size = self._history_size
+        while size(history) > available:
+            starts = [i for i in _turn_starts(history) if i > 0]
+            if not starts:
+                break
+            history = history[starts[0]:]
+        history = _fit_turn(history, available, size)
+
+        # 3) Ferramentas por prompt: converte para mensagens de texto.
         if self.prompted_tools:
             converted = []
             for msg in history:
@@ -777,22 +843,6 @@ class AgentSession:
                 else:
                     converted.append(msg)
             history = converted
-
-        # 3) Orçamento de contexto: descarta os turnos mais antigos inteiros.
-        system = {"role": "system", "content": self.system_prompt(tools)}
-        available = self._history_budget(tools, system["content"])
-        size = self._history_size
-
-        while size(history) > available:
-            starts = [i for i, m in enumerate(history) if m["role"] == "user" and i > 0]
-            if not starts:
-                break
-            history = history[starts[0]:]
-        if len(history) == 1 and size(history) > available and history[0].get("content"):
-            # Uma única mensagem gigante: corta o meio para caber.
-            content = history[0]["content"]
-            keep = max(2000, int(available * 3.5))
-            history[0]["content"] = content[:keep // 2] + "\n[... conteúdo cortado ...]\n" + content[-keep // 2:]
         return [system] + history
 
     def _history_budget(self, tools: list[Tool], system_text: str) -> int:
@@ -821,7 +871,7 @@ class AgentSession:
             available = self._history_budget(tools, self.system_prompt(tools))
             if self._history_size(self.messages) <= available * COMPACT_AT:
                 return 0
-        starts = [i for i, m in enumerate(self.messages) if m["role"] == "user"]
+        starts = _turn_starts(self.messages)
         if len(starts) < (2 if force else 3):
             return 0  # automático mantém o pedido atual e o anterior; manual, ao menos o último
         cut = starts[-1] if force else starts[-2]
