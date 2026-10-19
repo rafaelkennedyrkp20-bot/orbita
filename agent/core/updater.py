@@ -60,9 +60,35 @@ def updates_dir(root: Path = ROOT) -> Path:
     return root / "data" / "updates"
 
 
+# No Windows (e no macOS de fábrica) `.ENV` e `Data/` são o mesmo arquivo e a mesma pasta que `.env` e
+# `data/`; no Windows ainda somem ponto e espaço no fim de cada nome (`data./` é `data/`).
+_WINDOWS = os.name == "nt"
+_CASELESS = _WINDOWS or sys.platform == "darwin"
+
+
+def _path_key(rel: str) -> str:
+    """Como o sistema de arquivos enxerga o caminho relativo: é isso que se compara com PROTECTED."""
+    parts = [p for p in str(rel).replace("\\", "/").split("/") if p not in ("", ".")]
+    if _WINDOWS:
+        parts = [p.rstrip(" .") or p for p in parts]
+    key = "/".join(parts) + ("/" if str(rel).endswith(("/", "\\")) else "")
+    return key.casefold() if _CASELESS else key
+
+
 def is_protected(rel: str) -> bool:
-    rel = rel.replace("\\", "/")
-    return any(rel == p.rstrip("/") or rel.startswith(p) for p in PROTECTED)
+    rel = _path_key(rel)
+    return any(rel == _path_key(p).rstrip("/") or rel.startswith(_path_key(p)) for p in PROTECTED)
+
+
+def _blocked(root: Path, rel: str) -> bool:
+    """Protegido pelo nome ou pelo destino real (link, junção, nome curto), ou fora da pasta do programa."""
+    if is_protected(rel):
+        return True
+    try:
+        real = (root / rel).resolve().relative_to(root.resolve()).as_posix()
+    except (OSError, ValueError, RuntimeError):
+        return True
+    return is_protected(real)
 
 
 # ── Rede ───────────────────────────────────────────────────────
@@ -311,14 +337,17 @@ def _collisions(root: Path, rels: list[str]) -> list[str]:
     """Caminhos que não cabem na pasta: arquivo onde precisa haver pasta, ou pasta onde vai um arquivo.
 
     Conferido antes da primeira gravação, inclusive entre os próprios itens do pacote."""
-    names = set(rels)
+    names = {_path_key(rel) for rel in rels}
+    seen: set[str] = set()
     bad = []
     for rel in rels:
         target = root / rel
         parents = [p for p in Path(rel).parents if p != Path(".")]
-        if target.is_dir() or any((root / p).exists() and not (root / p).is_dir() for p in parents) \
-                or any(p.as_posix() in names for p in parents):
+        key = _path_key(rel)   # `A.py` e `a.py` no mesmo pacote seriam um arquivo só no Windows
+        if key in seen or target.is_dir() or any((root / p).exists() and not (root / p).is_dir() for p in parents) \
+                or any(_path_key(p.as_posix()) in names for p in parents):
             bad.append(rel)
+        seen.add(key)
     return bad
 
 
@@ -396,7 +425,7 @@ def apply_zip(root: Path, zip_path: Path, sha: str) -> dict:
     backup = updates_dir(root) / f"backup-{stamp}"
     with zipfile.ZipFile(zip_path) as archive:
         members = _safe_members(archive)
-        payloads = {rel: archive.read(item) for rel, item in members.items() if not is_protected(rel)}
+        payloads = {rel: archive.read(item) for rel, item in members.items() if not _blocked(root, rel)}
     writes = {}
     for rel, data in payloads.items():
         target = root / rel
@@ -420,7 +449,9 @@ def apply_zip(root: Path, zip_path: Path, sha: str) -> dict:
         raise RuntimeError(f"A versão nova não cabe na pasta: {clash[0]} esbarra em um arquivo ou pasta que já "
                            "existe com o mesmo nome. Nada foi alterado.")
     old = manifest(root).get("files") or {}
-    removes = [rel for rel in sorted(old) if rel not in members and not is_protected(rel) and (root / rel).is_file()]
+    keep = {_path_key(rel) for rel in members}   # no Windows, `Gui.py` na versão nova é o mesmo arquivo que `gui.py`
+    removes = [rel for rel in sorted(old) if _path_key(rel) not in keep and not _blocked(root, rel)
+               and (root / rel).is_file()]
 
     def finish():
         files = {rel: blob_sha((root / rel).read_bytes()) for rel in payloads if (root / rel).is_file()}
@@ -489,7 +520,7 @@ def restore_backup(root: Path, backup: Path, rels: list[str]) -> None:
     """Devolve arquivos do programa. Caminho protegido no backup não volta por cima dos dados."""
     for rel in rels:
         rel = str(rel).replace("\\", "/")
-        if is_protected(rel) or not rel or rel.startswith("/") or ".." in rel.split("/") or ":" in rel:
+        if not rel or rel.startswith("/") or ".." in rel.split("/") or ":" in rel or _blocked(root, rel):
             continue
         source = backup / rel
         if not source.is_file():
@@ -522,7 +553,7 @@ def apply_verified(root: Path, zip_path: Path, manifest: dict, signature: str, k
             rel_norm = str(rel).replace("\\", "/")
             if not rel_norm or rel_norm.startswith("/") or ".." in rel_norm.split("/") or ":" in rel_norm:
                 raise UpdateAuthError("Caminho recusado. Nada foi alterado.")
-            if is_protected(rel_norm):
+            if _blocked(root, rel_norm):
                 continue
             if not isinstance(expected, str) or len(expected) != 64:
                 raise UpdateAuthError(f"Hash inválido em {rel_norm}. Nada foi alterado.")
