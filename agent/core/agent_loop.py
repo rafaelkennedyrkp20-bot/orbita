@@ -111,22 +111,31 @@ def _turn_starts(messages: list[dict]) -> list[int]:
 def _fit_turn(history: list[dict], available: int, size: Callable[[list[dict]], int]) -> list[dict]:
     """Último recurso quando nem o turno atual cabe no orçamento (ex.: modelo local com 16k de contexto).
 
-    Até caber, nesta ordem: encurta resultados de ferramenta (skills por último) e tira imagens; descarta os
-    passos mais antigos inteiros (chamada + resultados juntos); corta o meio do pedido. O pedido e o último
-    passo ficam sempre.
+    Até caber, nesta ordem: encurta os resultados antigos do turno (skills por último) e tira imagens; descarta
+    os passos mais antigos inteiros (chamada + resultados juntos); encurta os resultados do último passo; corta
+    o meio do pedido. Cada resultado perde só o excesso, até um piso. O pedido e o último passo ficam sempre.
     """
     if size(history) <= available:
         return history
-    tools = sorted((i for i, m in enumerate(history) if m["role"] == "tool"),
-                   key=lambda i: (history[i].get("name") == "use_skill", i))
-    for i in tools:
-        content = history[i].get("content") or ""
-        if len(content) > FIT_FLOOR_CHARS:
-            history[i]["content"] = (content[:FIT_FLOOR_CHARS]
-                                     + f"\n[... encurtado para caber no contexto ({len(content)} caracteres)]")
+
+    def shrink(i: int) -> bool:
         history[i].pop("images", None)
-        if size(history) <= available:
-            return history
+        content = history[i].get("content") or ""
+        keep = max(FIT_FLOOR_CHARS, len(content) - int((size(history) - available) * 3.5) - 200)
+        if len(content) > keep:
+            history[i]["content"] = (content[:keep]
+                                     + f"\n[... encurtado para caber no contexto ({len(content)} caracteres)]")
+        return size(history) <= available
+
+    def last_step_results() -> list[int]:
+        last_call = max((i for i, m in enumerate(history) if m["role"] == "assistant"), default=len(history))
+        return [i for i in range(last_call + 1, len(history)) if history[i]["role"] == "tool"]
+
+    recent = set(last_step_results())
+    older = sorted((i for i, m in enumerate(history) if m["role"] == "tool" and i not in recent),
+                   key=lambda i: (history[i].get("name") == "use_skill", i))
+    if any(shrink(i) for i in older):
+        return history
     omitted = 0
     while size(history) > available and len(history) > 1:
         head = history[1]
@@ -139,9 +148,12 @@ def _fit_turn(history: list[dict], available: int, size: Callable[[list[dict]], 
             break   # o último passo fica
         del history[1:end]
         omitted += 1
+    if omitted and history[0]["role"] == "user":
+        history[0]["content"] = (f"{history[0].get('content') or ''}\n\n"
+                                 f"[{omitted} passos antigos deste turno omitidos para caber no contexto]")
+    if size(history) > available and any(shrink(i) for i in last_step_results()):
+        return history
     if history and history[0]["role"] == "user" and history[0].get("content"):
-        if omitted:
-            history[0]["content"] += f"\n\n[{omitted} passos antigos deste turno omitidos para caber no contexto]"
         if size(history) > available:
             content = history[0]["content"]
             keep = max(2000, int((available - size(history[1:])) * 3.5))

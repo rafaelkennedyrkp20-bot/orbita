@@ -239,6 +239,8 @@ def test_long_turn_fits_local_context(brain, steps):
     assert wire[1]["content"].startswith("analise o projeto")
     assert wire[-1]["tool_call_id"] == f"r{steps - 1}"
     assert tool_pairs_intact(wire[1:])
+    # Encurta só o excesso, do mais antigo para o mais novo: o resultado mais recente continua útil.
+    assert len(wire[-1]["content"]) > 5000
 
 
 def test_system_note_does_not_start_a_turn(brain):
