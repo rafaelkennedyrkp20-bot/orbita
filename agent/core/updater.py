@@ -307,48 +307,130 @@ def _safe_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     return members
 
 
-def apply_zip(root: Path, zip_path: Path, sha: str) -> dict:
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup = updates_dir(root) / f"backup-{stamp}"
-    replaced, added, removed = [], [], []
-    with zipfile.ZipFile(zip_path) as archive:
-        members = _safe_members(archive)
-        # Antes de gravar qualquer coisa: se algum arquivo não puder ser substituído, não mexe em nada
-        # (atualização pela metade é pior que nenhuma).
-        locked = [rel for rel in members if not is_protected(rel)
-                  and (((root / rel).exists() and not os.access(root / rel, os.W_OK))
-                       or (not (root / rel).exists() and _first_existing(root / rel).exists()
-                           and not os.access(_first_existing(root / rel), os.W_OK)))]
-        if locked:
-            raise RuntimeError(write_problem(root, "zip") or
-                               f"Sem permissão para gravar {len(locked)} arquivo(s) do programa (ex.: {locked[0]}). "
-                               "Nada foi alterado.")
-        for rel, item in sorted(members.items()):
-            if is_protected(rel):
-                continue
-            data = archive.read(item)
+def _collisions(root: Path, rels: list[str]) -> list[str]:
+    """Caminhos que não cabem na pasta: arquivo onde precisa haver pasta, ou pasta onde vai um arquivo.
+
+    Conferido antes da primeira gravação, inclusive entre os próprios itens do pacote."""
+    names = set(rels)
+    bad = []
+    for rel in rels:
+        target = root / rel
+        parents = [p for p in Path(rel).parents if p != Path(".")]
+        if target.is_dir() or any((root / p).exists() and not (root / p).is_dir() for p in parents) \
+                or any(p.as_posix() in names for p in parents):
+            bad.append(rel)
+    return bad
+
+
+def _make_parents(root: Path, folder: Path, created: list[Path]) -> None:
+    """Cria as pastas que faltam e anota quais eram novas (para sumirem se a transação voltar)."""
+    missing = []
+    while folder != root and not folder.exists():
+        missing.append(folder)
+        folder = folder.parent
+    for path in reversed(missing):
+        path.mkdir()
+        created.append(path)
+
+
+def _transaction(root: Path, backup: Path, writes: dict[str, bytes], removes: list[str],
+                 finish=None) -> tuple[list[str], list[str], list[str]]:
+    """Grava `writes`, apaga `removes` e chama `finish` como uma coisa só. Em qualquer falha, os arquivos
+    substituídos e removidos voltam do backup, os novos e as pastas novas somem, e o erro sobe."""
+    replaced: list[str] = []
+    added: list[str] = []
+    removed: list[str] = []
+    backed: list[str] = []
+    created: list[Path] = []
+    try:
+        for rel, data in sorted(writes.items()):
             target = root / rel
             if target.is_file():
-                current = target.read_bytes()
-                if current == data or current.replace(b"\r\n", b"\n") == data.replace(b"\r\n", b"\n"):
-                    continue   # igual (só a quebra de linha muda): não mexe
                 _backup(root, backup, rel)
+                backed.append(rel)
                 replaced.append(rel)
             else:
                 added.append(rel)
-            target.parent.mkdir(parents=True, exist_ok=True)
+            _make_parents(root, target.parent, created)
             target.write_bytes(data)
-    old = manifest(root).get("files") or {}
-    for rel in sorted(old):
-        if rel not in members and not is_protected(rel) and (root / rel).is_file():
+        for rel in removes:
             _backup(root, backup, rel)
+            backed.append(rel)
             (root / rel).unlink()
             removed.append(rel)
-    files = {rel: blob_sha((root / rel).read_bytes()) for rel in members if not is_protected(rel) and (root / rel).is_file()}
-    updates_dir(root).mkdir(parents=True, exist_ok=True)
-    (updates_dir(root) / "install.json").write_text(json.dumps(
-        {"sha": sha, "updated_at": datetime.now().isoformat(timespec="seconds"), "files": files},
-        ensure_ascii=False, indent=1), encoding="utf-8")
+        if finish:
+            finish()
+    except BaseException:
+        for rel in added:
+            try:
+                (root / rel).unlink(missing_ok=True)
+            except OSError:
+                pass
+        for rel in backed:
+            try:
+                restore_backup(root, backup, [rel])
+            except OSError:
+                pass
+        for folder in reversed(created):
+            try:
+                folder.rmdir()
+            except OSError:
+                pass
+        raise
+    return replaced, added, removed
+
+
+def _write_manifest(root: Path, sha: str, files: dict) -> None:
+    """Grava o manifesto de uma vez (arquivo temporário + troca): nunca fica meio escrito."""
+    folder = updates_dir(root)
+    folder.mkdir(parents=True, exist_ok=True)
+    temp = folder / "install.json.tmp"
+    temp.write_text(json.dumps({"sha": sha, "updated_at": datetime.now().isoformat(timespec="seconds"),
+                                "files": files}, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(temp, folder / "install.json")
+
+
+def apply_zip(root: Path, zip_path: Path, sha: str) -> dict:
+    """Aplica o ZIP como transação: ou a versão nova entra inteira (com manifesto), ou tudo volta como estava."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = updates_dir(root) / f"backup-{stamp}"
+    with zipfile.ZipFile(zip_path) as archive:
+        members = _safe_members(archive)
+        payloads = {rel: archive.read(item) for rel, item in members.items() if not is_protected(rel)}
+    writes = {}
+    for rel, data in payloads.items():
+        target = root / rel
+        if target.is_file():
+            current = target.read_bytes()
+            if current == data or current.replace(b"\r\n", b"\n") == data.replace(b"\r\n", b"\n"):
+                continue   # igual (só a quebra de linha muda): não mexe
+        writes[rel] = data
+    # Antes de gravar qualquer coisa: se algum arquivo não puder ser substituído, não mexe em nada
+    # (atualização pela metade é pior que nenhuma).
+    locked = [rel for rel in writes
+              if ((root / rel).exists() and not os.access(root / rel, os.W_OK))
+              or (not (root / rel).exists() and _first_existing(root / rel).exists()
+                  and not os.access(_first_existing(root / rel), os.W_OK))]
+    if locked:
+        raise RuntimeError(write_problem(root, "zip") or
+                           f"Sem permissão para gravar {len(locked)} arquivo(s) do programa (ex.: {locked[0]}). "
+                           "Nada foi alterado.")
+    clash = _collisions(root, sorted(writes))
+    if clash:
+        raise RuntimeError(f"A versão nova não cabe na pasta: {clash[0]} esbarra em um arquivo ou pasta que já "
+                           "existe com o mesmo nome. Nada foi alterado.")
+    old = manifest(root).get("files") or {}
+    removes = [rel for rel in sorted(old) if rel not in members and not is_protected(rel) and (root / rel).is_file()]
+
+    def finish():
+        files = {rel: blob_sha((root / rel).read_bytes()) for rel in payloads if (root / rel).is_file()}
+        _write_manifest(root, sha, files)
+
+    try:
+        replaced, added, removed = _transaction(root, backup, writes, removes, finish)
+    except OSError as error:
+        raise RuntimeError("A gravação foi interrompida e os arquivos anteriores voltaram. "
+                           f"Nada foi alterado. ({error})") from error
     return {"replaced": replaced, "added": added, "removed": removed,
             "backup": str(backup) if (replaced or removed) else ""}
 
@@ -455,31 +537,14 @@ def apply_verified(root: Path, zip_path: Path, manifest: dict, signature: str, k
     finally:
         archive.close()
 
+    clash = _collisions(root, sorted(payloads))
+    if clash:
+        raise UpdateAuthError(f"{clash[0]} esbarra em um arquivo ou pasta que já existe. Nada foi alterado.")
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = updates_dir(root) / f"backup-{stamp}"
-    replaced: list[str] = []
-    added: list[str] = []
-    backed: list[str] = []
-    written_new: list[str] = []
     try:
-        for rel, data in sorted(payloads.items()):
-            target = root / rel
-            if target.is_file():
-                _backup(root, backup, rel)
-                backed.append(rel)
-                replaced.append(rel)
-            else:
-                added.append(rel)
-                written_new.append(rel)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
+        replaced, added, _ = _transaction(root, backup, payloads, [])
     except OSError as error:
-        for rel in written_new:
-            try:
-                (root / rel).unlink(missing_ok=True)
-            except OSError:
-                pass
-        restore_backup(root, backup, backed)
         raise UpdateAuthError(
             "A gravação foi interrompida e os arquivos anteriores voltaram. Nada ficou pela metade."
         ) from error
