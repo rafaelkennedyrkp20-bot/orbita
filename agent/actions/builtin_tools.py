@@ -647,12 +647,18 @@ def _register_pc(r: ToolRegistry, services) -> None:
     def press_keys(args, ctx):
         return _pc_call(lambda: services.system.press_key(args["keys"].lower().replace(" ", "")))
 
-    @tool(r, "clipboard", "Read the clipboard (no text) or write text to it.",
-          {"text": {"type": "string", "description": "If given, copies this text"}}, group="pc")
+    # Leitura e escrita separadas: o risco é da ferramenta, então gravar precisa ser `write`
+    # para passar pela aprovação e pelo modo plano.
+    @tool(r, "clipboard", "Read the clipboard text. To copy text to it, use set_clipboard.", group="pc")
     def clipboard(args, ctx):
         if args.get("text") is not None:
-            return services.system.copy_to_clipboard(args["text"])
+            return ToolResult.error("`clipboard` só lê. Para copiar texto, use set_clipboard.")
         return services.system.get_clipboard() or "(clipboard vazio)"
+
+    @tool(r, "set_clipboard", "Copy text to the clipboard (replaces what the user had copied).",
+          {"text": {"type": "string", "description": "Text to copy"}}, ["text"], risk="write", group="pc")
+    def set_clipboard(args, ctx):
+        return services.system.copy_to_clipboard(args["text"])
 
     @tool(r, "system_info", "CPU, RAM, disk, battery and GPU status.", group="pc")
     def system_info(args, ctx):
