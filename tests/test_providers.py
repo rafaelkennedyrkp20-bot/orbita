@@ -1,4 +1,9 @@
-from agent.core.providers import AnthropicProvider, OpenAICompatProvider, OllamaProvider, _http_error, ToolsUnsupported
+import httpx
+import pytest
+
+from agent.core import providers
+from agent.core.providers import (AnthropicProvider, OpenAICompatProvider, OllamaProvider,
+                                  ProviderError, _http_error, _stream_request, ToolsUnsupported)
 
 HISTORY = [
     {"role": "system", "content": "sys"},
@@ -77,4 +82,18 @@ def test_openai_preserves_reasoning_content_on_tool_calls():
     out = p._convert("deepseek-reasoner", messages)
     assert out[1]["reasoning_content"] == "passo 1: ler arquivo"
     assert out[1]["tool_calls"][0]["function"]["name"] == "read_file"
+
+
+def test_connect_timeout_retries_and_returns_friendly_error(monkeypatch):
+    attempts = []
+
+    def timeout(request):
+        attempts.append(request)
+        raise httpx.ConnectTimeout("tempo esgotado", request=request)
+
+    monkeypatch.setattr(providers.time, "sleep", lambda _seconds: None)
+    with httpx.Client(transport=httpx.MockTransport(timeout)) as client:
+        with pytest.raises(ProviderError, match="Não foi possível conectar"):
+            _stream_request(client, "https://example.invalid/chat", {}, {}, attempts=2)
+    assert len(attempts) == 2
 

@@ -180,7 +180,7 @@ def _stream_request(client: "httpx.Client", url: str, payload: dict, headers: di
                 kwargs["timeout"] = timeout
             request = client.build_request("POST", url, **kwargs)
             response = client.send(request, stream=True)
-        except (hx.ConnectError, hx.ReadTimeout, hx.RemoteProtocolError) as error:
+        except (hx.ConnectError, hx.TimeoutException, hx.RemoteProtocolError) as error:
             if attempt == attempts - 1:
                 raise ProviderError(f"Não foi possível conectar a {url}: {error}") from error
             time.sleep(delay)
