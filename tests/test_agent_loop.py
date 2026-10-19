@@ -559,14 +559,12 @@ class _FakeClaude:
         return _FakeClaudeStream(_Block(content=blocks, stop_reason=stop, usage=usage, stop_details=None))
 
 
-def test_claude_thinking_is_replayed_only_with_the_prefix_that_produced_it(brain, monkeypatch, tmp_path):
-    # Opus 5.5 / Fable 5.1: o bloco de pensamento só vale com o histórico exato que o gerou (contas novas: HTTP
-    # 400). O encurtamento do turno longo edita resultados antigos; o pensamento posterior não pode ir junto.
+def _long_claude_turn(brain, monkeypatch, tmp_path, reads: int) -> list[dict]:
+    """Turno real com o AnthropicProvider e cliente falso: `reads` leituras de 6.000 caracteres e "fim"."""
     from agent.core.providers import AnthropicProvider
 
     big = tmp_path / "grande.txt"
     big.write_text("linha de dados\n" * 400, encoding="utf-8")   # 6.000 caracteres: acima do encurtamento
-    reads = 10
     replies = [[_Block(type="tool_use", id=f"r{i}", name="read_file", input={"path": str(big)})]
                for i in range(reads)] + [[_Block(type="text", text="fim")]]
     client = _FakeClaude(replies)
@@ -576,10 +574,16 @@ def test_claude_thinking_is_replayed_only_with_the_prefix_that_produced_it(brain
     brain.settings.set("permission_mode", "livre", save=False)
     s = AgentSession(brain, brain.profiles.get("geral"), "anthropic", "claude-opus-5-5", approve=lambda r: "yes")
     assert s.run("leia o arquivo várias vezes") == "fim"
+    assert len(client.requests) == reads + 1
+    return client.requests
 
-    produced = {f"sig{n}": request for n, request in enumerate(client.requests)}
+
+def _replayed_thinking(requests: list[dict]) -> int:
+    """Quantas mensagens do assistente levaram pensamento, somando todos os envios. Cada uma tem de ir com o
+    prefixo exato (sistema, ferramentas e mensagens) que a gerou."""
+    produced = {f"sig{n}": request for n, request in enumerate(requests)}
     replayed = 0
-    for request in client.requests:
+    for request in requests:
         for i, message in enumerate(request["messages"]):
             for j, block in enumerate(message["content"]):
                 if block.get("type") != "thinking":
@@ -589,8 +593,32 @@ def test_claude_thinking_is_replayed_only_with_the_prefix_that_produced_it(brain
                     f"{block['signature']} reenviado depois de um trecho editado"
                 assert request.get("system") == origin.get("system") and request.get("tools") == origin.get("tools")
                 replayed += 1
-    assert replayed, "o pensamento continua indo quando o histórico antes dele não mudou"
-    assert "encurtado" in str(client.requests[-1]["messages"])   # o encurtamento aconteceu de fato
+    return replayed
+
+
+def test_claude_thinking_is_replayed_only_with_the_prefix_that_produced_it(brain, monkeypatch, tmp_path):
+    # Opus 5.5 / Fable 5.1: o bloco de pensamento só vale com o histórico exato que o gerou (contas novas: HTTP
+    # 400). O encurtamento do turno longo edita resultados antigos; o pensamento posterior não pode ir junto.
+    requests = _long_claude_turn(brain, monkeypatch, tmp_path, reads=13)
+    assert _replayed_thinking(requests), "o pensamento continua indo quando o histórico antes dele não mudou"
+    assert "encurtado" in str(requests[-1]["messages"])   # o encurtamento aconteceu de fato
+
+
+def test_long_claude_turn_keeps_most_thinking_and_the_same_system(brain, monkeypatch, tmp_path):
+    # Num turno de 32 passos com resultados grandes, o envio deve ser quase só acréscimo: o aviso de passos não
+    # muda o sistema (que invalidaria todo pensamento e o cache) e o encurtamento não desliza a cada passo.
+    requests = _long_claude_turn(brain, monkeypatch, tmp_path, reads=32)
+    replayed = _replayed_thinking(requests)
+    systems = len({r.get("system") for r in requests})
+    appended = sum(prev.get("system") == cur.get("system") and cur["messages"][:len(prev["messages"])] == prev["messages"]
+                   for prev, cur in zip(requests, requests[1:]))
+    print(f"\n[medição] envios={len(requests)} pensamento reenviado={replayed} só acréscimo={appended} "
+          f"sistemas distintos={systems}")
+    # Antes: 39 pensamentos reenviados, 9 sistemas distintos, 6 de 32 envios só acrescentavam.
+    assert systems == 1
+    last = str(requests[-1]["messages"])
+    assert "encurtado" in last and last.count("Aviso do ambiente") == 8   # passos 25 a 32, cópias antigas ficam
+    assert replayed >= 120 and appended >= 25
 
 
 

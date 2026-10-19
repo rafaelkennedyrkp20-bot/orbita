@@ -46,6 +46,7 @@ MAX_DEPTH = 2
 KEEP_RECENT_RESULTS = 6      # resultados de ferramenta mais recentes do turno que vão inteiros ao modelo
 MASK_OVER_CHARS = 2000       # acima disso, resultado antigo do turno vira começo + nota
 MASK_KEEP_CHARS = 900
+MASK_EVERY = 6               # encurta em blocos: o meio do turno muda a cada 6 resultados, não a cada passo
 KEEP_RECENT_IMAGES = 2
 WRITE_ARGS = ("content", "new_string", "old_string")
 
@@ -54,22 +55,30 @@ STEP_NOTES = {0: (25, 50), 1: (15, 30)}   # (aviso, freio) por profundidade: pri
 
 
 def _step_note(step: int, depth: int) -> str:
-    """Freio do ambiente: medido em teste real, o que mais gasta é o agente que não para de verificar detalhes."""
+    """Freio do ambiente: medido em teste real, o que mais gasta é o agente que não para de verificar detalhes.
+
+    Vai como aviso depois dos resultados do passo, não no prompt de sistema: no Claude, mudar o sistema a cada passo
+    reescreve o cache e descarta todo o pensamento anterior do turno."""
     warn, stop = STEP_NOTES[min(depth, 1)]
     if step >= stop:
-        return (f"## Freio do ambiente\nVocê já deu {step} passos neste pedido. Pare de verificar detalhes: corrija "
-                "só erros reais que ainda existirem e ENCERRE agora, com um resumo do que está pronto e do que falta.")
+        return (f"{SYSTEM_NOTE} Freio do ambiente: você já deu {step} passos neste pedido. Pare de verificar detalhes: "
+                "corrija só erros reais que ainda existirem e ENCERRE agora, com um resumo do que está pronto e do "
+                "que falta.)")
     if step >= warn:
-        return (f"## Aviso do ambiente\nJá são {step} passos neste pedido. Caminhe para fechar: termine o essencial, "
-                "faça uma verificação final proporcional (erros reais, não detalhes de pixel) e responda.")
+        return (f"{SYSTEM_NOTE} Aviso do ambiente: já são {step} passos neste pedido. Caminhe para fechar: termine o "
+                "essencial, faça uma verificação final proporcional (erros reais, não detalhes de pixel) e responda.)")
     return ""
 
 
 def _mask_old_observations(history: list[dict], start: int) -> None:
     """Mascara observações antigas do turno atual (técnica de 'observation masking'): o modelo continua sabendo
-    o que fez, mas não recebe de novo, a cada passo, arquivos inteiros que já leu ou gravou."""
+    o que fez, mas não recebe de novo, a cada passo, arquivos inteiros que já leu ou gravou.
+
+    Encurta MASK_EVERY resultados de uma vez (ficam de 6 a 11 inteiros): entre um bloco e outro o envio só
+    acrescenta, e o Claude mantém o pensamento e o cache do que já foi enviado."""
     tool_idx = [i for i in range(start, len(history)) if history[i]["role"] == "tool"]
-    old_tools = set(tool_idx[:-KEEP_RECENT_RESULTS]) if len(tool_idx) > KEEP_RECENT_RESULTS else set()
+    old = max(0, len(tool_idx) - KEEP_RECENT_RESULTS)
+    old_tools = set(tool_idx[:old - old % MASK_EVERY])
     for i in old_tools:
         if history[i].get("name") == "use_skill":
             continue   # o protocolo da skill vale o turno inteiro, e use_skill não recarrega no mesmo pedido
@@ -555,8 +564,6 @@ class AgentSession:
         if self.prompted_tools:
             schemas = "\n".join(json.dumps(t.schema(), ensure_ascii=False) for t in tools)
             parts.append(PROMPTED_TOOLS_TEMPLATE.format(tools=schemas))
-        if getattr(self, "_step_note", ""):
-            parts.append(self._step_note)
         return "\n\n".join(parts)
 
     def _step_system(self, tools: list[Tool]) -> str:
@@ -662,7 +669,9 @@ class AgentSession:
         for step in range(max_steps):
             if self.cancel.is_set():
                 return final_text or "(interrompido)"
-            self._step_note = _step_note(step, self.depth)
+            note = _step_note(step, self.depth)
+            if note:
+                self.messages.append({"role": "user", "content": note})
             self._system_memo = None
             if not self._check_budget():
                 return final_text + "\n\n[Pausado pelo limite de tokens. Peça para continuar quando quiser.]"

@@ -23,6 +23,11 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   recusar a requisição (HTTP 400). O pensamento de um passo agora só é reenviado quando o histórico antes dele
   não mudou.
 
+### Melhorias
+- **Tarefas longas mais baratas no Claude**: o aviso de "muitos passos" não muda mais o prompt de sistema, e os
+  resultados antigos são encurtados de 6 em 6, não um por passo. Assim o que já foi enviado fica igual, e o Claude
+  mantém o raciocínio e o cache por mais tempo numa tarefa longa.
+
 ## [0.3.0-alpha] — 2026-10-19
 
 ### Melhorias
