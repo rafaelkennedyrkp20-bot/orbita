@@ -21,11 +21,13 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 import mimetypes
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from email.utils import parsedate_to_datetime
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
@@ -191,8 +193,17 @@ def _stream_request(client: "httpx.Client", url: str, payload: dict, headers: di
         body = response.read().decode("utf-8", errors="replace")
         response.close()
         if response.status_code in _RETRY_STATUS and attempt < attempts - 1:
-            wait = float(response.headers.get("retry-after", delay) or delay)
-            time.sleep(min(wait, 20))
+            wait = delay
+            retry_after = response.headers.get("retry-after")
+            if retry_after:
+                try:
+                    wait = float(retry_after)
+                except ValueError:
+                    try:
+                        wait = parsedate_to_datetime(retry_after).timestamp() - time.time()
+                    except (TypeError, ValueError, OverflowError):
+                        pass
+            time.sleep(min(max(wait if math.isfinite(wait) else delay, 0), 20))
             delay *= 2
             continue
         raise _http_error(response.status_code, body)

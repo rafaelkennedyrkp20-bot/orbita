@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
+
 import httpx
 import pytest
 
@@ -96,4 +99,22 @@ def test_connect_timeout_retries_and_returns_friendly_error(monkeypatch):
         with pytest.raises(ProviderError, match="Não foi possível conectar"):
             _stream_request(client, "https://example.invalid/chat", {}, {}, attempts=2)
     assert len(attempts) == 2
+
+
+def test_retry_after_http_date_retries_instead_of_raising(monkeypatch):
+    attempts, waits = [], []
+    retry_at = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=10), usegmt=True)
+
+    def respond(request):
+        attempts.append(request)
+        if len(attempts) == 1:
+            return httpx.Response(429, headers={"Retry-After": retry_at}, json={"error": "limite"})
+        return httpx.Response(200, text="data: [DONE]\n\n")
+
+    monkeypatch.setattr(providers.time, "sleep", waits.append)
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        response = _stream_request(client, "https://example.invalid/chat", {}, {}, attempts=2)
+        response.close()
+    assert len(attempts) == 2
+    assert len(waits) == 1 and 0 < waits[0] <= 20
 
