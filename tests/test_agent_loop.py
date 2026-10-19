@@ -243,6 +243,60 @@ def test_long_turn_fits_local_context(brain, steps):
     assert len(wire[-1]["content"]) > 5000
 
 
+def _turn(steps: int, chars: int, errors: tuple = ()) -> list[dict]:
+    history = [{"role": "user", "content": "analise o projeto"}]
+    for i in range(steps):
+        history.append({"role": "assistant", "content": "",
+                        "tool_calls": [{"id": f"r{i}", "name": "read_file", "arguments": {"path": f"f{i}"}}]})
+        result = {"role": "tool", "tool_call_id": f"r{i}", "name": "read_file", "content": f"inicio{i} " + "x" * chars}
+        if i in errors:
+            result["is_error"] = True
+        history.append(result)
+    return history
+
+
+def _fit(history: list[dict], available: int) -> list[dict]:
+    return loop._fit_turn(history, available, AgentSession._history_size)
+
+
+def test_fit_turn_keeps_guard_margin():
+    # Encher a janela até a última unidade estoura com o erro da estimativa de tokens: sobra uma folga fixa.
+    history = _fit(_turn(3, 6000), 3000)
+    assert AgentSession._history_size(history) <= 3000 - max(loop.FIT_GUARD_MIN, 3000 // 20)
+
+
+def test_fit_turn_stubs_old_steps_instead_of_dropping():
+    # Passos antigos viram uma linha com a ferramenta e o tamanho: o agente sabe o que já rodou e não repete.
+    history = _fit(_turn(10, 4000, errors=(2,)), 1800)
+    assert tool_pairs_intact(history)
+    assert [m["tool_call_id"] for m in history if m["role"] == "tool"] == [f"r{i}" for i in range(10)]
+    old = [m["content"] for m in history[1:-1] if m["role"] == "tool"]
+    assert all("omitido" in s for s in old)   # os mais novos só perdem o meio; os mais velhos viram uma linha
+    stubs = [s for s in old if s.startswith("[passo")]
+    assert len(stubs) >= 5 and all("read_file" in s and "4008 caracteres" in s and len(s) < 160 for s in stubs)
+    assert "erro" in stubs[2] and "erro" not in stubs[3]
+    assert history[-1]["content"].endswith("x" * 4000)   # o último passo cabe inteiro
+
+
+def test_fit_turn_trims_head_and_tail():
+    # Erros e conclusões ficam no fim do resultado: encurtar preserva começo e fim, com o corte no meio.
+    history = _turn(1, 0)
+    history[-1]["content"] = "CABECALHO " + "y" * 40000 + " Traceback: ErroFinal"
+    history = _fit(history, 2000)
+    content = history[-1]["content"]
+    assert content.startswith("CABECALHO") and content.endswith("ErroFinal")
+    assert "omitidos" in content and len(content) < 10000
+
+
+def test_fit_turn_last_step_does_not_erase_history():
+    # Um último resultado enorme fica com até 70% do orçamento; o resto guarda o rastro dos passos anteriores.
+    history = _fit(_turn(120, 20000), 6000)
+    assert AgentSession._history_size(history) <= 6000
+    assert sum(1 for m in history if m["role"] == "tool") > 1
+    assert 5000 < len(history[-1]["content"]) < 0.75 * 6000 * 3.5
+    assert "read_file" in history[0]["content"]   # os passos que saíram de vez aparecem no pedido
+
+
 def test_system_note_does_not_start_a_turn(brain):
     # O aviso "(Sistema: ...)" entra como mensagem de usuário, mas o pedido real do turno não pode sumir.
     s = AgentSession(brain, brain.profiles.get("geral"), "ollama", "qwen3:8b", approve=lambda r: "yes")

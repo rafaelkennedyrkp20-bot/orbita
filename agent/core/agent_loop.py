@@ -108,7 +108,11 @@ def _mask_old_observations(history: list[dict], start: int) -> None:
 
 
 SYSTEM_NOTE = "(Sistema:"   # aviso do loop que entra como mensagem de usuário; não começa turno
-FIT_FLOOR_CHARS = 300       # piso de um resultado de ferramenta quando nem o turno atual cabe
+# Quando nem o turno atual cabe (_fit_turn), tudo em tokens estimados (~3,5 caracteres cada):
+FIT_FLOOR_TOKENS = 100      # piso de um resultado de ferramenta encurtado
+FIT_GUARD, FIT_GUARD_MIN = 0.05, 128   # folga para o erro da estimativa: 5% do orçamento, no mínimo 128
+FIT_LAST_SHARE = 0.7        # o último passo fica com até 70% antes de apagar o rastro dos passos antigos
+FIT_HEAD = 0.3              # ao encurtar, 30% do começo e 70% do fim (erros e conclusões ficam no fim)
 
 
 def _turn_starts(messages: list[dict]) -> list[int]:
@@ -120,33 +124,55 @@ def _turn_starts(messages: list[dict]) -> list[int]:
 def _fit_turn(history: list[dict], available: int, size: Callable[[list[dict]], int]) -> list[dict]:
     """Último recurso quando nem o turno atual cabe no orçamento (ex.: modelo local com 16k de contexto).
 
-    Até caber, nesta ordem: encurta os resultados antigos do turno (skills por último) e tira imagens; descarta
-    os passos mais antigos inteiros (chamada + resultados juntos); encurta os resultados do último passo; corta
-    o meio do pedido. Cada resultado perde só o excesso, até um piso. O pedido e o último passo ficam sempre.
+    Mira o orçamento menos uma folga (FIT_GUARD) e, até caber, nesta ordem, sem voltar atrás:
+    1. encurta os resultados antigos do turno (skills por último), do mais velho ao mais novo, e tira imagens;
+    2. troca o resultado dos passos antigos por uma linha (ferramenta, tamanho, se deu erro): o agente sabe o
+       que já rodou e não repete;
+    3. encurta o último passo até FIT_LAST_SHARE do orçamento;
+    4. descarta os passos antigos já resumidos, do mais velho (o pedido lista as ferramentas que saíram);
+    5. encurta o último passo de vez; 6. corta o meio do pedido.
+    Encurtar guarda começo e fim (FIT_HEAD) e perde só o excesso, até um piso. O pedido e o último passo ficam.
     """
-    if size(history) <= available:
+    target = available - max(FIT_GUARD_MIN, int(available * FIT_GUARD))
+    if size(history) <= target:
         return history
 
-    def shrink(i: int) -> bool:
+    def fits() -> bool:
+        return size(history) <= target
+
+    def shrink(i: int, floor_tokens: int = FIT_FLOOR_TOKENS) -> bool:
         history[i].pop("images", None)
         content = history[i].get("content") or ""
-        keep = max(FIT_FLOOR_CHARS, len(content) - int((size(history) - available) * 3.5) - 200)
+        keep = max(int(floor_tokens * 3.5), len(content) - int((size(history) - target) * 3.5) - 200)
         if len(content) > keep:
-            history[i]["content"] = (content[:keep]
-                                     + f"\n[... encurtado para caber no contexto ({len(content)} caracteres)]")
-        return size(history) <= available
+            head = int(keep * FIT_HEAD)
+            history[i]["content"] = (f"{content[:head]}\n[... {len(content) - keep} caracteres omitidos para caber "
+                                     f"no contexto ...]\n{content[len(content) - keep + head:]}")
+        return fits()
 
-    def last_step_results() -> list[int]:
-        last_call = max((i for i, m in enumerate(history) if m["role"] == "assistant"), default=len(history))
-        return [i for i in range(last_call + 1, len(history)) if history[i]["role"] == "tool"]
+    def last_step() -> tuple[int, list[int]]:
+        call = max((i for i, m in enumerate(history) if m["role"] == "assistant"), default=len(history))
+        return call, [i for i in range(call + 1, len(history)) if history[i]["role"] == "tool"]
 
-    recent = set(last_step_results())
-    older = sorted((i for i, m in enumerate(history) if m["role"] == "tool" and i not in recent),
-                   key=lambda i: (history[i].get("name") == "use_skill", i))
-    if any(shrink(i) for i in older):
+    last_call, recent = last_step()
+    older = [i for i, m in enumerate(history) if m["role"] == "tool" and i < last_call]
+    full = {i: len(history[i].get("content") or "") for i in older}   # tamanho original, para o resumo
+    if any(shrink(i) for i in sorted(older, key=lambda i: (history[i].get("name") == "use_skill", i))):
         return history
-    omitted = 0
-    while size(history) > available and len(history) > 1:
+
+    for step, i in enumerate(older, 1):
+        msg = history[i]
+        failed = ", deu erro" if msg.get("is_error") else ""
+        msg["content"] = (f"[passo {step}: {msg.get('name') or 'ferramenta'}{failed}; resultado omitido para "
+                          f"caber no contexto ({full[i]} caracteres)]")
+        if fits():
+            return history
+
+    if recent and any(shrink(i, int(target * FIT_LAST_SHARE / len(recent))) for i in recent):
+        return history
+
+    dropped: dict[str, int] = {}
+    while not fits() and len(history) > 1:
         head = history[1]
         if head["role"] != "assistant" and not (head.get("content") or "").startswith(SYSTEM_NOTE):
             break
@@ -155,19 +181,20 @@ def _fit_turn(history: list[dict], available: int, size: Callable[[list[dict]], 
             end += 1
         if end >= len(history):
             break   # o último passo fica
+        for call in head.get("tool_calls") or []:
+            dropped[call.get("name") or "?"] = dropped.get(call.get("name") or "?", 0) + 1
         del history[1:end]
-        omitted += 1
-    if omitted and history[0]["role"] == "user":
-        history[0]["content"] = (f"{history[0].get('content') or ''}\n\n"
-                                 f"[{omitted} passos antigos deste turno omitidos para caber no contexto]")
-    if size(history) > available and any(shrink(i) for i in last_step_results()):
+    if dropped and history[0]["role"] == "user":
+        names = ", ".join(f"{name} ×{count}" for name, count in dropped.items())
+        history[0]["content"] = (f"{history[0].get('content') or ''}\n\n[{sum(dropped.values())} chamadas antigas "
+                                 f"deste turno omitidas para caber no contexto: {names}]")
+    if not fits() and any(shrink(i) for i in last_step()[1]):
         return history
-    if history and history[0]["role"] == "user" and history[0].get("content"):
-        if size(history) > available:
-            content = history[0]["content"]
-            keep = max(2000, int((available - size(history[1:])) * 3.5))
-            if len(content) > keep:
-                history[0]["content"] = content[:keep // 2] + "\n[... conteúdo cortado ...]\n" + content[-keep // 2:]
+    if history and history[0]["role"] == "user" and history[0].get("content") and not fits():
+        content = history[0]["content"]
+        keep = max(2000, int((target - size(history[1:])) * 3.5))
+        if len(content) > keep:
+            history[0]["content"] = content[:keep // 2] + "\n[... conteúdo cortado ...]\n" + content[-keep // 2:]
     return history
 
 
