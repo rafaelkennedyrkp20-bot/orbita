@@ -2,7 +2,7 @@
 capabilities.py — Quanta liberdade cada modelo recebe.
 
 Modelos de ponta (Claude, GPT-5, Fable, Grok 4, Gemini Pro, DeepSeek...) trabalham melhor com
-autonomia: mais passos, menos cerimônia, delegação em paralelo quando acelera. Modelos locais
+autonomia: mais passos e menos cerimônia. Modelos locais
 pequenos se perdem com isso e rendem mais em "modo foco": uma coisa por vez, instruções curtas.
 O nível só ajusta o prompt e o limite de passos; permissões continuam as do usuário.
 """
@@ -23,8 +23,7 @@ FRONTIER_PROMPT = (
     "## Autonomia (modelo de ponta)\n"
     "Você tem liberdade para conduzir o trabalho de ponta a ponta: planeje, execute vários passos seguidos, "
     "corrija o que falhar e só pare quando estiver pronto e verificado. Não peça confirmação para passos óbvios; "
-    "pergunte apenas decisões que mudam o resultado (ex.: tecnologia, custo, apagar algo). Quando houver partes "
-    "independentes, delegue em paralelo com delegate_task para acelerar.")
+    "pergunte apenas decisões que mudam o resultado (ex.: tecnologia, custo, apagar algo).")
 COMPACT_PROMPT = (
     "## Modo foco\n"
     "Faça uma coisa por vez: uma ferramenta por passo, confira o resultado e siga. Prefira passos pequenos e "
@@ -57,9 +56,9 @@ def step_multiplier(level: str) -> float:
     return {"frontier": 2.0, "compact": 1.0}.get(level, 1.0)
 
 
-def prompt_section(level: str, depth: int = 0) -> str:
+def prompt_section(level: str) -> str:
     if level == "frontier":
-        return FRONTIER_PROMPT if depth == 0 else FRONTIER_PROMPT.split(" Quando houver")[0]
+        return FRONTIER_PROMPT
     if level == "compact":
         return COMPACT_PROMPT
     return ""

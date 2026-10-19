@@ -217,7 +217,7 @@ e a uma equipe de outros agentes. Responda sempre em português do Brasil, de fo
 ## Economia de Contexto
 - Use `grep`/`glob_files` e `offset`/`limit` em `read_file` em vez de ler arquivos inteiros enormes; não releia o que já está no contexto.
 - Para conferir uma página web, use `check_web_page` (navegador invisível, sem instalar nada; `width=390` para celular). Playwright, servidores ou controlar a tela só se ele realmente não bastar.
-- Siga o roteador de skills: `use_skill` no primeiro passo, antes de editar ou gerar. Delegue só com paralelismo real, contexto pesado isolado ou revisão independente."""
+- Siga o roteador de skills: `use_skill` no primeiro passo, antes de editar ou gerar."""
 
 PROMPTED_TOOLS_TEMPLATE = """## Ferramentas (modo texto)
 Este modelo chama ferramentas escrevendo blocos exatamente neste formato:
@@ -438,7 +438,7 @@ class AgentSession:
         brain = self.brain
         mode = self.settings.get("permission_mode", "auto")
         parts = [BASE_PROMPT]
-        freedom = capabilities.prompt_section(self.tier, self.depth)
+        freedom = capabilities.prompt_section(self.tier)
         if freedom:
             parts.append(freedom)
         if getattr(self, "pinned_prompt", "").strip():
@@ -539,25 +539,19 @@ class AgentSession:
     def _team_text(self) -> str:
         auto = self.settings.get("team_model", "principal") == "auto"
         same = f"{self.provider_name}:{self.model}"
+        # Única regra de quando delegar. Medido: num site de 4 páginas, 4 ajudantes custaram ~15x mais tokens.
         lines = ["## Sua equipe (delegate_task)",
-                 "Para acelerar, divida o trabalho em partes independentes e delegue em paralelo: cada subagente tem "
-                 "contexto próprio e trabalha na mesma pasta, numa tarefa diferente. Dê a cada um arquivos "
-                 "diferentes ('files') para não se atropelarem; depois revise e integre o que voltar. "
-                 "Se as partes precisam se encaixar (HTML/CSS/JS, front/back, módulos que se chamam), ANTES de "
-                 "delegar defina o contrato e passe em 'contract': nomes de classes e IDs, estrutura e nomes dos "
-                 "arquivos, funções/endpoints e formatos de dados — todos recebem o mesmo. Se for difícil fixar "
-                 "o contrato, crie você o esqueleto primeiro (ex.: o HTML com as classes) e delegue o resto. "
-                 "Quantos: 1 parte → faça você mesmo; 2–3 partes independentes → 2–3 ajudantes; projeto grande → um "
-                 f"ajudante por módulo/tela/área ({self.parallel_cap} rodam ao mesmo tempo; os demais esperam na fila). "
-                 + ("Sem 'model', o sistema escolhe o modelo pela especialidade. " if auto else
-                    f"Sem 'model', cada subagente usa o SEU mesmo modelo ({same}) — são cópias suas com tarefas "
-                    "diferentes. Só passe 'model' se o usuário pedir outro modelo; nunca troque para um modelo "
-                    "local ou mais fraco por conta própria. ")
-                 + "Relatório sem Status/Verificação, ou com PARTIAL/BLOCKED, não é entrega: não declare pronto. Agentes:"]
+                 "Delegue só com paralelismo real, contexto pesado isolado ou revisão independente; uma parte só, "
+                 "faça você. Cada ajudante tem contexto próprio na mesma pasta: dê 'files' diferentes e "
+                 "'acceptance_criteria'. Se as partes se encaixam, passe o mesmo 'contract' (nomes, arquivos, "
+                 f"interfaces, formatos) ou crie o esqueleto antes. {self.parallel_cap} rodam ao mesmo tempo; o resto espera. "
+                 + ("Sem 'model', o sistema escolhe pela especialidade. " if auto else
+                    f"Sem 'model', cada um usa o SEU mesmo modelo ({same}); só passe outro se o usuário pedir. ")
+                 + "Relatório sem Status/Verificação, ou com PARTIAL/BLOCKED, não é entrega. Agentes:"]
         for member in self.brain.profiles.team():
-            model = member.model_ref or (self._routed_ref(member) if auto else "") or f"mesmo modelo seu ({same})"
+            model = member.model_ref or (self._routed_ref(member) if auto else "")
             tags = f" [{', '.join(member.skills_tags)}]" if member.skills_tags else ""
-            lines.append(f"- {member.id} → {model}{tags}: {member.description}")
+            lines.append(f"- {member.id}{f' → {model}' if model else ''}{tags}: {member.description}")
         table = self.brain.models_table()
         if table:
             lines.append("Modelos com acesso configurado (use em 'model' como provedor:modelo):\n" + table)

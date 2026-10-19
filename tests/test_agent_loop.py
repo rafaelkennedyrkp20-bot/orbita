@@ -363,6 +363,16 @@ def test_bridge_tools_obey_local_only_and_staged_writes(brain, tmp_path, monkeyp
     assert not marker.exists()
 
 
+def test_delegation_rule_lives_in_one_short_place(brain):
+    # Medido no Órbita: equipe custou ~15x mais tokens num site de 4 páginas. O prompt não pode empurrar para ela.
+    s = AgentSession(brain, brain.profiles.get("geral"), "anthropic", "claude-opus-5-5", approve=lambda r: "yes")
+    prompt = s.system_prompt(s.visible_tools())
+    rules = prompt.split("## Sua equipe (delegate_task)\n", 1)[1].split("\n- ", 1)[0]
+    assert "paralelismo real" in rules and len(rules) <= 700
+    assert prompt.count("paralelismo real") == 1
+    assert "Para acelerar" not in prompt and "delegue em paralelo" not in prompt
+
+
 def test_find_tools_stays_inside_profile_servers(brain):
     from agent.core.tools import Tool
 

@@ -28,6 +28,6 @@ def test_tiers(provider, model, expected):
 
 def test_effects():
     assert cap.step_multiplier("frontier") == 2.0 and cap.step_multiplier("compact") == 1.0
-    assert "delegate_task" in cap.prompt_section("frontier")
-    assert "delegate_task" not in cap.prompt_section("frontier", depth=1)   # subagente não delega
+    # A regra de quando delegar mora num lugar só (texto da equipe); a autonomia não empurra para a equipe.
+    assert "delegate_task" not in cap.prompt_section("frontier")
     assert "Modo foco" in cap.prompt_section("compact") and cap.prompt_section("standard") == ""
