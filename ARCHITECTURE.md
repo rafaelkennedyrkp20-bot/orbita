@@ -61,9 +61,11 @@ Você ──► GUI (agent/gui.py) / terminal / voz
   `find_tools`. `always_load` define um "kit inicial" sempre visível.
 - **Ferramentas MCP rodam em sequência** (têm estado no servidor); só leituras embutidas rodam em paralelo.
 - **Permissões por risco**: `read` nunca pergunta; `write` pergunta no modo *perguntar*; `exec` pergunta
-  nos modos *perguntar* e *auto*; *livre* nunca pergunta.
+  nos modos *perguntar* e *auto*; *livre* nunca pergunta. Um caminho só (`_authorize`) para o loop, a ponte do
+  Grok e a verificação da equipe; o perfil (grupos e `mcp_servers`) vale também para MCP chamado pelo nome.
 - **Economia**: resultados antigos de ferramentas são encurtados, turnos velhos saem do contexto,
-  saídas longas são cortadas e o freio pergunta antes de ultrapassar o orçamento por tarefa/dia.
+  saídas longas são cortadas e o freio pergunta antes de ultrapassar o orçamento por tarefa/dia. Se nem o turno
+  atual cabe (modelo local), `_fit_turn` encurta o excesso e descarta passos antigos; skill carregada fica inteira.
 - **Subagentes** compartilham o botão Parar e o orçamento do principal; profundidade máxima 2.
 
 ## Dados (pasta `data/`)

@@ -60,6 +60,16 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   tokens (entrega o que tem como PARTIAL), em vez de gastar o saldo testando sem fim.
 
 ### Corrigido
+- Perfil sem o grupo MCP, ou limitado a alguns servidores, não roda mais ferramenta MCP chamada pelo nome, e
+  `find_tools` não ativa ferramenta de servidor fora do perfil.
+- Em tarefa longa, a skill carregada não é mais encurtada no meio do caminho (antes o protocolo sumia e
+  `use_skill` recusava recarregar).
+- Modelo local com contexto curto: um turno longo agora cabe no orçamento (antes ia até 6x acima e o Ollama cortava
+  o começo, inclusive o pedido). O aviso interno "(Sistema: ...)" não toma mais o lugar do pedido.
+- A ponte do Grok passa pela mesma autorização do resto: modo somente local e revisão antes de gravar valem lá.
+- O índice de skills não esconde mais skills por ordem alfabética e não mostra as que só rodam em macOS ou Linux.
+- O prompt deixou de empurrar o modelo para a equipe: a regra de quando delegar fica num lugar só e o texto da
+  equipe encolheu (prompt de sistema cerca de 8% menor).
 - Quem alterou arquivos do programa (ex.: o `iniciar_orbita.sh` para outro Python) não fica mais travado: a atualização
   oferece "Atualizar guardando minhas alterações" — guarda, atualiza e reaplica por cima, com cópia em
   `data/updates/backup-…`; se uma alteração conflitar, fica a versão nova e a sua continua na cópia.
