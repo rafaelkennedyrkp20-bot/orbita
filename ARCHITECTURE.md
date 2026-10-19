@@ -34,6 +34,7 @@ Você ──► GUI (agent/gui.py) / terminal / voz
 | `agent/core/tools.py` | `Tool`, `ToolRegistry`, `ToolResult`, decorador `tool()`; busca de ferramentas adiadas |
 | `agent/core/profiles.py` | Perfis/equipe (`data/profiles/*.json`): prompt de sistema, prompt inicial, modelo, ferramentas |
 | `agent/core/mcp_hub.py` | Cliente MCP (stdio/HTTP) numa thread asyncio; importação de configs do Claude/Cursor |
+| `agent/core/ghidra_setup.py` | Ghidra do REA pelo backend: aponta `GHIDRA_INSTALL_DIR` no processo ou baixa em segundo plano (SHA-256, extração atômica); estado só leitura no painel |
 | `agent/core/skills.py` | Skills `SKILL.md` + plugins. `when` vira roteador no prompt; `context: models` anexa a tabela só ao carregar |
 | `agent/core/usage.py` | Medidor de tokens (`data/usage.json`) e políticas de economia |
 | `agent/core/brain.py` | Fachada: liga tudo, seleção de perfil/modelo, modos texto/voz |
@@ -57,6 +58,8 @@ Você ──► GUI (agent/gui.py) / terminal / voz
   hora de enviar; o Claude recebe de volta seus blocos originais (`_native`) para preservar o raciocínio.
 - **Ferramentas por prompt**: se o modelo não aceita tool-calling nativo, o loop injeta o catálogo no
   prompt e lê blocos `<tool_call>`; qualquer modelo vira agente.
+- **Motor lento (REA)**: com `ready_check`, o hub faz o check-in em segundo plano ao conectar e cada chamada pesada roda
+  em segundo plano; passou de 5 s, a tool volta `warming_up` na hora e a mesma chamada repetida reaproveita a execução.
 - **MCP adiado**: servidores com muitas ferramentas (REA: 207) não entram no contexto; o modelo usa
   `find_tools`. `always_load` define um "kit inicial" sempre visível.
 - **Ferramentas MCP rodam em sequência** (têm estado no servidor); só leituras embutidas rodam em paralelo.

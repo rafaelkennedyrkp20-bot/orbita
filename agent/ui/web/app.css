@@ -164,10 +164,10 @@ svg.i { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-widt
 .mcp-ready.ok { color: var(--ok); } .mcp-ready.bad { color: var(--warn); }
 .ghidra-box { margin-top: 18px; }
 .ghidra-box .tile.ghidra { max-width: none; }
-.ghidra-prog { display: flex; align-items: center; gap: 10px; margin-top: 10px; color: var(--accent2); font-size: 11.5px; }
-.ghidra-prog .warm-bar { position: relative; flex: 0 0 120px; height: 5px; border-radius: 3px; background: rgba(34,211,238,.20); overflow: hidden; }
-.ghidra-prog .warm-bar i { position: absolute; left: -40%; top: 0; width: 40%; height: 100%; border-radius: 3px; background: var(--accent2); animation: warmslide 1.1s ease-in-out infinite; }
-.ghidra-prog .warm-tx { flex: 1; }
+.mcp-ready.warm-line { display: flex; align-items: center; gap: 8px; color: var(--accent2); }
+.warm-line .warm-bar, .warm-line .gh-bar { position: relative; flex: 0 0 72px; height: 4px; border-radius: 3px; background: rgba(34,211,238,.20); overflow: hidden; }
+.warm-line .warm-bar i { position: absolute; left: -40%; top: 0; width: 40%; height: 100%; border-radius: 3px; background: var(--accent2); animation: warmslide 1.1s ease-in-out infinite; }
+.warm-line .gh-bar i { position: absolute; left: 0; top: 0; height: 100%; border-radius: 3px; background: var(--accent2); }
 .spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--line2); border-top-color: var(--accent2); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* ── Componente de pensamento expansível ────────────────────────────────────── */

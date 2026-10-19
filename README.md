@@ -150,9 +150,10 @@ Plugins: crie `plugins/<nome>/` com `skills/` e/ou `.mcp.json`.
 
 ### REA — engenharia reversa
 Já conectado (207 ferramentas, carregadas sob demanda). Formatos, arquitetura, apps Electron/JS e
-sites funcionam direto. Para **decompilar binários nativos** o REA precisa de um motor de análise:
-instale o [Ghidra 12.1](https://github.com/NationalSecurityAgency/ghidra/releases) e defina
-`GHIDRA_INSTALL_DIR` no `.env` (ou rode `npx rea-agents setup`). Diagnóstico: `npx rea-agents@6.5.0 doctor`.
+sites funcionam direto. Para **decompilar binários nativos** o REA usa o Ghidra: com o REA ligado, o Órbita
+baixa sozinho o [Ghidra 12.1](https://github.com/NationalSecurityAgency/ghidra/releases) oficial (SHA-256 conferido)
+em `models/tools/ghidra`, ou usa o seu se `GHIDRA_INSTALL_DIR` apontar para ele. Requer o JDK 21+, que você instala.
+Diagnóstico: `npx rea-agents@6.5.0 doctor`.
 
 ## Modelos locais
 

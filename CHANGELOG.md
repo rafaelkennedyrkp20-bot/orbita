@@ -29,6 +29,15 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 - **Tarefa longa em modelo local** (issue #5): quando o turno não cabe na janela, sobra uma folga para o erro da contagem;
   os passos antigos viram uma linha (ferramenta, tamanho, erro) em vez de sumir, e o agente não repete o que já fez;
   resultado encurtado guarda o começo e o fim, onde ficam os erros.
+- **Chamadas MCP lentas falhavam**: no Python 3.10, qualquer chamada MCP com mais de meio segundo voltava "Erro MCP"
+  sem texto. Agora espera o resultado de verdade (afetava REA, Playwright e outros servidores).
+- **REA sem travar o agente** (issue #4): o motor do REA aquece em segundo plano. Enquanto ele sobe, a ferramenta responde na hora
+  que está aquecendo, em vez de prender o agente por minutos; repetir a mesma chamada entrega o resultado quando sai.
+
+### Mudanças
+- **Ghidra instalado sozinho** (issue #3): com o REA ligado, o Órbita aponta o Ghidra ou, se falta, baixa a versão oficial em
+  segundo plano (SHA-256 conferido; nada pela metade se cair). O `.env` não é mais alterado. Sem JDK 21+, não baixa
+  e avisa. No painel Conexões a seção do Ghidra só mostra o estado.
 
 ### Documentação
 - **Plano de modelos locais** (issue #6): o documento mostra o estado real de cada cartão (7 feitos, 13 parciais),

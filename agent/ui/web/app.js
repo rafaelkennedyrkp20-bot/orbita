@@ -126,7 +126,7 @@ const now = () => new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minu
 let api = null;
 let S = {};              // estado vindo do Python
 let busy = false, attachments = [], liveTimer = null, liveStart = 0, planMode = false, longHintShown = false;
-let turnEl = null, segEls = {}, stepEls = {}, stepsBox = null, warmTimers = {};
+let turnEl = null, segEls = {}, stepEls = {}, stepsBox = null;
 let settingsSection = "geral";
 
 function call(method, ...args) {
@@ -555,7 +555,6 @@ async function openConversation(id) {
 // ── Chat ───────────────────────────────────────────────────────────────────────
 function resetChat(welcome = true) {
   $("#messages").innerHTML = ""; turnEl = null; segEls = {}; stepEls = {}; stepsBox = null; longHintShown = false; undoNote = "";
-  Object.values(warmTimers).forEach(clearInterval); warmTimers = {};
   S.conversation_id = null; S.conversation_title = ""; S.pinned_prompt = ""; S.goal = ""; S.conversation_tokens = 0;
   outQueue = []; renderQueue();
   $("#feed").innerHTML = `<div class="empty">As ações do agente aparecem aqui em tempo real.</div>`;
@@ -1011,7 +1010,6 @@ function toolStep(d) {
     updateStepsSummary(stepsBox);
   }
   if (d.status && d.status !== "running") {
-    clearInterval(warmTimers[d.id]); delete warmTimers[d.id];
     const w = el.querySelector(".warm"); if (w) w.remove();
     const st = el.querySelector(".st");
     st.className = "st " + d.status;
@@ -1022,6 +1020,8 @@ function toolStep(d) {
       if ((d.images || []).length) det.open = true;
       el.appendChild(det);
     }
+    const warming = warmingInfo(d.result);
+    if (warming) mcpWarm({ id: d.id, elapsed: warming.elapsed_s, message: warming.message || "consulte de novo em instantes" });
     updateStepsSummary(el.closest(".steps"));
   }
   scrollEnd();
@@ -1032,7 +1032,11 @@ function updateStepsSummary(box) {
   box.querySelector(".sum").textContent = done < all ? `Trabalhando… ${done}/${all} ações` : `${all} ${all === 1 ? "ação" : "ações"}${errs ? ` · ${errs} com erro` : ""}`;
 }
 function finishSteps(box) { updateStepsSummary(box); if (!$$(".st.error", box).length && $$(".step", box).length > 2) box.open = false; }
-// Barra "aquecendo… (Xs)": o REA avisa a cada ~10s enquanto o Ghidra sobe; o relógio corre localmente entre os avisos.
+// Linha "aquecendo o motor… Xs": tempo e mensagem vêm do backend (evento mcp_progress ou resultado warming_up).
+function warmingInfo(text) {
+  if (!(text || "").startsWith('{"status": "warming_up"')) return null;
+  try { return JSON.parse(text.split("\n")[0]); } catch (_) { return null; }
+}
 function mcpWarm(e) {
   const el = stepEls[e.id];
   if (!el) return;
@@ -1042,17 +1046,7 @@ function mcpWarm(e) {
     w.innerHTML = `<span class="warm-bar"><i></i></span><span class="warm-tx"></span>`;
     el.querySelector(".lbl").appendChild(w);
   }
-  w.dataset.base = e.elapsed || 0;
-  w.dataset.at = Date.now();
-  const msg = e.message || "";
-  const paint = () => {
-    const s = (+w.dataset.base || 0) + Math.round((Date.now() - (+w.dataset.at)) / 1000);
-    const tx = w.querySelector(".warm-tx");
-    if (tx) tx.textContent = `aquecendo o motor… ${s}s${msg ? " · " + msg : ""}`;
-  };
-  paint();
-  clearInterval(warmTimers[e.id]);
-  warmTimers[e.id] = setInterval(paint, 1000);
+  w.querySelector(".warm-tx").textContent = `aquecendo o motor… ${e.elapsed || 0}s${e.message ? " · " + e.message : ""}`;
 }
 // ── Painel flutuante da equipe ───────────────────────────────
 // Os ajudantes trabalham fora do chat: um cartão por ajudante (tarefa, ação atual, passos e relatório), num painel
@@ -1645,7 +1639,7 @@ function renderConnections() {
     <div class="row" style="margin-bottom:18px"><button class="btn" id="mc-reload">${icon("refresh")} Reconectar</button><button class="btn" id="mc-import">${icon("download")} Importar do Claude/Cursor</button><button class="btn" id="mc-edit">${icon("code")} Editar mcp.json</button></div>
     <div class="grid">${servers.map(s => `<div class="tile ${s.status === "indisponivel" ? "off" : ""}"><div class="top"><div class="em">${icon("plug")}</div><div style="flex:1"><h3>${esc(s.name)}</h3><span class="status ${s.status}"><i></i>${esc(MCP_STATUS[s.status] || s.status)}${s.status === "conectado" ? ` · ${s.tools} ferramentas${s.deferred ? " (sob demanda)" : ""}` : ""}</span></div>
       <label class="toggle"><input type="checkbox" data-mcp="${esc(s.name)}" ${s.enabled ? "checked" : ""} ${s.status === "indisponivel" ? "disabled" : ""}><span></span></label></div>
-      <div class="desc">${esc(s.description || "")}${s.error ? `<div class="mcp-err ${s.status}">${esc(s.error)}</div>` : ""}${s.status === "conectado" && s.warm ? `<div class="mcp-ready ${s.ready === false ? "bad" : s.ready ? "ok" : ""}">${s.ready === false ? "⚠ check-in: " + esc((s.ready_note || "sem resposta").slice(0, 120)) : s.ready ? "✓ check-in ok · a 1ª análise profunda aquece o motor (pode levar minutos)" : "verificando prontidão…"}</div>` : ""}</div></div>`).join("")}</div>
+      <div class="desc">${esc(s.description || "")}${s.error ? `<div class="mcp-err ${s.status}">${esc(s.error)}</div>` : ""}${s.status === "conectado" && s.warm ? mcpWarmLine(s) : ""}</div></div>`).join("")}</div>
     <div id="ghidra-box" class="ghidra-box"></div>
     <h1 style="margin-top:34px">Skills</h1><p class="lead">Instruções especializadas no padrão <b>SKILL.md</b>, lidas de <code>skills/</code>, plugins e das pastas do Claude/Codex.</p>
     <div class="grid">${(S.skills || []).map(k => `<div class="tile"><div class="top"><div class="em">${icon("book")}</div><div><h3>${esc(k.name)}</h3><span class="tag">${esc(k.origin)}</span></div></div><div class="desc">${esc(k.description)}</div></div>`).join("") || `<div class="empty">Nenhuma skill encontrada.</div>`}</div>`;
@@ -1656,44 +1650,37 @@ function renderConnections() {
   renderToolbox();
   renderGhidra();
 }
-// Motor nativo do REA: baixar/instalar o Ghidra de dentro do app (fonte oficial, SHA-256 conferido).
-async function renderGhidra() {
-  const box = $("#ghidra-box");
-  if (!box) return;
-  const g = await call("ghidraStatus");
-  if (!g) { box.innerHTML = ""; return; }
-  if (g.installed) {
-    box.innerHTML = `<div class="tile ghidra"><div class="top"><div class="em">${icon("check")}</div><div style="flex:1"><h3>Motor de análise — Ghidra ${esc(g.version)}</h3><span class="status conectado"><i></i>instalado</span></div></div>
-      <div class="desc">O REA usa este motor para desmontar e descompilar binários nativos.<div class="mcp-ready ok">✓ ${esc(g.dir)}</div></div></div>`;
-    return;
+// Estado do motor de um servidor MCP (REA): só leitura, com o tempo e o progresso medidos no backend.
+function mcpWarmLine(s) {
+  const note = esc((s.warm_note || "").slice(0, 140));
+  if (s.warm === "aquecendo") {
+    const pct = s.warm_progress != null ? ` · ${s.warm_progress}%` : "";
+    return `<div class="mcp-ready warm-line"><span class="warm-bar"><i></i></span>aquecendo o motor${s.pending_tool ? ` (${esc(s.pending_tool)})` : ""}… ${s.warm_elapsed || 0}s${pct}${note ? " · " + note : ""}</div>`;
   }
-  const java = g.java_ok ? "" : `<div class="mcp-ready bad">⚠ ${esc(g.java_reason || "Instale o JDK 21+ para o Ghidra rodar.")}</div>`;
-  box.innerHTML = `<div class="tile ghidra"><div class="top"><div class="em">${icon("download")}</div><div style="flex:1"><h3>Motor de análise — Ghidra ${esc(g.version)}</h3><span class="status erro"><i></i>não instalado</span></div></div>
-    <div class="desc">O REA precisa do Ghidra para o overview, as funções e as strings de binários nativos. Sem ele, só a leitura básica funciona.${java}
-      <div class="ghidra-prog" hidden><span class="warm-bar"><i></i></span><span class="warm-tx"></span><button class="btn small" id="gh-cancel">Cancelar</button></div>
-      <div class="row" style="margin-top:10px"><button class="btn primary" id="gh-install">${icon("download")} Baixar e instalar (${esc(g.size_label)})</button><span class="sub" style="align-self:center">fonte: ${esc(g.source)} · SHA-256 conferido</span></div>
-    </div></div>`;
-  $("#gh-install").onclick = () => { call("installGhidra"); onGhidra({ state: "downloading", pct: 0 }); };
-  const c = $("#gh-cancel"); if (c) c.onclick = () => call("cancelGhidra");
+  if (s.warm === "erro") return `<div class="mcp-ready bad">⚠ motor: ${note || "falhou ao aquecer"}</div>`;
+  return `<div class="mcp-ready ok">✓ motor pronto</div>`;
+}
+// Motor nativo do REA (Ghidra): o backend instala sozinho quando o REA conecta; aqui só mostramos o estado real.
+const GHIDRA_PHASE = { downloading: "baixando", verifying: "conferindo o SHA-256", extracting: "extraindo" };
+function renderGhidra() {
+  const box = $("#ghidra-box");
+  const g = S.ghidra;
+  if (!box || !g) return;
+  const [kind, label, line] = {
+    installed: ["conectado", "instalado", `<div class="mcp-ready ok">✓ ${esc(g.dir)}${g.java_version ? ` · JDK ${esc(g.java_version)}` : ""}</div>`],
+    missing_jdk: ["falta", "falta o JDK 21+", `<div class="mcp-ready bad">⚠ ${esc(g.message || "Instale o JDK 21+ para o Ghidra rodar.")} O Órbita não instala o Java; depois de instalar, clique em Reconectar.</div>`],
+    installing: ["conectando", `instalando ${g.pct || 0}%`, `<div class="mcp-ready warm-line"><span class="gh-bar"><i style="width:${Math.max(0, Math.min(100, +g.pct || 0))}%"></i></span>${esc(GHIDRA_PHASE[g.phase] || g.phase || "preparando")}… ${g.pct || 0}% de ${esc(g.size_label)}</div>`],
+    checking: ["conectando", "verificando", ""],
+    error: ["erro", "erro", `<div class="mcp-ready bad">⚠ ${esc(g.message || "A instalação falhou.")} Tenta de novo ao reconectar o REA.</div>`],
+  }[g.state] || ["desligado", "aguardando o REA", ""];
+  box.innerHTML = `<div class="tile ghidra"><div class="top"><div class="em">${icon(g.state === "installed" ? "check" : "layers")}</div><div style="flex:1"><h3>Motor de análise — Ghidra ${esc(g.version)}</h3><span class="status ${kind}"><i></i>${esc(label)}</span></div></div>
+    <div class="desc">O REA usa este motor para desmontar e descompilar binários nativos. O Órbita o baixa sozinho (fonte: ${esc(g.source)}, SHA-256 conferido) quando o REA está ligado.${line}</div></div>`;
 }
 function onGhidra(e) {
-  const box = $("#ghidra-box");
-  if (!box) return;
-  if (["installed", "done", "error", "cancelled"].includes(e.state)) {
-    if (e.state === "error") toast("error", "Ghidra", e.message || "Falha ao instalar.", 8000);
-    else if (e.state === "installed") toast("success", "Ghidra", "Instalado. REA reconectado com o motor nativo.");
-    else if (e.state === "cancelled") toast("warn", "Ghidra", "Instalação cancelada.");
-    if (e.state !== "done") renderGhidra();
-    return;
-  }
-  const install = $("#gh-install"); if (install) install.disabled = true;
-  const prog = box.querySelector(".ghidra-prog");
-  if (prog) {
-    prog.hidden = false;
-    const label = { downloading: "baixando", verifying: "conferindo integridade", extracting: "extraindo" }[e.state] || e.state;
-    const mb = e.state === "downloading" && e.total ? ` ${Math.round((e.done || 0) / 1048576)}/${Math.round(e.total / 1048576)} MB (${e.pct || 0}%)` : "";
-    const tx = prog.querySelector(".warm-tx"); if (tx) tx.textContent = `${label}…${mb}`;
-  }
+  const before = (S.ghidra || {}).state;
+  S.ghidra = e;
+  if (before === "installing" && e.state === "installed") toast("success", "Ghidra", "Instalado. REA reconectado com o motor nativo.");
+  renderGhidra();
 }
 
 // ── Caixa de ferramentas (programas opcionais) ─────────────────────────────────
