@@ -190,6 +190,52 @@ def complete_summary(text: str) -> str:
     return f"{body}\n\n{extra}".strip()
 
 
+KEEP_STEPS = 2   # numa tarefa longa de um pedido só, a compactação mantém o pedido e os 2 últimos passos
+
+
+def history_summary(old: list[dict], previous: str = "") -> str:
+    """Resumo sem modelo, tirado do próprio histórico. Nunca falha: é o último recurso da compactação."""
+    def one_line(text: str, limit: int) -> str:
+        return " ".join((text or "").split())[:limit]
+
+    asks = [m.get("content") or "" for m in old
+            if m["role"] == "user" and not (m.get("content") or "").startswith(SYSTEM_NOTE)]
+    asks = asks[:1] + [a for a in asks[1:][-4:] if a != asks[0]]   # o primeiro pedido costuma ser o objetivo
+    done = []
+    for msg in old:
+        for call in msg.get("tool_calls") or []:
+            args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+            target = next((str(args[k]) for k in ("path", "command", "url", "query", "name", "task") if args.get(k)), "")
+            done.append(f"- {call['name']}" + (f": {one_line(target, 120)}" if target else ""))
+    answers = [m["content"] for m in old if m["role"] == "assistant" and (m.get("content") or "").strip()]
+    parts = ["(Resumo automático extraído do histórico: nenhum modelo conseguiu resumir agora.)"]
+    if previous:
+        parts.append("Resumo anterior:\n" + previous[:3000])
+    parts.append("## Objetivo\n" + ("\n".join(f"- {one_line(a, 300)}" for a in asks) or "- não apareceu"))
+    parts.append("## Feito\n" + ("\n".join(done[-40:] + [f"- respondeu: {one_line(a, 300)}" for a in answers[-3:]])
+                                 or "- nada registrado"))
+    parts.append("## Estado atual\n- " + (one_line(answers[-1], 600) if answers else "sem resposta registrada"))
+    return complete_summary("\n\n".join(parts))
+
+
+def strip_thinking(messages: list[dict]) -> None:
+    """Tira os blocos de pensamento das mensagens que ficam depois de um resumo.
+
+    Nos Claude atuais (Opus 5.5, Fable 5.1) o bloco só vale com o histórico exato que o gerou; depois do resumo,
+    reenviá-lo dá HTTP 400 nas contas novas. Texto e chamadas de ferramenta continuam.
+    """
+    for msg in messages:
+        native = msg.get("_native")
+        if not isinstance(native, dict) or not isinstance(native.get("content"), list):
+            continue
+        content = [b for b in native["content"]
+                   if not (isinstance(b, dict) and b.get("type") in ("thinking", "redacted_thinking"))]
+        if content:
+            msg["_native"] = {**native, "content": content}
+        else:
+            msg.pop("_native", None)
+
+
 def tool_pairs_intact(messages: list[dict]) -> bool:
     """Um resultado de ferramenta só fica se o pedido que o chamou estiver no mesmo bloco."""
     pending = 0
@@ -890,29 +936,37 @@ class AgentSession:
     def _maybe_compact(self, tools: list[Tool], force: bool = False) -> int:
         """Quando o histórico chega perto do orçamento, resume os turnos antigos em vez de descartá-los.
 
-        `force` (botão Compactar): resume tudo menos o último pedido, sem esperar o limite.
-        Devolve quantas mensagens viraram resumo (0 = nada a compactar ou falhou).
+        `force` (botão Compactar): resume tudo menos o último pedido, sem esperar o limite. Numa tarefa longa de
+        um pedido só, resume os passos antigos e mantém o pedido e os últimos passos.
+        Devolve quantas mensagens viraram resumo (0 = nada a compactar).
         """
         if not force:
             available = self._history_budget(tools, self._step_system(tools))
             if self._history_size(self.messages) <= available * COMPACT_AT:
                 return 0
         starts = _turn_starts(self.messages)
-        if len(starts) < (2 if force else 3):
-            return 0  # automático mantém o pedido atual e o anterior; manual, ao menos o último
-        cut = starts[-1] if force else starts[-2]
-        kept = self.messages[cut:]
+        if len(starts) >= (2 if force else 3):
+            cut = starts[-1] if force else starts[-2]   # automático mantém o pedido atual e o anterior
+            head: list[dict] = []
+        else:
+            request = starts[-1] if starts else None
+            steps = [i for i, m in enumerate(self.messages)
+                     if request is not None and i > request and m["role"] == "assistant"]
+            if len(steps) <= KEEP_STEPS:
+                return 0
+            cut, head = steps[-KEEP_STEPS], [self.messages[request]]
+        kept = head + self.messages[cut:]
         if not tool_pairs_intact(kept):
             return 0
         summary = self._summarize(self.messages[:cut])
-        if not summary:
-            return 0  # falhou: o corte simples em _wire_messages continua garantindo o limite
-        self.summary = complete_summary(summary)
-        self.messages = self.messages[cut:]
-        self.events("compacted", {"agent": self.label, "messages": cut, "chars": len(summary)})
-        return cut
+        self.summary = summary
+        strip_thinking(kept)
+        removed = len(self.messages) - len(kept)
+        self.messages = kept
+        self.events("compacted", {"agent": self.label, "messages": removed, "chars": len(summary)})
+        return removed
 
-    def _summarize(self, old: list[dict]) -> Optional[str]:
+    def _summarize(self, old: list[dict]) -> str:
         lines = [f"RESUMO ANTERIOR:\n{self.summary}"] if self.summary else []
         for msg in old:
             content = msg.get("content") or ""
@@ -926,33 +980,38 @@ class AgentSession:
                 lines.append(f"Usuário: {content[:3000]}")
         transcript = "\n".join(lines)[-60000:]
 
-        # Resumo no modelo econômico quando houver; agentes externos (Grok Build) não servem para isso.
-        fallback = (self.provider_name, self.model)
-        provider_name, model = self.brain.resolve_model(self.settings.get("cheap_model") or "", fallback=fallback)
-        provider = get_provider(provider_name, self.settings)
-        if getattr(provider, "external_agent", False):
-            provider_name, model = fallback
-            provider = get_provider(provider_name, self.settings)
-            if getattr(provider, "external_agent", False):
-                return None
+        # Modelo econômico primeiro, depois o principal; agentes externos (Grok Build) não servem para resumir.
+        main = (self.provider_name, self.model)
+        candidates = []
+        for ref in (self.brain.resolve_model(self.settings.get("cheap_model") or "", fallback=main), main):
+            if ref not in candidates and not getattr(get_provider(ref[0], self.settings), "external_agent", False):
+                candidates.append(ref)
         self.events("status", {"text": "Compactando o histórico…", "agent": self.label})
-        try:
-            result = provider.chat(model, [{"role": "system", "content": SUMMARY_PROMPT},
-                                           {"role": "user", "content": transcript}],
-                                   None, max_tokens=1500, cancel=self.cancel,
-                                   on_inference_event=self._inference_event)
-        except Exception as error:  # nunca derruba o turno por causa do resumo
-            logger.warning("Compactação falhou (%s); usando corte simples.", error)
-            return None
-        usage = result.usage or {}
-        used_in = usage.get("input_tokens") or estimate_tokens(transcript)
-        used_out = usage.get("output_tokens") or estimate_tokens(result.text)
-        self.brain.usage.record(provider_name, model, used_in, used_out)
-        with self._lock:
-            self.turn_tokens += used_in + used_out
-            self.total_tokens += used_in + used_out
-        text = (result.text or "").strip()
-        return complete_summary(text) if text else None
+        request = [{"role": "system", "content": SUMMARY_PROMPT}, {"role": "user", "content": transcript}]
+        for provider_name, model in candidates:
+            # Modelos que "pensam" gastam a saída raciocinando: resposta vazia ganha uma tentativa com mais espaço.
+            for max_tokens in (4000, 8000):
+                if self.cancel.is_set():
+                    break
+                try:
+                    result = get_provider(provider_name, self.settings).chat(
+                        model, request, None, max_tokens=max_tokens, cancel=self.cancel,
+                        on_inference_event=self._inference_event)
+                except Exception as error:  # nunca derruba o turno por causa do resumo
+                    logger.warning("Resumo com %s:%s falhou (%s).", provider_name, model, error)
+                    break
+                usage = result.usage or {}
+                used_in = usage.get("input_tokens") or estimate_tokens(transcript)
+                used_out = usage.get("output_tokens") or estimate_tokens(result.text + result.reasoning)
+                self.brain.usage.record(provider_name, model, used_in, used_out)
+                with self._lock:
+                    self.turn_tokens += used_in + used_out
+                    self.total_tokens += used_in + used_out
+                text = (result.text or "").strip()
+                if text:
+                    return complete_summary(text)
+        logger.warning("Nenhum modelo resumiu o histórico; usando o resumo extraído do próprio histórico.")
+        return history_summary(old, self.summary or "")
 
     # ── Execução de ferramentas ──────────────────────────────
 

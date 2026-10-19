@@ -438,8 +438,8 @@ class Brain:
         before = len(session.messages)
         compacted = session._maybe_compact([], force=True)
         if not compacted:
-            return {"ok": False, "error": "Nada para compactar ainda (é preciso ter mais de um pedido), "
-                                          "ou o modelo não conseguiu gerar o resumo."}
+            return {"ok": False, "error": "Nada para compactar ainda: a conversa só tem o pedido atual "
+                                          "e poucos passos."}
         self.save_conversation()
         return {"ok": True, "messages": compacted, "kept": len(session.messages), "before": before,
                 "summary": session.summary or ""}

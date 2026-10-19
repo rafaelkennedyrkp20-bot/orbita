@@ -253,8 +253,53 @@ def test_manual_compaction_needs_more_than_one_request(brain, monkeypatch):
     assert session._maybe_compact([], force=True) == 0 and session.messages[0]["content"] == "único"
 
 
-def test_compaction_failure_falls_back_to_trimming(brain, monkeypatch):
+def test_compaction_failure_still_compacts_with_a_summary_from_the_history(brain, monkeypatch):
+    # Antes: uma tentativa só; se o modelo falhava, nada era compactado ("o modelo não conseguiu gerar o resumo").
     install(monkeypatch, [ProviderError("sem rede"), ChatResult(text="ok mesmo assim")])
     session = big_session(brain)
     assert session.run("novo pedido") == "ok mesmo assim"
-    assert session.summary is None
+    assert session.summary and "extraído do histórico" in session.summary
+    assert "pedido 0" in session.summary and "## Próximos passos" in session.summary
+
+
+def test_compaction_tries_the_main_model_when_the_cheap_one_fails(brain, monkeypatch):
+    brain.settings.set("cheap_model", "fake:barato", save=False)
+    fake = install(monkeypatch, [ProviderError("HTTP 429"), ChatResult(text=""),   # barato falha; principal vazio
+                                 ChatResult(text="## Objetivo\nsite da loja")])
+    session = AgentSession(brain, brain.profiles.get("geral"), "fake", "m1", approve=lambda r: "yes")
+    for i in range(3):
+        session.messages += [{"role": "user", "content": f"pedido {i}"}, {"role": "assistant", "content": f"ok {i}"}]
+    assert session._maybe_compact([], force=True) == 4
+    assert [c["model"] for c in fake.calls] == ["barato", "m1", "m1"]   # vazio conta como falha e tenta de novo
+    assert session.summary.startswith("## Objetivo\nsite da loja")
+
+
+def test_manual_compaction_works_inside_one_long_request(brain, monkeypatch):
+    # Tarefa longa de um pedido só: é quando mais precisa compactar, e o botão recusava.
+    install(monkeypatch, [ChatResult(text="## Objetivo\nmontar o site")])
+    session = AgentSession(brain, brain.profiles.get("geral"), "fake", "m1", approve=lambda r: "yes")
+    session.messages = [{"role": "user", "content": "faça o site"}]
+    for n in range(8):
+        session.messages += [
+            {"role": "assistant", "content": "", "tool_calls": [{"id": f"c{n}", "name": "read_file", "arguments": {}}]},
+            {"role": "tool", "tool_call_id": f"c{n}", "name": "read_file", "content": f"arquivo {n}"}]
+    assert session._maybe_compact([], force=True) > 0
+    assert session.messages[0]["content"] == "faça o site"
+    assert session.messages[1]["role"] == "assistant" and loop.tool_pairs_intact(session.messages[1:])
+    assert session.messages[-1]["content"] == "arquivo 7" and len(session.messages) < 17
+    assert session.summary.startswith("## Objetivo")
+
+
+def test_compaction_strips_thinking_from_the_messages_it_keeps(brain, monkeypatch):
+    # Opus 5.5 / Fable 5.1: um bloco de pensamento só vale com o histórico que o gerou; depois do resumo,
+    # mantê-lo dá HTTP 400 nas contas novas. Texto e chamadas de ferramenta ficam.
+    install(monkeypatch, [ChatResult(text="## Objetivo\nx")])
+    session = AgentSession(brain, brain.profiles.get("geral"), "fake", "m1", approve=lambda r: "yes")
+    native = {"provider": "anthropic", "model": "m1", "content": [
+        {"type": "thinking", "thinking": "", "signature": "abc"}, {"type": "text", "text": "ok 2"}]}
+    for i in range(3):
+        session.messages += [{"role": "user", "content": f"pedido {i}"},
+                             {"role": "assistant", "content": f"ok {i}", "_native": dict(native)}]
+    session._maybe_compact([], force=True)
+    kept = session.messages[-1]["_native"]["content"]
+    assert [b["type"] for b in kept] == ["text"]
