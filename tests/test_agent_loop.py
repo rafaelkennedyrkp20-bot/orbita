@@ -281,6 +281,37 @@ def test_mcp_tools_run_in_order_not_parallel(brain, provider):
     assert order == ["mcp__s__open", "mcp__s__overview"]
 
 
+def test_profile_limits_apply_to_mcp_tools(brain, provider):
+    from agent.core.tools import Tool
+
+    ran = []
+    for name, server in (("mcp__x__danger", "x"), ("mcp__rea__open", "rea")):
+        brain.registry.register(Tool(name, name, {"type": "object"}, lambda a, c, n=name: ran.append(n) or "ok",
+                                     risk="exec", group="mcp", source=f"mcp:{server}", deferred=True))
+    provider([ChatResult(tool_calls=[call("mcp__x__danger")]), ChatResult(text="fim"),
+              ChatResult(tool_calls=[call("mcp__x__danger"), call("mcp__rea__open")]), ChatResult(text="fim")])
+    reviewer = session(brain, profile="revisor")          # perfil sem o grupo mcp
+    reviewer.run("x")
+    reverse = session(brain, profile="engenharia_reversa")  # perfil só com o servidor rea
+    reverse.run("y")
+    assert ran == ["mcp__rea__open"]   # adiada, mas do servidor liberado: roda pelo nome
+    denied = [m["content"] for m in reviewer.messages + reverse.messages if m["role"] == "tool" and m.get("is_error")]
+    assert len(denied) == 2 and all("não está liberada" in text for text in denied)
+
+
+def test_find_tools_stays_inside_profile_servers(brain):
+    from agent.core.tools import Tool
+
+    brain.registry.register(Tool("mcp__x__decompile", "decompile binary", {"type": "object"}, lambda a, c: "ok",
+                                 group="mcp", source="mcp:x", deferred=True))
+    reverse = session(brain, profile="engenharia_reversa")
+    finder = brain.registry.get("find_tools")
+    by_query = finder.run({"query": "decompile", "server": "x"}, reverse._context())
+    by_name = finder.run({"names": ["mcp__x__decompile"]}, reverse._context())
+    assert "mcp__x__decompile" not in reverse.activated
+    assert "mcp__x__decompile" not in by_query.text + by_name.text
+
+
 def test_loop_detector_warns_on_repeated_failure(brain, provider):
     provider([ChatResult(tool_calls=[call("read_file", path="nao_existe.txt")]),
               ChatResult(tool_calls=[call("read_file", path="nao_existe.txt")]),

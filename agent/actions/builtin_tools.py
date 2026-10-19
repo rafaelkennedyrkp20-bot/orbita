@@ -842,11 +842,15 @@ def _register_mcp_search(r: ToolRegistry, services) -> None:
           group="mcp")
     def find_tools(args, ctx: ToolContext):
         registry = services.registry
-        servers = {args["server"]} if args.get("server") else (ctx.session.mcp_servers() if ctx.session else None)
+        # Nunca sai dos servidores liberados no perfil, mesmo pedindo outro `server`.
+        servers = ctx.session.mcp_servers() if ctx.session else None
+        if args.get("server"):
+            servers = {args["server"]} & servers if servers is not None else {args["server"]}
         found = []
         for name in args.get("names") or []:
             tool_obj = registry.get(name) or next((t for t in registry.all() if t.name.endswith(f"__{name}")), None)
-            if tool_obj is not None and tool_obj.source.startswith("mcp:"):
+            if (tool_obj is not None and tool_obj.source.startswith("mcp:")
+                    and (servers is None or tool_obj.source[4:] in servers)):
                 found.append(tool_obj)
         if args.get("query"):
             found += [t for t in registry.search(args["query"], limit=8, mcp_servers=servers) if t not in found]

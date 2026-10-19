@@ -368,6 +368,14 @@ class AgentSession:
     def visible_tools(self) -> list[Tool]:
         return self.brain.registry.visible(self.tool_groups(), self.activated, self.mcp_servers())
 
+    def _tool_allowed(self, tool: Tool) -> bool:
+        """Mesma regra de ToolRegistry.visible(); adiada ainda não ativada pode ser chamada pelo nome."""
+        groups = self.tool_groups()
+        if tool.source.startswith("mcp:"):
+            servers = self.mcp_servers()
+            return "mcp" in groups and (servers is None or tool.source[4:] in servers)
+        return tool.group in groups
+
     # ── Prompt de sistema ────────────────────────────────────
 
     def system_prompt(self, tools: list[Tool]) -> str:
@@ -888,7 +896,7 @@ class AgentSession:
         runnable: list[tuple[dict, Optional[Tool]]] = []
         for call in calls:
             tool = self.brain.registry.get(call["name"])
-            if tool is not None and tool.group not in self.tool_groups() and not tool.source.startswith("mcp:"):
+            if tool is not None and not self._tool_allowed(tool):
                 tool = None
             runnable.append((call, tool))
 
@@ -1061,7 +1069,7 @@ class AgentSession:
 
     def _bridge_tool(self, name: str) -> Optional[Tool]:
         tool = self.brain.registry.get(name) if name in grok_bridge.EXPOSED else None
-        return tool if tool is not None and tool.group in self.tool_groups() else None
+        return tool if tool is not None and self._tool_allowed(tool) else None
 
     def bridge_tools(self) -> list[dict]:
         """Ferramentas do Órbita que o Grok pode chamar, conforme os grupos liberados no perfil."""
