@@ -46,6 +46,9 @@ from agent.memory.memory_manager import MemoryManager
 
 logger = logging.getLogger(__name__)
 
+GOAL_LIMIT = 2000
+_GOAL_CLEAR = {"limpar", "clear", "off", "remover", "apagar"}
+
 EXIT_COMMANDS = {
     "sair", "exit", "quit", "encerrar agente", "encerrar o agente", "fechar agente", "fechar o agente",
     "desligar agente", "desligar o agente", "sair do agente", "encerrar conversa", "encerrar a conversa",
@@ -90,6 +93,7 @@ class Brain:
         self.conversation_id: Optional[str] = None
         self.conversation_title = ""
         self.pinned_prompt = ""
+        self.goal = ""
         logger.info("Brain pronto: %d ferramentas, %d skills, %d perfis.",
                     len(self.registry.all()), len(self.skills.skills), len(self.profiles.profiles))
 
@@ -270,6 +274,7 @@ class Brain:
         provider, model = self.current_model
         self.session = AgentSession(self, self.profile, provider, model, events=events, approve=approve)
         self.session.pinned_prompt = self.pinned_prompt
+        self.session.goal = self.goal
         return self.session
 
     # ── Conversas salvas ─────────────────────────────────────
@@ -279,6 +284,7 @@ class Brain:
         self.conversation_id = None
         self.conversation_title = ""
         self.pinned_prompt = ""
+        self.goal = ""
 
     def set_pinned_prompt(self, prompt: str) -> str:
         """Define ou limpa o prompt fixo desta conversa (vale já no próximo turno e é salvo com ela)."""
@@ -295,12 +301,37 @@ class Brain:
                     self.conversations.save(existing)
         return self.pinned_prompt
 
+    def set_goal(self, text: str) -> str:
+        """Define ou limpa a meta desta conversa. Vale no próximo turno e é salva com ela."""
+        self.goal = (text or "").strip()[:GOAL_LIMIT]
+        if self.session is not None:
+            self.session.goal = self.goal
+        if self.conversation_id:
+            if self.session is not None and self.session.messages:
+                self.save_conversation()
+            else:
+                existing = self.conversations.load(self.conversation_id)
+                if existing:
+                    existing["goal"] = self.goal
+                    self.conversations.save(existing)
+        return self.goal
+
+    def apply_goal_command(self, argument: str) -> dict:
+        """Interpreta o texto depois de /goal. Vazio abre o editor; palavra de limpeza apaga."""
+        text = (argument or "").strip()
+        if not text:
+            return {"action": "edit", "goal": self.goal}
+        if text.casefold() in _GOAL_CLEAR:
+            return {"action": "clear", "goal": self.set_goal("")}
+        return {"action": "set", "goal": self.set_goal(text)}
+
     def open_conversation(self, conversation_id: str) -> Optional[dict]:
         """Reabre uma conversa salva; devolve os dados (com blocos para a interface)."""
         data = self.conversations.load(conversation_id)
         if not data:
             return None
         self.pinned_prompt = (data.get("pinned_prompt") or "").strip()
+        self.goal = (data.get("goal") or "").strip()[:GOAL_LIMIT]
         session = self.new_session()
         session.messages = data.get("messages", [])
         session.summary = data.get("summary")
@@ -309,6 +340,7 @@ class Brain:
         self.conversation_id = data["id"]
         self.conversation_title = data.get("title", "")
         data["pinned_prompt"] = self.pinned_prompt
+        data["goal"] = self.goal
         data["blocks"] = to_ui_blocks(session.messages)
         return data
 
@@ -327,6 +359,7 @@ class Brain:
             "title": existing.get("title") if existing.get("pinned_title") else self.conversation_title,
             "pinned_title": existing.get("pinned_title", False),
             "pinned_prompt": self.pinned_prompt,
+            "goal": self.goal,
             "created": existing.get("created") or datetime.now().isoformat(timespec="seconds"),
             "profile": self.profile.id, "provider": provider, "model": model,
             "project": str(self.effective_workspace()) if (self.profile.workspace or self.settings.get("default_workspace")) else (existing.get("project") or ""),
@@ -345,6 +378,7 @@ class Brain:
         else:
             session.profile = self.profile
             session.pinned_prompt = self.pinned_prompt
+            session.goal = self.goal
             if (session.provider_name, session.model) != (provider, model):
                 session.external_session = None   # outra IA: a sessão do Grok Build não vale mais
                 session.prompted_tools = False

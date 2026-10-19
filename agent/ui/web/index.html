@@ -39,6 +39,7 @@
         <button class="icon-btn" data-action="toggle-convs" title="Mostrar/ocultar conversas"><svg class="i" data-ic="sidebar"></svg></button>
         <div id="conv-title" contenteditable="true" spellcheck="false">Nova conversa</div>
         <button class="chip" id="chip-pin" title="Prompt fixo desta conversa"><svg class="i" data-ic="pin"></svg><span id="pin-name">Prompt da conversa</span><i class="pin-badge" id="pin-badge" hidden>ativo</i></button>
+        <button class="chip" id="chip-goal" title="Meta desta conversa (/goal)"><svg class="i" data-ic="target"></svg><span id="goal-name">Meta</span><i class="pin-badge" id="goal-badge" hidden>ativa</i></button>
         <button class="chip need" id="chip-project" title="Abrir ou criar a pasta do projeto"><svg class="i" data-ic="folder"></svg><span id="project-name">Abrir projeto</span></button>
         <button class="chip" id="chip-profile" title="Trocar perfil"><span id="profile-ic"></span><span id="profile-name">Perfil</span><svg class="i" data-ic="chevdown"></svg></button>
         <button class="chip" id="chip-model" title="Trocar modelo"><svg class="i" data-ic="cpu"></svg><span id="model-name">modelo</span><svg class="i" data-ic="chevdown"></svg></button>
@@ -48,6 +49,7 @@
         <button class="icon-btn" data-action="toggle-side" title="Painel ao vivo (Ctrl+B)"><svg class="i" data-ic="panel"></svg></button>
       </header>
       <div id="pin-banner" hidden></div>
+      <div id="goal-banner" hidden></div>
       <div id="messages"></div>
       <button class="icon-btn" id="to-end" hidden title="Ir para o fim da conversa"><svg class="i" data-ic="chevdown"></svg></button>
       <div id="live"><div class="dots"><i></i><i></i><i></i></div><span class="t" id="live-text">Pensando…</span><span class="clock" id="live-clock">0s</span></div>
@@ -58,14 +60,16 @@
           <div id="dict-bar"><span class="rec-dot"></span><span id="dict-label">Ouvindo…</span><span id="dict-time">0:00</span>
             <span class="dict-level"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
             <span class="grow"></span><button class="btn small" id="dict-cancel" title="Cancelar (Esc)">Cancelar</button><button class="btn primary small" id="dict-done" title="Terminar (Enter ou clique no microfone)">Concluir</button></div>
+          <div id="msg-queue" hidden></div>
           <div class="attach-row" id="attachments"></div>
-          <textarea id="input" rows="1" placeholder="Peça qualquer coisa… (@ cita um arquivo, / comandos, Shift+Enter quebra linha)"></textarea>
+          <textarea id="input" rows="1" placeholder="Peça qualquer coisa… (@ cita um arquivo, /goal define a meta, Shift+Enter quebra linha)"></textarea>
           <div class="c-row">
             <button class="icon-btn" data-action="attach" title="Anexar imagens"><svg class="i" data-ic="clip"></svg></button>
             <button class="icon-btn" id="mic" data-action="dictate" title="Ditar: clique, fale e clique de novo — o texto aparece no campo"><svg class="i" data-ic="mic"></svg></button>
             <button class="mode-btn" id="plan-btn" title="Modo plano: o agente lê, planeja e espera o seu OK antes de alterar qualquer coisa"><svg class="i" data-ic="map"></svg>Planejar</button>
             <div class="spacer"></div>
-            <span class="hint" id="hint">@ arquivo · Esc para parar · Ctrl+K comandos</span>
+            <span class="hint" id="hint">@ arquivo · /goal meta · Esc para o turno</span>
+            <button id="stop-btn" hidden title="Parar o turno atual (Esc)"><svg class="i" data-ic="stop"></svg></button>
             <button id="send" title="Enviar"><svg class="i" data-ic="send"></svg></button>
           </div>
         </div>

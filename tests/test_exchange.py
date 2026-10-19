@@ -44,6 +44,18 @@ def test_roundtrip_drops_secrets_and_importing_twice_does_not_duplicate(tmp_path
     assert list(tmp_path.joinpath("conversations").glob("*.json")).__len__() == 1
 
 
+def test_goal_roundtrip_keeps_the_text_and_redacts_a_key(tmp_path):
+    store = ConversationStore(tmp_path / "conversations")
+    data = _conversation()
+    data["goal"] = "consultar sk-abcdefghijklmnopqrstuvwxyz e seguir"
+    package = export_conversation(data)
+    assert "sk-" not in json.dumps(package)
+    assert "[removido]" in package["conversation"]["goal"]
+    imported = import_conversation(store, package)
+    saved = json.loads((tmp_path / "conversations" / f"{imported}.json").read_text(encoding="utf-8"))
+    assert saved["goal"] == package["conversation"]["goal"]
+
+
 def test_profile_export_strips_a_key_and_imports_once(tmp_path):
     manager = ProfileManager(tmp_path / "profiles")
     before = len(manager.list())

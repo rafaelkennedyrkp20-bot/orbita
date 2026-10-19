@@ -55,6 +55,7 @@ const ICONS = {
   at: "M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1",
   diff: "M6 3h8l4 4v14H6zM9 11h6M12 8v6M9 17h6",
   pin: "M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z",
+  target: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zM12 13.2a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4z",
 };
 // ── Ícones dos agentes: símbolo próprio sobre degradê (substituem os emojis do Windows) ──
 const S_ = 'stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"';
@@ -192,15 +193,24 @@ function bindChrome() {
     if (link && !link.closest("[data-go]")) { e.preventDefault(); call("openUrl", link.getAttribute("href")); }
   });
   const input = $("#input");
-  input.addEventListener("input", () => { autosize(); slashHint(); mentionHint(); });
+  input.addEventListener("input", () => { autosize(); slashHint(); mentionHint(); paintComposer(); });
   input.addEventListener("keydown", e => {
     if (mentionKey(e)) return;
     if (dict && e.key === "Enter") { e.preventDefault(); stopDictation(); return; }   // Enter termina o ditado, não envia
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if ($("#input").value.trim() === "/") { clearTimeout(slashTimer); palette(""); return; }
+      send();
+    }
   });
   input.addEventListener("blur", () => setTimeout(closeMention, 150));
   $("#plan-btn").addEventListener("click", () => setPlanMode(!planMode));
-  $("#send").addEventListener("click", () => busy ? call("stop") : send());
+  $("#send").addEventListener("click", () => {
+    const has = $("#input").value.trim() || attachments.length;
+    if (engineBusy && !has) requestStop();
+    else send();
+  });
+  $("#stop-btn").addEventListener("click", requestStop);
   document.addEventListener("keydown", e => {
     if (e.ctrlKey && e.key.toLowerCase() === "k") { e.preventDefault(); palette(); }
     else if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); action("new"); }
@@ -208,7 +218,7 @@ function bindChrome() {
     else if (e.ctrlKey && e.key === ",") { e.preventDefault(); go("settings"); }
     else if (e.key === "Escape" && dict) { e.preventDefault(); cancelDictation(); }
     else if (e.ctrlKey && e.key.toLowerCase() === "m") { e.preventDefault(); toggleDictation(); }
-    else if (e.key === "Escape") { if ($("#ctx-menu").innerHTML) closeCtxMenu(); else if ($("#modal-root").innerHTML) closeModal(); else if (busy) call("stop"); }
+    else if (e.key === "Escape") { if ($("#ctx-menu").innerHTML) closeCtxMenu(); else if ($("#modal-root").innerHTML) closeModal(); else if (engineBusy || flushing) requestStop(); }
   });
   $("#conv-search").addEventListener("input", renderConvs);
   $("#conv-list").addEventListener("scroll", closeCtxMenu);
@@ -225,6 +235,8 @@ function bindChrome() {
   });
   $("#chip-pin").addEventListener("click", pinnedPromptModal);
   $("#pin-banner").addEventListener("click", pinnedPromptModal);
+  $("#chip-goal").addEventListener("click", goalModal);
+  $("#goal-banner").addEventListener("click", goalModal);
   $("#chip-profile").addEventListener("click", profileMenu);
   $("#chip-project").addEventListener("click", () => projectDialog());
   $("#chip-model").addEventListener("click", modelMenu);
@@ -249,7 +261,7 @@ function bindChrome() {
 
 async function action(name, el) {
   switch (name) {
-    case "new": await call("newConversation"); resetChat(); refreshConvs(); break;
+    case "new": outQueue = []; await call("newConversation"); resetChat(); refreshConvs(); break;
     case "toggle-side": $("#side").classList.toggle("hidden"); break;
     case "toggle-convs": $("#page-chat").classList.toggle("no-convs"); break;
     case "attach": addAttachments(await call("pickImages") || []); break;
@@ -293,6 +305,19 @@ function renderTopbar() {
     banner.hidden = !pin;
     banner.innerHTML = pin ? `${icon("pin")}<b>Prompt da conversa</b><span class="txt">${esc(pin.replace(/\s+/g, " "))}</span><span class="pin-badge">ativo</span>` : "";
   }
+  const goal = (S.goal || "").trim();
+  const goalChip = $("#chip-goal");
+  if (goalChip) {
+    goalChip.classList.toggle("on", !!goal);
+    goalChip.title = goal ? ("Meta: " + goal.slice(0, 140)) : "Definir a meta desta conversa (/goal)";
+  }
+  const goalBadge = $("#goal-badge");
+  if (goalBadge) goalBadge.hidden = !goal;
+  const goalBanner = $("#goal-banner");
+  if (goalBanner) {
+    goalBanner.hidden = !goal;
+    goalBanner.innerHTML = goal ? `${icon("target")}<b>Meta</b><span class="txt">${esc(goal.replace(/\s+/g, " "))}</span><span class="pin-badge">ativa</span>` : "";
+  }
   updateMeter(S.conversation_tokens || 0);
 }
 function pinnedPromptModal() {
@@ -318,6 +343,30 @@ function pinnedPromptModal() {
   };
   $("#pin-save").onclick = () => applyPin($("#pin-text").value.trim());
   $("#pin-remove").onclick = () => applyPin("");
+}
+function goalModal() {
+  const current = (S.goal || "").trim();
+  openModal(`<div class="modal"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${icon("target")} Meta da conversa</h2>
+      <button class="icon-btn" id="goal-close" title="Fechar (Esc)">${icon("x")}</button></div>
+    <p class="sub" style="margin-top:6px">Objetivo que o agente segue nos próximos turnos. Não muda permissão nem pula confirmação. No chat: <b>/goal sua meta</b> · <b>/goal limpar</b>.</p>
+    <textarea class="inp" id="goal-text" style="min-height:110px" placeholder="Ex.: Terminar o jogo do Luma com pulo, moedas e um teste que passe.">${esc(current)}</textarea>
+    <div class="actions">
+      <button class="btn danger" id="goal-remove" ${current ? "" : "disabled"}>${icon("trash")} Remover</button>
+      <span style="flex:1"></span>
+      <button class="btn" id="goal-cancel">Cancelar</button>
+      <button class="btn primary" id="goal-save">${icon("check")} Salvar</button>
+    </div></div>`);
+  $("#goal-close").onclick = closeModal;
+  $("#goal-cancel").onclick = closeModal;
+  const apply = async text => {
+    const r = await call("setGoal", text);
+    S.goal = (r && r.goal) || "";
+    closeModal();
+    renderTopbar();
+    toast("success", "Meta", S.goal ? "Meta definida. Vale a partir do próximo turno." : "Meta removida.", 2400);
+  };
+  $("#goal-save").onclick = () => apply($("#goal-text").value.trim());
+  $("#goal-remove").onclick = () => apply("");
 }
 function updateMeter(tokens) {
   const budget = S.settings.turn_token_budget || 0;
@@ -488,7 +537,7 @@ async function openConversation(id) {
   const data = await call("openConversation", id);
   if (!data) return toast("error", "Conversa", "Não foi possível abrir.");
   resetChat(false);
-  S.conversation_id = data.id; S.conversation_title = data.title; S.pinned_prompt = data.pinned_prompt || "";
+  S.conversation_id = data.id; S.conversation_title = data.title; S.pinned_prompt = data.pinned_prompt || ""; S.goal = data.goal || "";
   renderTopbar(); renderConvs();
   data.blocks.forEach(b => {
     if (b.kind === "user") addUser(b.text, b.images);
@@ -502,7 +551,8 @@ async function openConversation(id) {
 // ── Chat ───────────────────────────────────────────────────────────────────────
 function resetChat(welcome = true) {
   $("#messages").innerHTML = ""; turnEl = null; segEls = {}; stepEls = {}; stepsBox = null; longHintShown = false; undoNote = "";
-  S.conversation_id = null; S.conversation_title = ""; S.pinned_prompt = ""; S.conversation_tokens = 0;
+  S.conversation_id = null; S.conversation_title = ""; S.pinned_prompt = ""; S.goal = ""; S.conversation_tokens = 0;
+  outQueue = []; renderQueue();
   $("#feed").innerHTML = `<div class="empty">As ações do agente aparecem aqui em tempo real.</div>`;
   renderTopbar(); renderConvs();
   if (welcome) renderWelcome();
@@ -537,24 +587,103 @@ function renderQuick() {
   box.innerHTML = items.map(q => `<button data-q="${esc(q.text)}">${esc(q.label)}</button>`).join("");
   $$("button", box).forEach(b => b.addEventListener("click", () => { $("#input").value = b.dataset.q; autosize(); $("#input").focus(); }));
 }
+let slashTimer = null;
 function slashHint() {
-  const v = $("#input").value;
-  if (v === "/") palette("");
+  clearTimeout(slashTimer);
+  if ($("#input").value === "/") slashTimer = setTimeout(() => { if ($("#input").value === "/") palette(""); }, 320);
 }
 let undoNote = "";   // avisa o agente, na próxima mensagem, que o usuário desfez arquivos
+let engineBusy = false, flushing = false, pauseQueue = false, outQueue = [], qSeq = 0;
+function requestStop() {
+  pauseQueue = true;
+  call("stop");
+}
+function paintComposer() {
+  const has = $("#input").value.trim() || attachments.length;
+  const showStop = engineBusy && !has;
+  const sendBtn = $("#send");
+  if (!sendBtn) return;
+  sendBtn.classList.toggle("stop", showStop);
+  sendBtn.innerHTML = icon(showStop ? "stop" : "send");
+  sendBtn.title = showStop ? "Parar (Esc)" : (engineBusy || flushing ? "Entrar na fila" : "Enviar");
+  const stopBtn = $("#stop-btn");
+  // Só o botão dedicado quando o Enviar NÃO virou Parar (campo com texto = "Entrar na fila");
+  // com o campo vazio o próprio Enviar já é o Parar, então não mostra os dois.
+  if (stopBtn) stopBtn.hidden = !((engineBusy || flushing) && !showStop);
+}
+function renderQueue() {
+  const box = $("#msg-queue");
+  if (!box) return;
+  if (!outQueue.length) { box.hidden = true; box.innerHTML = ""; return; }
+  box.hidden = false;
+  const waiting = engineBusy || flushing;
+  box.innerHTML = `<div class="q-head">${icon("layers")}<span>${waiting
+    ? `Na fila · ${outQueue.length === 1 ? "1 mensagem espera" : outQueue.length + " mensagens esperam"} esta resposta terminar`
+    : `Fila pausada · ${outQueue.length === 1 ? "1 mensagem" : outQueue.length + " mensagens"}`}</span>${waiting ? "" : `<button type="button" class="btn small primary" id="q-go">Enviar agora</button>`}<button type="button" class="btn small" id="q-clear">Limpar</button></div>` +
+    outQueue.map(item => `<div class="q-item"><span>${item.plan ? "Planejar · " : ""}${esc((item.text || "Imagem anexada").replace(/\s+/g, " "))}${item.images.length ? ` · ${item.images.length} imagem` : ""}</span><button type="button" class="icon-btn" data-qdrop="${esc(item.id)}" title="Tirar da fila">${icon("x")}</button></div>`).join("");
+  const go = $("#q-go");
+  if (go) go.onclick = () => { if (!engineBusy && !flushing) flushOne(); };
+  $("#q-clear").onclick = () => { outQueue = []; renderQueue(); paintComposer(); };
+  $$("[data-qdrop]", box).forEach(b => b.addEventListener("click", () => {
+    outQueue = outQueue.filter(item => item.id !== b.dataset.qdrop);
+    renderQueue();
+  }));
+}
+function flushOne() {
+  if (engineBusy || flushing || !outQueue.length) return;
+  const item = outQueue.shift();
+  flushing = true;
+  busy = true;
+  renderQueue();
+  paintComposer();
+  setLive(true, outQueue.length ? "Enviando a próxima da fila…" : "Pensando…");
+  if ($(".welcome")) $("#messages").innerHTML = "";
+  addUser(item.text, item.images, item.plan);
+  call("send", JSON.stringify({ text: item.text + undoNote, images: item.images, plan: item.plan }));
+  undoNote = "";
+  maybeLongHint();
+}
+function clearComposer() {
+  $("#input").value = "";
+  autosize();
+  paintComposer();
+}
+async function submitGoal(argument) {
+  const r = await call("applyGoalCommand", argument || "");
+  if (!r) return;
+  if (r.action === "edit") { goalModal(); return; }
+  S.goal = r.goal || "";
+  clearComposer();
+  renderTopbar();
+  toast("success", "Meta", r.action === "clear" || !S.goal ? "Meta removida." : "Meta definida. Vale a partir do próximo turno.", 2400);
+}
+function handleSlash(text) {
+  clearTimeout(slashTimer);
+  if (text === "/") { palette(""); return true; }
+  const goal = text.match(/^\/goal(?:\s+([\s\S]*))?$/i);
+  if (!goal) return false;
+  clearComposer();
+  submitGoal((goal[1] || "").trim());
+  return true;
+}
 function send(override) {
   const typed = override === undefined;
   const text = (typed ? $("#input").value : override).trim();
-  if ((!text && !attachments.length) || busy) return;
+  if (typed && handleSlash(text)) return;
+  if (!text && !attachments.length) return;
   closeMention();
-  if ($(".welcome")) $("#messages").innerHTML = "";
-  const msg = text || "Analise a imagem anexada.", plan = typed && planMode;
-  addUser(msg, attachments, plan);
-  call("send", JSON.stringify({ text: msg + undoNote, images: attachments, plan }));
-  undoNote = "";
-  if (typed) { $("#input").value = ""; autosize(); }
-  attachments = []; renderAttachments();
-  maybeLongHint();
+  const item = {
+    id: "q" + (++qSeq),
+    text: text || "Analise a imagem anexada.",
+    images: attachments.slice(),
+    plan: typed && planMode,
+  };
+  if (typed) clearComposer();
+  attachments = [];
+  renderAttachments();
+  outQueue.push(item);
+  if (engineBusy || flushing) renderQueue();
+  else flushOne();
 }
 function addUser(text, images = [], plan = false) {
   closeTurn();
@@ -624,7 +753,7 @@ function setPlanMode(on) {
   $("#plan-btn").classList.toggle("on", on);
   $("#composer-box").classList.toggle("plan", on);
   $("#input").placeholder = on ? "Modo plano: descreva o que quer. O agente só lê, planeja e espera o seu OK."
-    : "Peça qualquer coisa… (@ cita um arquivo, / comandos, Shift+Enter quebra linha)";
+    : "Peça qualquer coisa… (@ cita um arquivo, /goal define a meta, Shift+Enter quebra linha)";
 }
 function planActions() {
   const last = $$(".msg.bot").pop();
@@ -1018,12 +1147,22 @@ function setLive(on, text) {
 function onEvent(e) {
   switch (e.type) {
     case "busy":
-      busy = e.busy;
-      $("#send").classList.toggle("stop", busy);
-      $("#send").innerHTML = icon(busy ? "stop" : "send");
-      $("#send").title = busy ? "Parar (Esc)" : "Enviar";
+      engineBusy = e.busy;
+      if (e.busy) flushing = false;
+      busy = engineBusy || flushing;
+      paintComposer();
       setLive(busy, busy ? "Pensando…" : "");
-      if (!busy) { closeTurn(); $("#mic").classList.remove("rec"); if (pendingApproval) closeModal(); }
+      if (!e.busy) {
+        flushing = false;
+        busy = false;
+        closeTurn();
+        $("#mic").classList.remove("rec");
+        if (pendingApproval) closeModal();
+        if (pauseQueue) { pauseQueue = false; renderQueue(); }
+        else flushOne();
+        busy = engineBusy || flushing;
+        paintComposer();
+      }
       break;
     case "turn_start": closeTurn(); ensureTurn(e.model); break;
     case "seg": segment(e.id, e.html, e.streaming); break;
@@ -1180,6 +1319,7 @@ function palette(initial = "") {
     ["plus", "Nova conversa", () => action("new"), "Ctrl+N"],
     ["edit", "Renomear conversa", () => renameCurrentConv()],
     ["pin", "Prompt da conversa", () => pinnedPromptModal()],
+    ["target", "Definir meta (/goal)", () => goalModal()],
     ["folder", "Abrir ou criar projeto", () => projectDialog()],
     ["globe", "Adicionar API manual", () => { settingsSection = "api"; go("settings"); }],
     ["settings", "Abrir configurações", () => go("settings"), "Ctrl+,"],

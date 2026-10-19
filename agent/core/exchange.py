@@ -63,6 +63,7 @@ def export_conversation(data: dict) -> dict:
         "project": data.get("project") or "",
         "summary": _strip(data.get("summary") or ""),
         "pinned_prompt": _strip(data.get("pinned_prompt") or ""),
+        "goal": _strip(data.get("goal") or ""),
         "pinned_title": bool(data.get("pinned_title")),
         "messages": messages,
     }
@@ -110,6 +111,7 @@ def import_conversation(store, payload: dict) -> str:
         "title": exported["title"] or "Conversa",
         "pinned_title": exported["pinned_title"],
         "pinned_prompt": exported["pinned_prompt"],
+        "goal": exported["goal"],
         "profile": exported["profile"],
         "provider": "",
         "model": exported["model"],

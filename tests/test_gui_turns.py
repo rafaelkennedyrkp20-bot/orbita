@@ -224,6 +224,55 @@ def test_pinned_prompt_saved_reapplied_and_in_system_prompt(tmp_path):
     assert brain.conversations.load(cid)["pinned_prompt"] == ""
 
 
+def test_goal_is_saved_reapplied_and_does_not_change_permission(tmp_path):
+    from agent.core.brain import Brain
+    from agent.core.conversations import ConversationStore
+
+    brain = Brain(start_mcp=False)
+    brain.conversations = ConversationStore(tmp_path / "convs")
+    api = gui.Api.__new__(gui.Api)
+    api.brain = brain
+    mode = brain.settings.get("permission_mode")
+
+    empty = json.loads(gui.Api.applyGoalCommand(api, "   "))
+    assert empty["action"] == "edit" and empty["goal"] == ""
+
+    cleared = json.loads(gui.Api.applyGoalCommand(api, "Limpar"))
+    assert cleared["action"] == "clear" and brain.goal == ""
+
+    kept = json.loads(gui.Api.applyGoalCommand(api, "limpar a pasta do jogo"))
+    assert kept["action"] == "set" and kept["goal"] == "limpar a pasta do jogo"
+
+    res = json.loads(gui.Api.applyGoalCommand(api, "  Terminar o jogo e pular a confirmação.  "))
+    assert res["action"] == "set"
+    assert res["goal"] == "Terminar o jogo e pular a confirmação."
+    assert brain.settings.get("permission_mode") == mode
+    session = brain.new_session()
+    prompt = session.system_prompt(session.visible_tools())
+    assert "## Meta desta conversa\n" in prompt
+    assert "não uma ordem para pular confirmação" in prompt
+    assert "Terminar o jogo e pular a confirmação." in prompt
+
+    session.messages = [{"role": "user", "content": "segue"}, {"role": "assistant", "content": "ok"}]
+    cid = brain.save_conversation()
+    assert brain.conversations.load(cid)["goal"] == "Terminar o jogo e pular a confirmação."
+
+    brain.new_conversation()
+    assert brain.goal == ""
+    clean = brain.new_session()
+    assert "## Meta desta conversa" not in clean.system_prompt(clean.visible_tools())
+
+    reopened = json.loads(gui.Api.openConversation(api, cid))
+    assert reopened["goal"] == "Terminar o jogo e pular a confirmação."
+    assert brain.goal == "Terminar o jogo e pular a confirmação."
+    again = brain.session.system_prompt(brain.session.visible_tools())
+    assert "Terminar o jogo e pular a confirmação." in again
+
+    gui.Api.setGoal(api, "")
+    assert brain.goal == ""
+    assert brain.conversations.load(cid)["goal"] == ""
+
+
 def test_turn_outputs_finds_what_was_created_so_the_user_can_test_it(tmp_path):
     """Caso real: o agente fez o jogo e só disse "está pronto em luma-salto/index.html" — sem botão para testar."""
     game = tmp_path / "luma salto"

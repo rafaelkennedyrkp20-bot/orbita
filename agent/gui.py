@@ -379,6 +379,7 @@ class Api(QObject):
             "conversation_id": brain.conversation_id,
             "conversation_title": brain.conversation_title,
             "pinned_prompt": brain.pinned_prompt,
+            "goal": brain.goal,
             "conversation_tokens": session.total_tokens if session else 0,
             "usage": brain.usage.today(),
             "grok": self.grok_status(),
@@ -579,6 +580,14 @@ class Api(QObject):
     def setPinnedPrompt(self, prompt: str) -> str:
         return json.dumps({"pinned_prompt": self.brain.set_pinned_prompt(prompt)}, ensure_ascii=False)
 
+    @pyqtSlot(str, result=str)
+    def setGoal(self, text: str) -> str:
+        return json.dumps({"goal": self.brain.set_goal(text)}, ensure_ascii=False)
+
+    @pyqtSlot(str, result=str)
+    def applyGoalCommand(self, argument: str) -> str:
+        return json.dumps(self.brain.apply_goal_command(argument), ensure_ascii=False)
+
     @pyqtSlot(result=str)
     def compactConversation(self) -> str:
         """Botão Compactar: roda no worker (chama o modelo para resumir); o resultado chega como evento."""
@@ -604,6 +613,7 @@ class Api(QObject):
             elif block["kind"] == "tool":
                 block["summary"] = _args_summary(block.get("args") or {})
         payload = {"id": data["id"], "title": data.get("title", ""), "pinned_prompt": data.get("pinned_prompt", ""),
+                   "goal": data.get("goal", ""),
                    "blocks": data["blocks"], "model_label": f"{data.get('provider', '')}:{data.get('model', '')}"}
         return json.dumps(payload, ensure_ascii=False, default=str)
 
