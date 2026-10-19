@@ -163,10 +163,11 @@ def test_environment_suggests_team_only_for_big_requests(brain, monkeypatch):
     fake = install(monkeypatch, [ChatResult(text="ok"), ChatResult(text="ok")])
     session = AgentSession(brain, brain.profiles.get("geral"), "anthropic", "claude-opus-5-5", approve=lambda r: "yes")
     session.run("crie um site completo de loja com página inicial, catálogo, carrinho, checkout e painel admin")
-    big_prompt = fake.calls[0]["messages"][0]["content"]
-    assert "Sugestão do ambiente para este pedido" in big_prompt and "6 rodam ao mesmo tempo" in big_prompt
+    big_request = fake.calls[0]["messages"][-1]["content"]
+    assert "Sugestão do ambiente para este pedido" in big_request
+    assert "6 rodam ao mesmo tempo" in fake.calls[0]["messages"][0]["content"]
     session.run("o que é um closure?")
-    assert "Sugestão do ambiente" not in fake.calls[1]["messages"][0]["content"]
+    assert all("Sugestão do ambiente" not in m["content"] for m in fake.calls[1]["messages"])
 
 
 def test_delegate_uses_routed_model_when_team_is_automatic(brain, monkeypatch):

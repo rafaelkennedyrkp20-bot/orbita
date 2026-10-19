@@ -19,6 +19,8 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## [Não lançado]
 
 ### Melhorias
+- **Cache do Claude entre pedidos**: o mapa do projeto e a sugestão do ambiente vão junto do pedido, e o prompt de
+  sistema fica igual de um pedido para o outro (o cache do histórico deixa de ser reescrito a cada pedido).
 - **"Criado nesta resposta"**: no fim do turno, o que a resposta criou (página, imagem, vídeo, modelo) aparece num
   cartão com **Testar no navegador** / Abrir e Mostrar na pasta — sem caçar o arquivo.
 - Botão **↓** para voltar ao fim da conversa quando você rolou para cima.
