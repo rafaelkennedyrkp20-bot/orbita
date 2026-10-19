@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-from agent.core import capabilities, grok_bridge, integration, repo_map, routing, teamwork
+from agent.core import capabilities, grok_bridge, grok_cli, integration, repo_map, routing, teamwork
 from agent.core.profiles import Profile
 from agent.core.providers import ChatResult, ProviderError, ToolsUnsupported, get_provider, new_call_id
 from agent.core.settings import resolve_workspace
@@ -661,7 +661,7 @@ class AgentSession:
 
         provider = get_provider(self.provider_name, self.settings)
         if getattr(provider, "external_agent", False):
-            return self._run_external(provider, text, history_before)
+            return self._run_external(provider, text, history_before, images)
 
         max_steps = min(200, int((self.profile.max_steps or self.policy.max_steps) * capabilities.step_multiplier(self.tier)))
         final_text = ""
@@ -726,7 +726,7 @@ class AgentSession:
         except ProviderError:
             return final_text + note
 
-    def _run_external(self, provider, text: str, history: list[dict]) -> str:
+    def _run_external(self, provider, text: str, history: list[dict], images: Optional[list[str]] = None) -> str:
         """Agente externo (Grok Build): executa o turno inteiro com as ferramentas dele."""
         if not self._check_budget():
             return "[Pausado pelo limite de tokens.]"
@@ -742,9 +742,9 @@ class AgentSession:
             bridge = grok_bridge.get_bridge()
             team = self._team_text() if "agentes" in self.tool_groups() else ""
             rules.append(grok_bridge.rules_text(team))
-        prompt = text
+        prompt = grok_cli.with_images(text, images)   # o Grok abre a imagem anexada pelo caminho
         if bridge is not None and self.external_session is not None:
-            prompt = f"{text}\n\n({grok_bridge.TURN_REMINDER})"   # as regras só vão na primeira mensagem
+            prompt = f"{prompt}\n\n({grok_bridge.TURN_REMINDER})"   # as regras só vão na primeira mensagem
         if not self.depth and getattr(self, "_turn_hint", ""):
             prompt = f"{prompt}\n\n{self._turn_hint}"
         if self.external_session is None:

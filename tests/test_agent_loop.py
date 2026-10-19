@@ -430,6 +430,39 @@ def test_external_agent_keeps_session_and_rules(brain, monkeypatch):
     assert calls[1]["permission"] == "livre"
 
 
+def test_external_agent_gets_attached_image_paths(brain, monkeypatch, tmp_path):
+    """Caso real: página de manhwa anexada com o Grok Build sumia do turno sem aviso."""
+    calls = []
+
+    class FakeGrok:
+        external_agent = True
+        supports_native_tools = False
+
+        def run_agent(self, prompt, **kwargs):
+            calls.append(prompt)
+            return "ok", "sessao-1", {}
+
+    page = tmp_path / "pagina 01.webp"
+    page.write_bytes(b"RIFF")
+    monkeypatch.setattr(loop, "get_provider", lambda name, settings: FakeGrok())
+    s = session(brain, profile="grok_build")
+    s.run("traduza a página", images=[str(page), str(tmp_path / "apagada.png")])
+    assert str(page) in calls[0] and "abra" in calls[0]
+    assert "apagada.png" not in calls[0]
+
+
+def test_grok_build_chat_sends_image_paths(monkeypatch, tmp_path):
+    from agent.core.grok_cli import GrokBuildProvider
+
+    page = tmp_path / "p.webp"
+    page.write_bytes(b"RIFF")
+    provider = GrokBuildProvider("grok", {"type": "grok_cli"})
+    sent = []
+    monkeypatch.setattr(provider, "run_agent", lambda prompt, **kw: (sent.append(prompt), ("lido", None, {}))[1])
+    provider.chat("grok-4.7", [{"role": "user", "content": "o que diz?", "images": [str(page)]}])
+    assert sent[0].startswith("o que diz?") and str(page) in sent[0]
+
+
 def test_grok_as_main_model_gets_orbita_team_through_the_bridge(brain, monkeypatch, tmp_path):
     """Caso real: Grok como principal pedia "agentes com o DeepSeek" e saía procurando DeepSeek e Blender no PC."""
     from agent.core import grok_bridge

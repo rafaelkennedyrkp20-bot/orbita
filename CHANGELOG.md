@@ -21,6 +21,8 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ### Correções
 - **DeepSeek V4 enxerga imagem**: a imagem anexada não chegava ao `DeepSeek-V4.1-Flash` (ex.: pelo river), e o modelo
   respondia que nada tinha sido enviado. Agora ela vai; nos DeepSeek só-texto, o modelo é avisado de que havia imagem.
+- **Grok Build enxerga imagem**: a imagem anexada sumia do turno do Grok Build. Agora o pedido leva o caminho
+  do arquivo e o Grok o abre com a ferramenta de leitura dele.
 
 ## [0.3.0-alpha] — 2026-10-19
 
