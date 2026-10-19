@@ -99,6 +99,34 @@ def test_router_uses_when_and_index_does_not_duplicate(tmp_path, monkeypatch):
     assert "sem-when" in index and "com-when" not in index
 
 
+def test_index_skips_other_platforms_and_names_every_skill(tmp_path, monkeypatch):
+    # Antes: ordem alfabética + teto de caracteres sumiam com skills do projeto, e as só de macOS
+    # apareciam no Windows.
+    import agent.core.skills as skills_module
+    project, user = tmp_path / "projeto", tmp_path / "usuario"
+    monkeypatch.setattr(skills_module, "PROJECT_SKILLS", project)
+    monkeypatch.setattr(skills_module, "USER_SKILL_DIRS", [user])
+    monkeypatch.setattr(skills_module, "current_platform", lambda: "windows")
+
+    def make(base, name, extra="", size=60):
+        folder = base / name
+        folder.mkdir(parents=True)
+        (folder / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {'d' * size}\n{extra}---\nCorpo.\n",
+                                         encoding="utf-8")
+
+    make(project, "so-mac", "platforms: [macos]\n")
+    make(project, "todas", "platforms: [linux, macos, windows]\n")
+    make(project, "zz-projeto")
+    for i in range(30):
+        make(user, f"a-usuario-{i:02}", size=500)   # do usuário, longas e antes no alfabeto
+    manager = SkillManager()
+    index = manager.index_text(2000)
+    assert "so-mac" not in manager.skills
+    assert "- todas: " in index and "- zz-projeto: " in index
+    assert all(f"a-usuario-{i:02}" in index for i in range(30))
+    assert len(index) < 2000 + 30 * 20
+
+
 SERVER = textwrap.dedent("""
     from mcp.server.mcpserver import MCPServer
     server = MCPServer("teste")

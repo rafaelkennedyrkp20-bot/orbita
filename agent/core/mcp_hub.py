@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 if TYPE_CHECKING:
     import asyncio
 
-from agent.core.config import DATA_DIR, LOGS_DIR
+from agent.core.config import DATA_DIR, LOGS_DIR, current_platform
 from agent.core.tools import Tool, ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -110,12 +110,6 @@ _NODE = ("Node.js", "sudo apt install nodejs npm (Fedora: sudo dnf install nodej
 _UV = ("uv", "curl -LsSf https://astral.sh/uv/install.sh | sh", "winget install astral-sh.uv")
 REQUIREMENTS = {"npx": _NODE, "node": _NODE, "npm": _NODE, "uvx": _UV, "uv": _UV}
 _PLATFORM_NAMES = {"windows": "Windows", "linux": "Linux", "macos": "macOS"}
-
-
-def current_platform() -> str:
-    import sys
-
-    return "windows" if os.name == "nt" else "macos" if sys.platform == "darwin" else "linux"
 
 
 def platform_problem(cfg: dict) -> str:

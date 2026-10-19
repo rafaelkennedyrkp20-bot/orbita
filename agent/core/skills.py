@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from agent.core.config import PROJECT_ROOT, RESOURCE_ROOT
+from agent.core.config import PROJECT_ROOT, RESOURCE_ROOT, current_platform
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,18 @@ PLUGINS_DIR = PROJECT_ROOT / "plugins"
 USER_SKILL_DIRS = [HOME / ".claude" / "skills", HOME / ".agents" / "skills", HOME / ".codex" / "skills"]
 
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
+
+
+def _platforms(meta: dict) -> list[str]:
+    """Campo `platforms` do frontmatter ([macos], "linux, windows"...); vazio = roda em qualquer sistema."""
+    value = meta.get("platforms") or []
+    if isinstance(value, str):
+        value = value.strip("[]").split(",")
+    return [str(item).strip().lower() for item in value if str(item).strip()]
+
+
+def _origin_rank(origin: str) -> int:
+    return 0 if origin == "projeto" else 1 if origin.startswith("plugin:") else 2
 
 
 @dataclass
@@ -89,6 +101,9 @@ class SkillManager:
                 except OSError as error:
                     logger.warning("Skill ilegível %s: %s", skill_file, error)
                     continue
+                platforms = _platforms(meta)
+                if platforms and current_platform() not in platforms:
+                    continue   # ex.: apple-notes no Windows
                 name = str(meta.get("name") or skill_file.parent.name).strip()
                 description = " ".join(str(meta.get("description") or "").split())
                 if not description or name in found:  # a primeira origem vence (projeto > plugin > usuário)
@@ -104,14 +119,20 @@ class SkillManager:
         return sorted(skills, key=lambda s: s.name)
 
     def index_text(self, max_chars: int = 6000, only: Optional[set[str]] = None) -> str:
-        """Índice das skills sem gatilho `when` (as que têm vão no roteador, para não duplicar)."""
-        pending = [s for s in self._selected(only) if not s.when]
+        """Índice das skills sem gatilho `when` (as que têm vão no roteador, para não duplicar).
+
+        Projeto e plugins vêm antes das do usuário; o que passar do orçamento entra só pelo nome, para nenhuma
+        skill sumir do índice.
+        """
+        pending = sorted((s for s in self._selected(only) if not s.when),
+                         key=lambda s: (_origin_rank(s.origin), s.name))
         lines, used = [], 0
-        for skill in pending:
+        for position, skill in enumerate(pending):
             line = f"- {skill.name}: {skill.description[:300]}"
-            used += len(line)
+            used += len(line) + 1
             if used > max_chars:
-                lines.append(f"- ... e mais {len(pending) - len(lines)} skills (use_skill com o nome exato)")
+                names = ", ".join(s.name for s in pending[position:])
+                lines.append(f"- Outras (use_skill com o nome exato): {names}")
                 break
             lines.append(line)
         return "\n".join(lines)

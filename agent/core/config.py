@@ -31,6 +31,13 @@ try:
 except ImportError:
     pass
 
+
+
+def current_platform() -> str:
+    """'windows' | 'macos' | 'linux' — o mesmo vocabulário do campo `platforms` de skills e servidores MCP."""
+    return "windows" if os.name == "nt" else "macos" if sys.platform == "darwin" else "linux"
+
+
 MODELS_DIR     = PROJECT_ROOT / "models"
 DATA_DIR       = PROJECT_ROOT / "data"
 LOGS_DIR       = DATA_DIR / "logs"
