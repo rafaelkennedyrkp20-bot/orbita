@@ -62,6 +62,18 @@ def test_plan_turn_blocks_changes_and_restores_permissions(setup):
     assert ("turn_end", {"text": "pronto", "plan": True, "plan_ready": True}) in events
 
 
+def test_page_receives_plan_ready_through_the_bridge(tmp_path):
+    # A página só mostra "Executar plano" com plan_ready; a ponte para a página precisa repassar o campo.
+    pushed = []
+    window = SimpleNamespace(
+        api=SimpleNamespace(push=pushed.append), _seg_id=None, _streamed_any=True,
+        _end_reasoning=lambda: None, _close_segment=lambda: None, notify=lambda *a: None,
+        brain=SimpleNamespace(conversation_id="c1", conversation_title="t", effective_workspace=lambda: tmp_path))
+    for ready in (True, False):
+        gui.MainWindow.on_agent_event(window, "turn_end", {"text": "plano", "plan": True, "plan_ready": ready})
+    assert [p["plan_ready"] for p in pushed if p["type"] == "turn_end"] == [True, False]
+
+
 def test_plan_turn_provider_error_has_no_plan_actions(setup):
     brain, worker, events, _ws = setup
 

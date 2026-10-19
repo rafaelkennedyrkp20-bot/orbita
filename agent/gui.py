@@ -1573,7 +1573,8 @@ class MainWindow(QMainWindow):
             except Exception:   # o cartão "Testar" nunca atrapalha o fim do turno
                 outputs = []
             push({"type": "turn_end", "conversation_id": self.brain.conversation_id,
-                  "title": self.brain.conversation_title, "plan": bool(data.get("plan")), "outputs": outputs})
+                  "title": self.brain.conversation_title, "plan": bool(data.get("plan")),
+                  "plan_ready": bool(data.get("plan_ready")), "outputs": outputs})
             self.notify("Tarefa concluída", render.speech_text(text, 200) or "O agente terminou.")
         elif kind == "usage":
             push({"type": "usage", "total": data.get("total", 0), "turn": data.get("turn", 0)})
