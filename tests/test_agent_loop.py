@@ -992,3 +992,47 @@ def test_compaction_model_counts_cache_tokens(brain, provider):
     s = session(brain)
     s._summarize([{"role": "user", "content": "antigo"}, {"role": "assistant", "content": "resposta"}])
     assert s.turn_tokens == 105_110 and brain.usage.today_total() == 105_110
+
+
+def _write_step(big: str, call_id: str = "t1") -> list[dict]:
+    args = {"path": "a.txt", "content": big}
+    return [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": call_id, "name": "write_file", "arguments": dict(args)}],
+         "_native": {"provider": "anthropic", "prefix": "x", "content": [
+             {"type": "thinking", "thinking": "vou gravar", "signature": "assinatura"},
+             {"type": "tool_use", "id": call_id, "name": "write_file", "input": dict(args)}]}},
+        {"role": "tool", "tool_call_id": call_id, "name": "write_file", "content": "gravado"},
+    ]
+
+
+def test_anthropic_payload_keeps_masked_arguments_masked(brain):
+    """#21: o mascaramento encurtava os argumentos, mas _native recolocava os 350.000 caracteres no envio."""
+    import json
+
+    from agent.core.providers import AnthropicProvider
+    from agent.core.usage import estimate_tokens
+
+    s = session(brain)
+    s.messages = [{"role": "user", "content": "grave o arquivo"}, *_write_step("x" * 350_000)]
+    tools = s.visible_tools()
+    assert s._maybe_compact([]) == 0
+    wire = s._wire_messages(tools)
+    budget = s._history_budget(tools, wire[0]["content"])
+    _system, out = AnthropicProvider("claude", {"type": "anthropic"})._convert("claude-opus-5-5", wire)
+    sent = json.dumps(out, ensure_ascii=False)
+    assert "x" * 1000 not in sent
+    assert estimate_tokens(sent) < budget
+    blocks = [b for m in out for b in m["content"]]
+    uses = [b for b in blocks if b["type"] == "tool_use"]
+    results = [b for b in blocks if b["type"] == "tool_result"]
+    assert [u["id"] for u in uses] == [r["tool_use_id"] for r in results] == ["t1"]   # par intacto
+    assert not any(b["type"] == "thinking" for b in blocks)   # assinatura não vale para o bloco alterado
+    assert s.messages[1]["_native"]["content"][0]["type"] == "thinking"   # o histórico salvo não muda
+
+
+def test_unmasked_native_turn_is_sent_as_is(brain):
+    s = session(brain)
+    s.messages = [{"role": "user", "content": "grave o arquivo"}, *_write_step("pequeno")]
+    wire = s._wire_messages(s.visible_tools())
+    assistant = next(m for m in wire if m["role"] == "assistant")
+    assert assistant["_native"]["content"][0]["signature"] == "assinatura"

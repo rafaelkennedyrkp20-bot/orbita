@@ -255,6 +255,22 @@ def history_summary(old: list[dict], previous: str = "") -> str:
     return complete_summary("\n\n".join(parts))
 
 
+def drop_stale_native(messages: list[dict]) -> None:
+    """Blocos originais do provedor só vão se ainda batem com o histórico enviado.
+
+    O mascaramento encurta argumentos de write_file/edit_file; reenviar o `_native` recolocaria o texto
+    inteiro (o orçamento mediria uma coisa e o envio seria outra). Bloco alterado não leva o pensamento
+    assinado: sem o `_native`, o provedor monta texto e chamadas a partir do histórico canônico."""
+    for msg in messages:
+        native = msg.get("_native")
+        if msg.get("role") != "assistant" or not isinstance(native, dict) or not isinstance(native.get("content"), list):
+            continue
+        calls = {call.get("id"): call.get("arguments") for call in msg.get("tool_calls") or []}
+        uses = [b for b in native["content"] if isinstance(b, dict) and b.get("type") == "tool_use"]
+        if len(uses) != len(calls) or any(calls.get(b.get("id"), None) != b.get("input") for b in uses):
+            msg.pop("_native", None)
+
+
 def strip_thinking(messages: list[dict]) -> None:
     """Tira os blocos de pensamento das mensagens que ficam depois de um resumo.
 
@@ -931,6 +947,7 @@ class AgentSession:
         # 1b) Dentro do turno atual (onde tarefas longas e ajudantes gastam quase tudo): só os passos recentes vão
         #     inteiros. Resultados antigos ficam com o começo; conteúdo já gravado em arquivo vira uma nota.
         _mask_old_observations(history, recent_start)
+        drop_stale_native(history)
 
         # 1c) Mapa do projeto e sugestão do ambiente vão só no pedido enviado deste turno (não ficam gravados).
         if starts:
