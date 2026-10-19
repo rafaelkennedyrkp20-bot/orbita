@@ -96,23 +96,39 @@ class Brain:
     def _register_image_tool_lazy(self) -> None:
         from agent.core.tools import tool
 
-        @tool(self.registry, "generate_image",
-              "Generate an image from a detailed visual prompt using the configured image model. "
-              "Supports style anchors, negative prompts and shot_id metadata for multi-shot consistency. "
-              "Returns the saved file path and shows it to the user.",
-              {"prompt": {"type": "string", "description": "Detailed scene/subject description"},
-               "size": {"type": "string", "description": "e.g. 1024x1024, 1536x1024, 1024x1536"},
-               "style": {"type": "string", "description": "Reusable style anchor (palette, lighting, lens, art direction) for consistency across shots"},
-               "negative_prompt": {"type": "string", "description": "Elements to avoid (e.g. 'blurry, watermark, distorted text')"},
-               "shot_id": {"type": "string", "description": "Optional storyboard/keyframe ID, e.g. 'shot_01'"},
-               "save_to": {"type": "string", "description": "Optional destination path (.png)"}},
-              ["prompt"], risk="write", group="imagem")
-        def generate_image(args, ctx):
+        def load(name, args, ctx):
             from agent.actions.image_gen import register_image_tool
 
             register_image_tool(self.registry, self)
-            real_tool = self.registry.get("generate_image")
-            return real_tool.func(args, ctx)
+            return self.registry.get(name).func(args, ctx)
+
+        @tool(self.registry, "generate_image",
+              "Generate an image from a detailed visual prompt. Uses the configured API or a ComfyUI "
+              "server the user already opened on localhost. Does not install ComfyUI or download weights. "
+              "If ComfyUI fails, stop; do not switch to a paid API.",
+              {"prompt": {"type": "string", "description": "Detailed scene/subject description"},
+               "size": {"type": "string", "description": "e.g. 512x512 or 1024x1024"},
+               "style": {"type": "string", "description": "Reusable style anchor (palette, lighting, lens, art direction)"},
+               "negative_prompt": {"type": "string", "description": "Elements to avoid"},
+               "shot_id": {"type": "string", "description": "Optional storyboard id, e.g. shot_01"},
+               "seed": {"type": "integer", "description": "Optional seed. Repeating it does not promise the same picture."},
+               "save_to": {"type": "string", "description": "Optional destination path (.png)"}},
+              ["prompt"], risk="write", group="imagem")
+        def generate_image(args, ctx):
+            return load("generate_image", args, ctx)
+
+        @tool(self.registry, "make_short_clip",
+              "Assemble a short local slideshow from image files already on disk, using ffmpeg. "
+              "Maximum 8 seconds, 1280x720 and 12 images. This is not a video model. "
+              "Do not download weights. If ffmpeg is missing, stop and say so.",
+              {"images": {"type": "array", "items": {"type": "string"},
+                          "description": "Local image paths already on disk"},
+               "seconds": {"type": "number", "description": "Duration, up to 8 seconds"},
+               "size": {"type": "string", "description": "Even size up to 1280x720"},
+               "save_to": {"type": "string", "description": "Optional .mp4 path"}},
+              ["images"], risk="write", group="imagem")
+        def make_short_clip(args, ctx):
+            return load("make_short_clip", args, ctx)
 
     # ── Serviços carregados sob demanda (abertura mais rápida) ──
 
@@ -434,8 +450,10 @@ class Brain:
             while True:
                 print("⏳ Aguardando ativação...", end="\r")
                 wake_word.wait_for_activation()
+                self.speaker.quiet_for_listen()
                 self.speaker.play_beep(frequency=880, duration=0.15)
                 user_input = self.listener.listen()
+                self.speaker.note_user_speech_ended()
                 if not user_input:
                     print("❌ Não entendi. Tente novamente.")
                     continue

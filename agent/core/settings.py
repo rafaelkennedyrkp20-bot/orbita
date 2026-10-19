@@ -139,6 +139,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "cheap_model": "",
     # "provedor:modelo" para a ferramenta generate_image (ex.: openai:gpt-image-1)
     "image_model": "",
+    # api: modelo de imagem | comfy: ComfyUI já aberto neste computador
+    "image_backend": "api",
+    "comfyui_url": "http://127.0.0.1:8188",
+    "comfyui_checkpoint": "",
     # open: nuvem e local | local_only: só motores locais verificados, sem fallback
     "execution_policy": "open",
     # open: escreve nos caminhos pedidos | project: só dentro da pasta de trabalho

@@ -51,7 +51,8 @@ logger = logging.getLogger(__name__)
 WEB_INDEX = brand.WEB_DIR / "index.html"
 SETTABLE = {"theme", "user_name", "default_workspace", "native_notifications", "show_reasoning", "permission_mode",
             "economy_mode", "turn_token_budget", "daily_token_budget", "voice_replies", "auto_routing",
-            "cheap_model", "image_model", "ollama_num_ctx", "ollama_keep_alive", "checkpoints", "update_check",
+            "cheap_model", "image_model", "image_backend", "comfyui_url", "comfyui_checkpoint",
+            "ollama_num_ctx", "ollama_keep_alive", "checkpoints", "update_check",
             "team_model", "stt_model", "stt_engine", "team_max_parallel", "execution_policy",
             "file_scope", "staged_writes"}
 # Modo plano: vai junto da mensagem; as ferramentas que alteram algo ficam bloqueadas no turno.
@@ -239,9 +240,12 @@ class AgentWorker(QThread):
                                        "changes": [asdict(c) for c in turn.changes]})
         if speak and self.brain.settings.get("voice_replies", True) and self.running:
             spoken = render.speech_text(response)
-            if spoken:
+            if spoken and self.running:
+                self.push({"type": "voice_state", "state": "speaking"})
                 self.events("status", {"text": "Falando…"})
                 self.brain.speaker.speak(spoken, blocking=True)
+                self.push({"type": "voice_state", "state": "idle",
+                           "latency_ms": self.brain.speaker.last_latency_ms})
 
     @contextmanager
     def _plan_mode(self, on: bool):
@@ -266,11 +270,15 @@ class AgentWorker(QThread):
                 self.brain.session.always_allowed |= allowed
 
     def _voice(self) -> None:
+        self.brain.speaker.quiet_for_listen()
+        self.push({"type": "voice_state", "state": "listening"})
         self.push({"type": "listening"})
         self.brain.speaker.play_beep(frequency=880, duration=0.12)
         text = self.brain.listener.listen(max_seconds=GUI_VOICE_MAX_RECORD_SECONDS,
                                           silence_threshold=GUI_VOICE_SILENCE_SECONDS,
                                           no_speech_timeout=GUI_VOICE_NO_SPEECH_TIMEOUT)
+        self.brain.speaker.note_user_speech_ended()
+        self.push({"type": "voice_state", "state": "thinking"})
         if not text:
             self.push({"type": "toast", "kind": "warn", "title": "Microfone", "text": "Nenhuma fala detectada."})
             return
@@ -499,6 +507,9 @@ class Api(QObject):
 
     @pyqtSlot(result=str)
     def dictationStart(self) -> str:
+        speaker = getattr(self.brain, "_speaker", None)
+        if speaker is not None:
+            speaker.quiet_for_listen()
         error = self.dictation().start()
         return json.dumps({"error": error} if error else {}, ensure_ascii=False)
 
@@ -663,7 +674,12 @@ class Api(QObject):
     @pyqtSlot(str, str, result=str)
     def setSetting(self, key: str, raw: str) -> str:
         if key in SETTABLE:
-            self.brain.settings.set(key, json.loads(raw))
+            value = json.loads(raw)
+            if key == "image_backend":
+                value = value if value in ("api", "comfy") else "api"
+            elif key in ("comfyui_url", "comfyui_checkpoint"):
+                value = str(value or "").strip()[:512]
+            self.brain.settings.set(key, value)
         return self._state_json()
 
     @pyqtSlot(str, str, result=str)
@@ -939,6 +955,61 @@ class Api(QObject):
     @pyqtSlot(str)
     def stopJob(self, job_id: str) -> None:
         self._ensure_jobs().stop(job_id)
+
+    def _gallery_project(self) -> str:
+        try:
+            return str(self.brain.effective_workspace())
+        except Exception:
+            return ""
+
+    @pyqtSlot(str, result=str)
+    def listGallery(self, query: str) -> str:
+        from agent.core.gallery import get_gallery
+
+        rows = get_gallery().list(self._gallery_project(), query or "")
+        public = []
+        for item in rows:
+            public.append({
+                "id": item.get("id"), "path": item.get("path"), "prompt": item.get("prompt") or "",
+                "model": item.get("model") or "", "backend": item.get("backend") or "",
+                "kind": item.get("kind") or "image", "seed": item.get("seed"),
+                "size": item.get("size") or "", "created_at": item.get("created_at") or "",
+                "exists": bool(item.get("exists")), "device": item.get("device") or "",
+            })
+        return json.dumps(public, ensure_ascii=False)
+
+    @pyqtSlot(str, result=str)
+    def forgetGallery(self, item_id: str) -> str:
+        from agent.core.gallery import get_gallery
+
+        error = get_gallery().forget(item_id, project=self._gallery_project())
+        self.push({"type": "gallery"})
+        return json.dumps({"ok": error is None, "error": error or ""}, ensure_ascii=False)
+
+    @pyqtSlot(str, result=str)
+    def deleteGalleryFile(self, item_id: str) -> str:
+        from agent.core.gallery import get_gallery
+
+        error = get_gallery().delete_file(item_id, project=self._gallery_project())
+        self.push({"type": "gallery"})
+        return json.dumps({"ok": error is None, "error": error or ""}, ensure_ascii=False)
+
+    @pyqtSlot()
+    def comfyStatus(self) -> None:
+        def work():
+            from agent.actions.comfyui import ComfyClient, ComfyError
+            from agent.actions.image_gen import comfy_status_message
+
+            url = (self.brain.settings.get("comfyui_url") or "http://127.0.0.1:8188").strip()
+            try:
+                report = ComfyClient(url).health()
+            except ComfyError as error:
+                report = {"status": "unreachable", "detail": str(error)}
+            checkpoints = [name for name in (report.get("checkpoints") or []) if isinstance(name, str)]
+            self.push({"type": "comfy_status", "status": report.get("status"),
+                       "message": comfy_status_message(report), "checkpoints": checkpoints[:20]})
+
+        threading.Thread(target=work, name="comfy-status", daemon=True).start()
 
     @pyqtSlot(result=str)
     def listProposals(self) -> str:
@@ -1390,6 +1461,9 @@ class MainWindow(QMainWindow):
             path = data.get("path", "")
             if Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}:
                 push({"type": "preview", "path": path, "kind": "image"})
+            elif Path(path).suffix.lower() in {".mp4", ".webm"}:
+                push({"type": "preview", "path": path, "kind": "text",
+                      "html": "<p>Clipe curto salvo neste computador. Abra o arquivo para assistir. Não é um modelo de vídeo.</p>"})
             else:
                 try:
                     content = Path(path).read_text(encoding="utf-8", errors="replace")[:150_000]

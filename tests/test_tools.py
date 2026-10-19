@@ -131,6 +131,9 @@ def test_generate_image_saves_sidecar_metadata(brain, tmp_path, monkeypatch):
         return b"\x89PNG\r\n\x1a\n"
 
     monkeypatch.setattr(img_mod, "_openai_image", fake_openai_image)
+    from agent.core.gallery import Gallery
+    gallery = Gallery(tmp_path / "gallery.json")
+    monkeypatch.setattr("agent.core.gallery.get_gallery", lambda: gallery)
     out_file = tmp_path / "shot_01.png"
     res = run(brain, "generate_image", {
         "prompt": "Cyberpunk street in rain",
@@ -147,6 +150,8 @@ def test_generate_image_saves_sidecar_metadata(brain, tmp_path, monkeypatch):
     assert meta_file.is_file()
     meta = json.loads(meta_file.read_text(encoding="utf-8"))
     assert meta["shot_id"] == "shot_01" and meta["size"] == "1536x1024"
+    listed = gallery.list(tmp_path)
+    assert len(listed) == 1 and listed[0]["exists"] and listed[0]["backend"] == "api"
 
 
 

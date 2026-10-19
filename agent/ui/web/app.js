@@ -1061,6 +1061,16 @@ function onEvent(e) {
     case "toast": toast(e.kind, e.title, e.text, e.ms || 4200); break;
     case "voice_text": if ($(".welcome")) $("#messages").innerHTML = ""; addUser(e.text); break;
     case "listening": $("#mic").classList.add("rec"); setLive(true, "Ouvindo…"); break;
+    case "voice_state":
+      if (e.state === "listening") { $("#mic").classList.add("rec"); setLive(true, "Ouvindo…"); }
+      else if (e.state === "thinking") setLive(true, "Pensando…");
+      else if (e.state === "speaking") setLive(true, "Falando…");
+      else {
+        $("#mic").classList.remove("rec");
+        if (e.latency_ms != null) note(`Voz: ${(e.latency_ms / 1000).toFixed(1)} s entre o fim da sua fala e o primeiro áudio desta resposta.`, "tip");
+        setLive(busy, busy ? "Pensando…" : "");
+      }
+      break;
     case "dictation": onDictation(e); break;
     case "toolbox": onToolbox(e); break;
     case "voice_gpu":
@@ -1076,6 +1086,12 @@ function onEvent(e) {
     case "local_catalog": localCatalog = e; catalogScanActive = false; renderLocalCatalog(); break;
     case "memories": if (settingsSection === "memoria") loadMemories(); break;
     case "jobs": if (settingsSection === "tarefas") loadJobs(); break;
+    case "gallery": if (settingsSection === "galeria") loadGallery(); break;
+    case "comfy_status": {
+      const box = $("#comfy-status");
+      if (box) box.textContent = e.message || "";
+      break;
+    }
     case "proposals": if (settingsSection === "permissoes") loadProposals(); break;
     case "approval_closed":
       if (pendingApproval === e.id) pendingApproval = null;
@@ -1388,7 +1404,7 @@ async function onToolbox(e) {
 
 // ── Página: Configurações ──────────────────────────────────────────────────────
 const SECTIONS = [
-  ["geral", "user", "Geral"], ["modelos", "cpu", "Modelos"], ["memoria", "brain", "Memória"], ["tarefas", "play", "Tarefas"], ["api", "globe", "API manual"], ["chaves", "key", "Chaves de API"], ["grok", "bolt", "Conta Grok"],
+  ["geral", "user", "Geral"], ["modelos", "cpu", "Modelos"], ["galeria", "image", "Galeria"], ["memoria", "brain", "Memória"], ["tarefas", "play", "Tarefas"], ["api", "globe", "API manual"], ["chaves", "key", "Chaves de API"], ["grok", "bolt", "Conta Grok"],
   ["economia", "coins", "Economia de tokens"], ["permissoes", "shield", "Permissões"], ["voz", "wave", "Voz"], ["sobre", "info", "Sobre"],
 ];
 function renderSettings() {
@@ -1432,7 +1448,10 @@ function renderSettings() {
         <div class="group"><h3>Equipe e modelos especiais</h3>
         ${field("Modelo da equipe", "Mesmo do principal: os ajudantes são cópias do agente principal. Automático: cada um usa o modelo da especialidade (pode ser local ou mais barato).", seg("team_model", [["principal", "Mesmo do principal"], ["auto", "Automático"]], st.team_model === "auto" ? "auto" : "principal"))}
         ${field("Modelo econômico", "Usado para resumos e quando o roteador não achar nada (provedor:modelo).", `<input class="inp" data-text="cheap_model" value="${esc(st.cheap_model || "")}" placeholder="ex.: deepseek:deepseek-chat">`)}
-        ${field("Modelo de imagem", "Para gerar imagens; vazio = automático.", `<input class="inp" data-text="image_model" value="${esc(st.image_model || "")}" placeholder="ex.: openai:gpt-image-1">`)}
+        ${field("Modelo de imagem", "Usado quando a geração está em API. Vazio = automático.", `<input class="inp" data-text="image_model" value="${esc(st.image_model || "")}" placeholder="ex.: openai:gpt-image-1">`)}
+        ${field("Onde gerar", "ComfyUI usa um serviço que você já abriu neste computador. O Órbita não instala o ComfyUI, não baixa pesos e não troca para uma API paga se o local falhar.", seg("image_backend", [["api", "API"], ["comfy", "ComfyUI"]], st.image_backend === "comfy" ? "comfy" : "api"))}
+        ${field("Endereço do ComfyUI", "Só loopback, sem usuário e senha.", `<input class="inp" data-text="comfyui_url" value="${esc(st.comfyui_url || "http://127.0.0.1:8188")}" spellcheck="false">`)}
+        ${field("Checkpoint", "Nome já instalado no ComfyUI. Este campo não dispara download.", `<div class="row"><input class="inp" style="flex:1" data-text="comfyui_checkpoint" value="${esc(st.comfyui_checkpoint || "")}" placeholder="ex.: sd15.safetensors"><button class="btn small" id="comfy-check" type="button">Consultar</button></div><p class="sub" id="comfy-status"></p>`)}
         ${field("Catálogo de capacidades", "Notas por especialidade e custo de cada modelo.", `<button class="btn small" id="cat-open">${icon("code")} Editar catálogo</button>`)}</div>
         <div class="group"><h3>Outra API</h3>
         <div class="row" style="padding:12px 0"><span style="color:var(--muted);flex:1">Together, Fireworks, Groq, um servidor seu ou LM Studio em outra porta.</span><button class="btn" id="goto-api">${icon("plus")} Adicionar API manual</button></div></div>`;
@@ -1478,6 +1497,10 @@ function renderSettings() {
         <div class="group"><div id="job-list"><div class="empty">Carregando…</div></div>
         <div class="row" style="padding:12px 0"><input class="inp" style="flex:1" id="job-prompt" placeholder="O que a tarefa deve fazer"><button class="btn" id="job-add">Começar</button></div></div>`;
       break;
+    case "galeria":
+      html = `<h1>Galeria</h1><p class="lead">Imagens e clipes deste projeto. Um arquivo que sumiu continua na lista, como ausente. Tirar da lista não apaga o arquivo. Apagar remove só o arquivo desta entrada. Repetir copia o pedido e não promete o mesmo resultado.</p>
+        <div class="group"><div class="row" style="padding-bottom:8px"><input class="inp" style="flex:1" id="gallery-query" placeholder="Buscar pelo texto do pedido"></div><div id="gallery-list"><div class="empty">Carregando…</div></div></div>`;
+      break;
     case "memoria":
       html = `<h1>Memória</h1><p class="lead">Fatos globais valem em todo projeto. Fatos de projeto só aparecem quando aquela pasta está aberta.</p>
         <div class="group"><div id="memory-list"><div class="empty">Carregando…</div></div>
@@ -1499,7 +1522,7 @@ function renderSettings() {
         <h3 style="margin-top:18px">Opcional: transcrição neste PC</h3>
         ${field("Modelo local", "Leve (~150 MB, padrão) roda em qualquer PC. Melhor (~500 MB) e Máximo (~1,6 GB) são mais precisos e mais pesados: só valem a pena com placa de vídeo. O modelo é baixado só na primeira vez que for usado.", seg("stt_model", [["base", "Leve"], ["small", "Melhor"], ["large-v3-turbo", "Máximo"]], st.stt_model || "base"))}
         ${field("Placa de vídeo NVIDIA (opcional)", `<span id="vg-status">Verificando…</span>`, `<button class="btn small" id="vg-install" style="display:none">${icon("bolt")} Acelerar com a placa de vídeo (~1 GB)</button>`)}
-        ${field("Ler respostas em voz alta", "Na conversa por voz (Ctrl+K › Conversa por voz). Voz neural local (Kokoro). Código não é lido.", toggle("voice_replies", st.voice_replies))}</div>`;
+        ${field("Ler respostas em voz alta", "Na conversa por voz (Ctrl+K › Conversa por voz). Voz neural local (Kokoro). Código não é lido. Parar (Esc) corta a fala no meio. Abrir o microfone também corta, para a voz do Órbita não entrar como comando. A tela mostra ouvindo, pensando e falando.", toggle("voice_replies", st.voice_replies))}</div>`;
       break;
     case "sobre":
       html = `<h1>Sobre</h1><div class="group" style="padding:20px"><div class="row"><img src="logo.svg" style="width:64px"><div><h2 style="margin:0">Órbita <span class="tag grad" style="vertical-align:middle">v${esc(S.version || "")}</span></h2><span style="color:var(--muted)">Seu agente pessoal de IA — suas regras, seu computador.</span></div></div>
@@ -1562,6 +1585,13 @@ function bindSettings() {
   const upOpen = $("#up-open"); if (upOpen) upOpen.onclick = () => updateModal(S.update);
   if (settingsSection === "modelos") bindModels();
   if (settingsSection === "memoria") loadMemories();
+  if (settingsSection === "galeria") loadGallery();
+  const comfyCheck = $("#comfy-check");
+  if (comfyCheck) comfyCheck.onclick = () => {
+    const status = $("#comfy-status");
+    if (status) status.textContent = "Consultando o ComfyUI local…";
+    call("comfyStatus");
+  };
   if (settingsSection === "tarefas") loadJobs();
   if (settingsSection === "permissoes") { loadProposals(); loadPcPause(); }
   const exportConv = $("#export-conv");
@@ -1702,6 +1732,47 @@ function renderLocalCatalog() {
     call("pullModel", name);
     toast("info", "Ollama", `Baixando ${name}…`);
   });
+}
+async function loadGallery() {
+  const box = $("#gallery-list");
+  if (!box) return;
+  const query = ($("#gallery-query") && $("#gallery-query").value) || "";
+  const rows = await call("listGallery", query) || [];
+  box.innerHTML = rows.length ? rows.map(item => `<div class="row" style="padding:8px 0;align-items:flex-start">
+    ${item.exists && item.kind !== "clip" ? `<img src="${fileUrl(item.path)}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:8px">` : `<span class="tag">${item.exists ? "clipe" : "ausente"}</span>`}
+    <div style="flex:1"><b>${esc((item.prompt || "").slice(0, 180))}</b>
+      <div class="sub">${esc(item.backend || "")} · ${esc(item.model || "")}${item.seed != null ? ` · semente ${esc(String(item.seed))}` : ""} · ${esc(item.created_at || "")}</div>
+      <div class="sub">${item.exists ? esc(item.path) : "O arquivo não está mais no disco. A lista continua."}</div></div>
+    <button class="btn small" data-gallery-reuse="${esc(item.id)}">Repetir</button>
+    <button class="btn small" data-gallery-forget="${esc(item.id)}">Tirar da lista</button>
+    <button class="btn small danger" data-gallery-delete="${esc(item.id)}">Apagar arquivo</button>
+  </div>`).join("") : `<div class="empty">Nada deste projeto na galeria.</div>`;
+  const reuse = (id) => {
+    const item = rows.find(row => row.id === id);
+    if (!item) return;
+    go("chat");
+    const input = $("#input");
+    input.value = item.kind === "clip"
+      ? `Monte de novo um clipe curto com as mesmas imagens, se elas ainda existirem. Não prometa o mesmo arquivo. Pedido anterior: ${item.prompt}`
+      : `Gere de novo esta imagem. Não prometa o mesmo desenho. Pedido anterior: ${item.prompt}`;
+    input.focus();
+  };
+  $$("[data-gallery-reuse]", box).forEach(button => button.onclick = () => reuse(button.dataset.galleryReuse));
+  $$("[data-gallery-forget]", box).forEach(button => button.onclick = async () => {
+    await call("forgetGallery", button.dataset.galleryForget);
+    loadGallery();
+  });
+  $$("[data-gallery-delete]", box).forEach(button => button.onclick = async () => {
+    if (!await confirmBox("Apagar arquivo", "O arquivo desta entrada sai do disco. Outros projetos não são mexidos. Tirar da lista, sem este botão, deixa o arquivo.")) return;
+    const result = await call("deleteGalleryFile", button.dataset.galleryDelete);
+    if (result && result.error) toast("error", "Galeria", result.error);
+    loadGallery();
+  });
+  const search = $("#gallery-query");
+  if (search && !search.dataset.bound) {
+    search.dataset.bound = "1";
+    search.addEventListener("change", () => loadGallery());
+  }
 }
 async function loadJobs() {
   const box = $("#job-list");

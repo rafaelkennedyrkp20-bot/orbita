@@ -8,6 +8,7 @@ import re
 import subprocess
 import tempfile
 import threading
+import time
 
 import numpy as np
 import sounddevice as sd
@@ -37,6 +38,13 @@ class Speaker:
 
     def __init__(self):
         self._lock = threading.Lock()
+        self._gen_lock = threading.Lock()
+        self._generation = 0
+        self._cancels: list[threading.Event] = []
+        self._playing = threading.Event()
+        self._speech_ended_at: float | None = None
+        self._marked_audio = False
+        self.last_latency_ms: int | None = None
         self._tts_engine = None
         self._kokoro = None
         self._kokoro_available = (
@@ -115,46 +123,93 @@ class Speaker:
             chunks.append(current)
         return chunks or [text]
 
-    def _speak_kokoro(self, text: str) -> bool:
-        if not self._load_kokoro():
+    def _cancelled(self, generation: int) -> bool:
+        with self._gen_lock:
+            return generation != self._generation
+
+    def note_user_speech_ended(self) -> None:
+        """Marca o fim da fala da pessoa, para medir até o primeiro áudio da resposta."""
+        self._speech_ended_at = time.monotonic()
+        self._marked_audio = False
+        self.last_latency_ms = None
+
+    def _mark_first_audio(self) -> None:
+        if self._marked_audio or self._speech_ended_at is None:
+            return
+        self._marked_audio = True
+        self.last_latency_ms = max(0, int((time.monotonic() - self._speech_ended_at) * 1000))
+
+    def _play(self, samples, sample_rate: int, generation: int) -> bool:
+        """Toca um pedaço. False significa que a fala foi cortada e não deve continuar."""
+        if self._cancelled(generation):
             return False
+        self._mark_first_audio()
+        sd.play(np.asarray(samples, dtype=np.float32), sample_rate)
+        sd.wait()
+        if self._cancelled(generation):
+            try:
+                sd.stop()
+            except Exception:
+                pass
+            return False
+        return True
+
+    def _speak_kokoro(self, text: str, generation: int) -> bool:
+        if self._cancelled(generation) or not self._load_kokoro():
+            return self._cancelled(generation)
         try:
             for chunk in self._chunks(text):
+                if self._cancelled(generation):
+                    return True
                 samples, sample_rate = self._kokoro.create(
                     chunk,
                     voice=KOKORO_VOICE,
                     speed=KOKORO_SPEED,
                     lang=KOKORO_LANGUAGE,
                 )
-                sd.play(np.asarray(samples, dtype=np.float32), sample_rate)
-                sd.wait()
+                if not self._play(samples, sample_rate, generation):
+                    return True
             return True
         except Exception as error:
             logger.error("Falha no Kokoro TTS: %s", error)
-            return False
+            return self._cancelled(generation)
 
-    def _speak_piper(self, text: str) -> bool:
+    def _speak_piper(self, text: str, generation: int) -> bool:
+        if self._cancelled(generation):
+            return True
         tmp_path = None
+        proc = None
         try:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 tmp_path = tmp.name
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 [PIPER_EXECUTABLE, "--model", PIPER_VOICE_MODEL, "--config", PIPER_VOICE_CONFIG,
                  "--output_file", tmp_path, "--length_scale", str(1.0 / TTS_SPEED)],
-                input=text.encode("utf-8"),
-                capture_output=True,
-                timeout=30,
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
-            if result.returncode != 0:
-                logger.error("Piper retornou erro: %s", result.stderr.decode(errors="replace"))
+            proc.stdin.write(text.encode("utf-8"))
+            proc.stdin.close()
+            while proc.poll() is None:
+                if self._cancelled(generation):
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    return True
+                time.sleep(0.05)
+            if proc.returncode != 0:
+                logger.error("Piper retornou erro: %s", (proc.stderr.read() or b"").decode(errors="replace")[:300])
                 return False
+            if self._cancelled(generation):
+                return True
             audio, sample_rate = sf.read(tmp_path, dtype="float32")
-            sd.play(audio, sample_rate)
-            sd.wait()
-            return True
+            return self._play(audio, sample_rate, generation)
         except Exception as error:
             logger.error("Falha no Piper TTS: %s", error)
-            return False
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+            return self._cancelled(generation)
         finally:
             if tmp_path:
                 try:
@@ -162,10 +217,12 @@ class Speaker:
                 except OSError:
                     pass
 
-    def _speak_fallback(self, text: str) -> None:
-        if self._tts_engine is None:
-            logger.warning("Nenhum TTS local disponível.")
+    def _speak_fallback(self, text: str, generation: int) -> None:
+        if self._cancelled(generation) or self._tts_engine is None:
+            if self._tts_engine is None and not self._cancelled(generation):
+                logger.warning("Nenhum TTS local disponível.")
             return
+        self._mark_first_audio()
         self._tts_engine.say(text)
         self._tts_engine.runAndWait()
 
@@ -176,18 +233,43 @@ class Speaker:
 
         def run() -> None:
             from agent.core.inference_queue import INFERENCE_QUEUE
-            with INFERENCE_QUEUE.slot("local-gpu"):
-                with self._lock:
-                    if self._kokoro_available and self._speak_kokoro(clean):
+            event = threading.Event()
+            with self._gen_lock:
+                self._cancels.append(event)
+                generation = self._generation
+            self._playing.set()
+            try:
+                with INFERENCE_QUEUE.slot("local-gpu", cancel=event) as acquired:
+                    if not acquired or self._cancelled(generation):
                         return
-                    if self._piper_available and self._speak_piper(clean):
-                        return
-                    self._speak_fallback(clean)
+                    with self._lock:
+                        if self._cancelled(generation):
+                            return
+                        if self._kokoro_available and self._speak_kokoro(clean, generation):
+                            return
+                        if self._piper_available and self._speak_piper(clean, generation):
+                            return
+                        self._speak_fallback(clean, generation)
+            finally:
+                with self._gen_lock:
+                    if event in self._cancels:
+                        self._cancels.remove(event)
+                self._playing.clear()
 
         if blocking:
             run()
         else:
             threading.Thread(target=run, daemon=True).start()
+
+    def quiet_for_listen(self, timeout: float = 2.0) -> None:
+        """Corta a fala atual e espera ela sair, antes de abrir o microfone.
+
+        Assim a voz do próprio Órbita não entra como um comando novo.
+        """
+        self.stop()
+        deadline = time.monotonic() + max(0.0, timeout)
+        while self._playing.is_set() and time.monotonic() < deadline:
+            time.sleep(0.02)
 
     def play_beep(self, frequency: float = 440.0, duration: float = 0.2, volume: float = 0.25) -> None:
         try:
@@ -200,7 +282,19 @@ class Speaker:
             logger.debug("Falha no bipe: %s", error)
 
     def stop(self) -> None:
+        """Corta o pedaço atual e impede os próximos. Não espera o cadeado da fala."""
+        with self._gen_lock:
+            self._generation += 1
+            events = list(self._cancels)
+        for event in events:
+            event.set()
         try:
             sd.stop()
         except Exception:
             pass
+        engine = self._tts_engine
+        if engine is not None:
+            try:
+                engine.stop()
+            except Exception:
+                pass
