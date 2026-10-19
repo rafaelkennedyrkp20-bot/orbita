@@ -982,7 +982,7 @@ const TOOL_INFO = {
   run_shell: ["term", "Executando comando"], web_search: ["globe", "Pesquisando na web"], fetch_url: ["globe", "Lendo página"],
   open_app: ["bolt", "Abrindo programa"], screenshot: ["eye", "Olhando a tela"], mouse_click: ["mouse", "Clicando"],
   mouse_scroll: ["mouse", "Rolando"], type_text: ["term", "Digitando"], press_keys: ["term", "Pressionando teclas"],
-  clipboard: ["clip", "Área de transferência"], system_info: ["cpu", "Status do sistema"], list_processes: ["cpu", "Listando processos"],
+  clipboard: ["clip", "Lendo a área de transferência"], set_clipboard: ["clip", "Copiando para a área de transferência"], system_info: ["cpu", "Status do sistema"], list_processes: ["cpu", "Listando processos"],
   close_app: ["x", "Fechando programa"], set_volume: ["wave", "Ajustando volume"], remember: ["brain", "Memorizando"],
   recall: ["brain", "Lembrando"], use_skill: ["book", "Carregando skill"], delegate_task: ["users", "Delegando à equipe"],
   find_tools: ["plug", "Buscando ferramentas"], generate_image: ["image", "Gerando imagem"], show_file: ["eye", "Mostrando arquivo"],
@@ -1758,7 +1758,7 @@ function renderSettings() {
     case "modelos":
       html = `<h1>Modelos</h1><p class="lead">Escolha a IA principal, gerencie os modelos locais e como a equipe escolhe modelos.</p>
         <div class="group"><h3>Onde os dados vão</h3>
-        ${field("Política", "Somente local impede chat, resumo, equipe, visão e imagem de saírem para a nuvem. Um localhost de gateway não conta como offline. Terminal, web e MCP ficam bloqueados nesse modo.", seg("execution_policy", [["open", "Normal"], ["local_only", "Somente local"]], st.execution_policy === "local_only" ? "local_only" : "open"))}
+        ${field("Política", "Somente local impede chat, resumo, equipe, visão e imagem de saírem para a nuvem. Um localhost de gateway não conta como offline. Terminal, web, MCP e a conferência de páginas no navegador ficam bloqueados nesse modo.", seg("execution_policy", [["open", "Normal"], ["local_only", "Somente local"]], st.execution_policy === "local_only" ? "local_only" : "open"))}
         <p class="sub">Modelo atual: <b>${esc(DESTINATION[S.data_destination] || "indeterminado")}</b></p></div>
         <div class="group"><h3>Motores neste computador</h3><p>Encontre Ollama, LM Studio e APIs locais já configuradas. A busca não troca sua IA.</p>
         <div class="row"><button class="btn" id="engine-scan">${icon("search")} Procurar motores</button><button class="btn small" id="engine-cancel">Cancelar busca</button></div><div id="engine-results"></div></div>
