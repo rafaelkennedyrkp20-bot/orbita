@@ -105,6 +105,38 @@ continuar o trabalho sem o histórico original, nesta estrutura (tópicos curtos
 ## Próximos passos — o que falta, na ordem
 Não invente nada; se algo não aparece no histórico, não escreva."""
 
+_SUMMARY_HEADINGS = ("## Objetivo", "## Feito", "## Decisões", "## Estado atual", "## Próximos passos")
+
+
+def complete_summary(text: str) -> str:
+    """Completa um resumo que já segue o modelo. Texto solto fica como o modelo escreveu."""
+    body = (text or "").strip()
+    lowered = body.lower()
+    present = [heading for heading in _SUMMARY_HEADINGS if heading.lower() in lowered]
+    if not present:
+        return body
+    missing = [heading for heading in _SUMMARY_HEADINGS if heading not in present]
+    if not missing:
+        return body
+    extra = "\n".join(f"{heading}\n- não apareceu no histórico compactado" for heading in missing)
+    return f"{body}\n\n{extra}".strip()
+
+
+def tool_pairs_intact(messages: list[dict]) -> bool:
+    """Um resultado de ferramenta só fica se o pedido que o chamou estiver no mesmo bloco."""
+    pending = 0
+    for message in messages:
+        role = message.get("role")
+        if role == "assistant":
+            pending = len(message.get("tool_calls") or [])
+        elif role == "tool":
+            if pending <= 0:
+                return False
+            pending -= 1
+        elif role == "user" and pending:
+            return False
+    return pending == 0
+
 _OS_NAME = "Windows" if os.name == "nt" else ("macOS" if sys.platform == "darwin" else "Linux")
 _SHELL_NAME = "PowerShell" if _OS_NAME == "Windows" else "bash"
 
@@ -775,10 +807,13 @@ class AgentSession:
         if len(starts) < (2 if force else 3):
             return 0  # automático mantém o pedido atual e o anterior; manual, ao menos o último
         cut = starts[-1] if force else starts[-2]
+        kept = self.messages[cut:]
+        if not tool_pairs_intact(kept):
+            return 0
         summary = self._summarize(self.messages[:cut])
         if not summary:
             return 0  # falhou: o corte simples em _wire_messages continua garantindo o limite
-        self.summary = summary
+        self.summary = complete_summary(summary)
         self.messages = self.messages[cut:]
         self.events("compacted", {"agent": self.label, "messages": cut, "chars": len(summary)})
         return cut
@@ -822,7 +857,8 @@ class AgentSession:
         with self._lock:
             self.turn_tokens += used_in + used_out
             self.total_tokens += used_in + used_out
-        return result.text.strip() or None
+        text = (result.text or "").strip()
+        return complete_summary(text) if text else None
 
     # ── Execução de ferramentas ──────────────────────────────
 
@@ -856,6 +892,11 @@ class AgentSession:
             from agent.core.local_policy import tool_block
 
             blocked = tool_block(self.settings, tool)
+            if blocked:
+                return ToolResult.error(blocked)
+            from agent.core.staged_writes import staged_block
+
+            blocked = staged_block(self.settings, tool)
             if blocked:
                 return ToolResult.error(blocked)
             if self._needs_approval(tool):

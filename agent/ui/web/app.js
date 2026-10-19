@@ -1075,6 +1075,13 @@ function onEvent(e) {
     case "local_engines": localEngines = e.engines || []; engineScanActive = false; renderLocalEngines(); break;
     case "local_catalog": localCatalog = e; catalogScanActive = false; renderLocalCatalog(); break;
     case "memories": if (settingsSection === "memoria") loadMemories(); break;
+    case "jobs": if (settingsSection === "tarefas") loadJobs(); break;
+    case "proposals": if (settingsSection === "permissoes") loadProposals(); break;
+    case "approval_closed":
+      if (pendingApproval === e.id) pendingApproval = null;
+      $("#modal-root").innerHTML = "";
+      break;
+    case "pc_pause": if (settingsSection === "permissoes") loadPcPause(); break;
     case "ollama_action":
       toast(e.error ? "error" : "success", "Ollama", e.error || e.message);
       if (!e.error && settingsSection === "modelos") renderSettings();
@@ -1381,7 +1388,7 @@ async function onToolbox(e) {
 
 // ── Página: Configurações ──────────────────────────────────────────────────────
 const SECTIONS = [
-  ["geral", "user", "Geral"], ["modelos", "cpu", "Modelos"], ["memoria", "brain", "Memória"], ["api", "globe", "API manual"], ["chaves", "key", "Chaves de API"], ["grok", "bolt", "Conta Grok"],
+  ["geral", "user", "Geral"], ["modelos", "cpu", "Modelos"], ["memoria", "brain", "Memória"], ["tarefas", "play", "Tarefas"], ["api", "globe", "API manual"], ["chaves", "key", "Chaves de API"], ["grok", "bolt", "Conta Grok"],
   ["economia", "coins", "Economia de tokens"], ["permissoes", "shield", "Permissões"], ["voz", "wave", "Voz"], ["sobre", "info", "Sobre"],
 ];
 function renderSettings() {
@@ -1466,6 +1473,11 @@ function renderSettings() {
         <div class="group"><h3>Uso de hoje</h3>${Object.entries(usage).map(([k, u]) => `<div class="usage-row"><span class="mono" style="font-family:var(--mono);font-size:12px">${esc(k)}</span><div class="bar"><i style="width:${(u.input + u.output) / max * 100}%"></i></div><span>${fmt(u.input + u.output)}</span></div>`).join("") || `<div class="empty">Nada usado hoje ainda.</div>`}</div>`;
       break;
     }
+    case "tarefas":
+      html = `<h1>Tarefas</h1><p class="lead">O mesmo agente trabalha em segundo plano. Parar cancela. Se o Órbita fechar no meio, a tarefa não continua sozinha.</p>
+        <div class="group"><div id="job-list"><div class="empty">Carregando…</div></div>
+        <div class="row" style="padding:12px 0"><input class="inp" style="flex:1" id="job-prompt" placeholder="O que a tarefa deve fazer"><button class="btn" id="job-add">Começar</button></div></div>`;
+      break;
     case "memoria":
       html = `<h1>Memória</h1><p class="lead">Fatos globais valem em todo projeto. Fatos de projeto só aparecem quando aquela pasta está aberta.</p>
         <div class="group"><div id="memory-list"><div class="empty">Carregando…</div></div>
@@ -1475,7 +1487,10 @@ function renderSettings() {
       html = `<h1>Permissões</h1><p class="lead">Quanto o agente pode fazer sozinho.</p><div class="group">
         ${field("Modo", "Perguntar: confirma qualquer alteração. Automático: só comandos e controle do PC. Livre: nunca pergunta.", seg("permission_mode", [["perguntar", "Perguntar"], ["auto", "Automático"], ["livre", "Livre"]], st.permission_mode))}
         ${field("Escopo dos arquivos", "No projeto, criar e editar só valem dentro da pasta aberta. Um atalho que aponta para fora também é recusado. O terminal ainda não fica preso a essa pasta.", seg("file_scope", [["open", "Aberto"], ["project", "Só o projeto"]], st.file_scope === "project" ? "project" : "open"))}
-        ${field("Pontos de restauração", "Antes de cada resposta o Órbita guarda uma foto da pasta do projeto (fora dela, sem tocar no seu git). Dá para ver o que mudou e desfazer com um clique.", toggle("checkpoints", st.checkpoints !== false))}</div>`;
+        ${field("Revisão antes de gravar", "Ligado: criar e editar viram proposta. O arquivo só muda quando você aplica. O terminal e o MCP ficam bloqueados nesse modo, porque eles gravariam sem passar pela proposta.", seg("staged_writes", [["off", "Gravar na hora"], ["on", "Revisar"]], st.staged_writes === "on" ? "on" : "off"))}
+        ${field("Pontos de restauração", "Antes de cada resposta o Órbita guarda uma foto da pasta do projeto (fora dela, sem tocar no seu git). Dá para ver o que mudou e desfazer com um clique.", toggle("checkpoints", st.checkpoints !== false))}</div>
+        <div class="group"><h3>Propostas</h3><div id="proposal-list"><div class="empty">Nenhuma proposta.</div></div></div>
+        <div class="group"><h3>Controle do PC</h3><p class="sub" id="pc-pause-text">Se você mexer no mouse, o Órbita para e não volta sozinho.</p><button class="btn" id="pc-resume">Retomar controle</button></div>`;
       break;
     case "voz":
       html = `<h1>Voz</h1><p class="lead">Clique no microfone (ou Ctrl+M), fale e clique de novo: o texto aparece no campo enquanto você fala, e você revisa antes de enviar. Com chave da Groq ou da OpenAI, a transcrição vai para a nuvem (rápida em qualquer PC); sem chave, roda neste computador, sem internet.</p><div class="group">
@@ -1489,6 +1504,7 @@ function renderSettings() {
     case "sobre":
       html = `<h1>Sobre</h1><div class="group" style="padding:20px"><div class="row"><img src="logo.svg" style="width:64px"><div><h2 style="margin:0">Órbita <span class="tag grad" style="vertical-align:middle">v${esc(S.version || "")}</span></h2><span style="color:var(--muted)">Seu agente pessoal de IA — suas regras, seu computador.</span></div></div>
         <div class="row" style="margin-top:16px"><button class="btn small" data-open="data">${icon("folder")} Pasta de dados</button><button class="btn small" data-open="logs">${icon("file")} Logs</button><button class="btn small" data-open="roadmap">${icon("book")} ROADMAP</button><button class="btn small" data-open="license">${icon("shield")} Licença GPL v3</button></div>
+        <div class="row" style="margin-top:10px"><button class="btn small" id="export-conv">${icon("download")} Exportar conversa</button><button class="btn small" id="export-profile">${icon("download")} Exportar perfil</button><button class="btn small" id="import-pack">${icon("folder")} Importar pacote</button></div>
         <p style="color:var(--muted);font-size:12.5px;margin:16px 0 0">Software livre sob a GNU GPL v3: você pode usar, estudar, modificar e compartilhar. Versões modificadas distribuídas devem continuar abertas sob a mesma licença.</p></div>
         <div class="group"><h3>Atualizações</h3>
         ${field("Situação", updateStatusText(), `<div class="row"><button class="btn small" id="up-check">${icon("refresh")} Procurar agora</button>${S.update && S.update.available ? `<button class="btn primary small" id="up-open">${icon("download")} Ver novidades</button>` : ""}</div>`)}
@@ -1546,6 +1562,25 @@ function bindSettings() {
   const upOpen = $("#up-open"); if (upOpen) upOpen.onclick = () => updateModal(S.update);
   if (settingsSection === "modelos") bindModels();
   if (settingsSection === "memoria") loadMemories();
+  if (settingsSection === "tarefas") loadJobs();
+  if (settingsSection === "permissoes") { loadProposals(); loadPcPause(); }
+  const exportConv = $("#export-conv");
+  if (exportConv) exportConv.onclick = async () => {
+    const result = await call("exportCurrentConversation");
+    if (result && result.ok) toast("success", "Conversa exportada", result.path);
+    else if (result && result.error) toast("warn", "Exportar", result.error);
+  };
+  const exportProfile = $("#export-profile");
+  if (exportProfile) exportProfile.onclick = async () => {
+    const result = await call("exportCurrentProfile");
+    if (result && result.ok) toast("success", "Perfil exportado", result.path);
+  };
+  const importPack = $("#import-pack");
+  if (importPack) importPack.onclick = async () => {
+    const result = await call("importPackage");
+    if (result && result.ok) toast("success", "Importado", result.kind === "profile" ? "Perfil guardado." : "Conversa guardada.");
+    else if (result && result.error) toast("error", "Importar", result.error);
+  };
 }
 // Chave de API colada no lugar do modelo (mesma regra do Python, em gui.looks_like_secret).
 function looksLikeKey(text) {
@@ -1667,6 +1702,46 @@ function renderLocalCatalog() {
     call("pullModel", name);
     toast("info", "Ollama", `Baixando ${name}…`);
   });
+}
+async function loadJobs() {
+  const box = $("#job-list");
+  if (!box) return;
+  const rows = await call("listJobs") || [];
+  box.innerHTML = rows.length ? rows.map(job => `<div class="row" style="padding:8px 0;align-items:flex-start">
+    <div style="flex:1"><b>${esc(job.state)}</b> <span class="sub">${esc(job.prompt || "")}</span>
+    ${job.note ? `<div class="sub">${esc(job.note)}</div>` : ""}
+    ${job.output ? `<div class="sub">${esc(job.output)}</div>` : ""}</div>
+    ${job.state === "waiting" || job.state === "running" ? `<button class="btn small" data-job-stop="${esc(job.id)}">Parar</button>` : ""}
+  </div>`).join("") : `<div class="empty">Nenhuma tarefa.</div>`;
+  $$("[data-job-stop]", box).forEach(button => button.onclick = () => call("stopJob", button.dataset.jobStop));
+  const add = $("#job-add");
+  if (add) add.onclick = () => {
+    const input = $("#job-prompt");
+    const text = (input.value || "").trim();
+    if (!text) return;
+    input.value = "";
+    call("startJob", text);
+  };
+}
+async function loadProposals() {
+  const box = $("#proposal-list");
+  if (!box) return;
+  const rows = await call("listProposals") || [];
+  box.innerHTML = rows.length ? rows.map(row => `<div style="padding:8px 0">
+    <div class="row"><span style="flex:1">${esc(row.path)}</span>
+    <button class="btn small" data-apply="${esc(row.path)}">Aplicar</button>
+    <button class="btn small" data-reject="${esc(row.path)}">Recusar</button></div>
+    ${row.diff ? `<pre>${esc(row.diff)}</pre>` : ""}
+  </div>`).join("") : `<div class="empty">Nenhuma proposta.</div>`;
+  $$("[data-apply]", box).forEach(button => button.onclick = async () => { await call("applyProposal", button.dataset.apply); loadProposals(); });
+  $$("[data-reject]", box).forEach(button => button.onclick = async () => { await call("rejectProposal", button.dataset.reject); loadProposals(); });
+}
+async function loadPcPause() {
+  const text = $("#pc-pause-text");
+  const state = await call("pcPauseState");
+  if (text && state) text.textContent = state.paused ? (state.reason || "Controle pausado.") : "Se você mexer no mouse, o Órbita para e não volta sozinho.";
+  const button = $("#pc-resume");
+  if (button) button.onclick = () => call("resumePc");
 }
 async function loadMemories() {
   const box = $("#memory-list"); if (!box) return;

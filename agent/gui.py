@@ -53,7 +53,7 @@ SETTABLE = {"theme", "user_name", "default_workspace", "native_notifications", "
             "economy_mode", "turn_token_budget", "daily_token_budget", "voice_replies", "auto_routing",
             "cheap_model", "image_model", "ollama_num_ctx", "ollama_keep_alive", "checkpoints", "update_check",
             "team_model", "stt_model", "stt_engine", "team_max_parallel", "execution_policy",
-            "file_scope"}
+            "file_scope", "staged_writes"}
 # Modo plano: vai junto da mensagem; as ferramentas que alteram algo ficam bloqueadas no turno.
 PLAN_NOTE = ("\n\n[Modo plano] Ainda NÃO execute: não crie, edite nem apague arquivos e não rode comandos que "
              "alterem algo — essas ferramentas estão bloqueadas neste turno. Leia e pesquise o que precisar e "
@@ -171,13 +171,17 @@ class AgentWorker(QThread):
             approval_id = uuid.uuid4().hex[:10]
             done, answer = threading.Event(), ["no"]
             self._pending[approval_id] = (done, answer)
+            extra_cancel = request.pop("cancel_event", None)
             if request.get("tool") == "toolbox_install":   # permissão mostra nome, tamanho e origem
                 request = {**request, "detail": toolbox.get_toolbox().approval_detail(
                     str((request.get("args") or {}).get("id", "")))}
             self.push({"type": "approval", "id": approval_id, "request": request})
             self.raw_event.emit("attention", {"title": "Permissão necessária", "text": request.get("tool", "")})
             while not done.wait(0.2):
-                if not self.running:
+                if not self.running or (extra_cancel is not None and extra_cancel.is_set()):
+                    answer[0] = "no"
+                    if extra_cancel is not None and extra_cancel.is_set():
+                        self.push({"type": "approval_closed", "id": approval_id})
                     break
             self._pending.pop(approval_id, None)
             return answer[0]
@@ -298,6 +302,8 @@ class Api(QObject):
         self._relay.connect(self.message)   # emissões de outras threads chegam enfileiradas
         self._grok_cache: tuple[float, dict] = (0.0, {})
         self._engine_scan = threading.Event()
+        self._jobs = None
+        self._ensure_jobs()
         # Progresso da caixa de ferramentas (instalação pela interface ou pelo agente) vai para a página.
         toolbox.get_toolbox().add_listener(lambda data: self.push({"type": "toolbox", **data}))
 
@@ -874,6 +880,160 @@ class Api(QObject):
         self.brain.memory.delete_fact(fact_id)
         self.push({"type": "memories"})
 
+    def _ensure_jobs(self):
+        if self._jobs is None:
+            from agent.core.jobs import get_store
+
+            self._jobs = get_store(self._run_job)
+            self._jobs.on_change = lambda: self.push({"type": "jobs"})
+        return self._jobs
+
+    def _run_job(self, job: dict, cancel) -> dict:
+        from agent.core.agent_loop import AgentSession
+
+        provider, model = self.brain.current_model
+
+        def approve(request):
+            if cancel.is_set():
+                return "no"
+            worker = getattr(self.win, "worker", None)
+            if worker is None:
+                return "no"
+            return worker.approve({**request, "cancel_event": cancel})
+
+        def events(kind, data):
+            self.push({"type": "job_event", "id": job["id"], "kind": kind})
+
+        session = AgentSession(
+            self.brain, self.brain.profile, provider, model,
+            events=events, approve=approve, label="tarefa", cancel=cancel,
+        )
+        text = session.run(job.get("prompt") or "")
+        return {"output": text, "tokens": session.turn_tokens, "cost_usd": None}
+
+    @pyqtSlot(result=str)
+    def listJobs(self) -> str:
+        rows = []
+        for job in self._ensure_jobs().list():
+            rows.append({
+                "id": job.get("id"), "state": job.get("state"),
+                "prompt": (job.get("prompt") or "")[:180], "project": job.get("project") or "",
+                "note": job.get("note") or "", "output": (job.get("output") or "")[:500],
+                "error": job.get("error") or "", "cost_usd": job.get("cost_usd"),
+                "tokens": job.get("tokens"),
+            })
+        return json.dumps(rows, ensure_ascii=False)
+
+    @pyqtSlot(str)
+    def startJob(self, prompt: str) -> None:
+        text = (prompt or "").strip()
+        if not text:
+            return
+        project = ""
+        try:
+            project = str(self.brain.effective_workspace())
+        except Exception:
+            project = ""
+        self._ensure_jobs().start(text, project=project, conversation_id=self.brain.conversation_id or "")
+
+    @pyqtSlot(str)
+    def stopJob(self, job_id: str) -> None:
+        self._ensure_jobs().stop(job_id)
+
+    @pyqtSlot(result=str)
+    def listProposals(self) -> str:
+        from agent.core.staged_writes import get_store
+
+        try:
+            workspace = self.brain.effective_workspace()
+        except Exception:
+            workspace = Path.home()
+        return json.dumps(get_store().list_for(workspace), ensure_ascii=False)
+
+    @pyqtSlot(str, result=str)
+    def applyProposal(self, path: str) -> str:
+        from agent.core.staged_writes import get_store
+
+        error = get_store().apply(Path(path))
+        self.push({"type": "proposals"})
+        return json.dumps({"ok": error is None, "error": error or ""}, ensure_ascii=False)
+
+    @pyqtSlot(str, result=str)
+    def rejectProposal(self, path: str) -> str:
+        from agent.core.staged_writes import get_store
+
+        error = get_store().reject(Path(path))
+        self.push({"type": "proposals"})
+        return json.dumps({"ok": error is None, "error": error or ""}, ensure_ascii=False)
+
+    @pyqtSlot(result=str)
+    def pcPauseState(self) -> str:
+        from agent.core.pc_pause import PC_PAUSE
+
+        return json.dumps({"paused": PC_PAUSE.paused, "reason": PC_PAUSE.reason}, ensure_ascii=False)
+
+    @pyqtSlot()
+    def resumePc(self) -> None:
+        from agent.core.pc_pause import PC_PAUSE
+
+        PC_PAUSE.resume()
+        self.push({"type": "pc_pause", "paused": False, "reason": ""})
+
+    @pyqtSlot(result=str)
+    def exportCurrentConversation(self) -> str:
+        from agent.core.exchange import conversation_markdown, export_conversation
+
+        data = None
+        if self.brain.conversation_id:
+            data = self.brain.conversations.load(self.brain.conversation_id)
+        if not data and self.brain.session and self.brain.session.messages:
+            self.brain.save_conversation()
+            data = self.brain.conversations.load(self.brain.conversation_id or "")
+        if not data:
+            return json.dumps({"ok": False, "error": "Não há conversa para exportar."}, ensure_ascii=False)
+        package = export_conversation(data)
+        path, _ = QFileDialog.getSaveFileName(self.win, "Exportar conversa", str(Path.home() / "conversa.json"),
+                                              "JSON (*.json)")
+        if not path:
+            return json.dumps({"ok": False, "error": ""}, ensure_ascii=False)
+        target = Path(path)
+        target.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
+        target.with_suffix(".md").write_text(conversation_markdown(package), encoding="utf-8")
+        return json.dumps({"ok": True, "path": str(target)}, ensure_ascii=False)
+
+    @pyqtSlot(result=str)
+    def exportCurrentProfile(self) -> str:
+        from agent.core.exchange import export_profile
+
+        package = export_profile(self.brain.profile)
+        path, _ = QFileDialog.getSaveFileName(
+            self.win, "Exportar perfil", str(Path.home() / f"{self.brain.profile.id}.json"), "JSON (*.json)")
+        if not path:
+            return json.dumps({"ok": False, "error": ""}, ensure_ascii=False)
+        Path(path).write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
+        return json.dumps({"ok": True, "path": path}, ensure_ascii=False)
+
+    @pyqtSlot(result=str)
+    def importPackage(self) -> str:
+        from agent.core.exchange import FORMAT_CONVERSATION, FORMAT_PROFILE, import_conversation, import_profile
+
+        path, _ = QFileDialog.getOpenFileName(self.win, "Importar pacote do Órbita", str(Path.home()), "JSON (*.json)")
+        if not path:
+            return json.dumps({"ok": False, "error": ""}, ensure_ascii=False)
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+            if payload.get("format") == FORMAT_CONVERSATION:
+                imported = import_conversation(self.brain.conversations, payload)
+                kind = "conversation"
+            elif payload.get("format") == FORMAT_PROFILE:
+                imported = import_profile(self.brain.profiles, payload)
+                kind = "profile"
+            else:
+                return json.dumps({"ok": False, "error": "Este arquivo não é um pacote do Órbita."}, ensure_ascii=False)
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as error:
+            return json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False)
+        return json.dumps({"ok": True, "kind": kind, "id": imported}, ensure_ascii=False)
+
     @pyqtSlot(result=str)
     def modelJobs(self) -> str:
         from agent.core.model_manager import get_manager
@@ -1276,6 +1436,8 @@ class MainWindow(QMainWindow):
             QApplication.alert(self, 0)
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        if getattr(self.api, "_jobs", None) is not None:
+            self.api._jobs.shutdown()
         self.api.cancelEngineDiscovery()
         self.worker.stop()
         self.worker.wait(3000)

@@ -40,7 +40,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Perfis prontos: Assistente Geral, Líder de Desenvolvimento, Programador, Revisor, Pesquisador, Designer, Grok Build, Engenharia Reversa, Automação do PC
 - [x] Editor de perfis na interface
 - [ ] Variáveis no prompt (`{workspace}`, `{user_name}`...) — hoje o ambiente é injetado automaticamente
-- [ ] Importar/exportar perfis; galeria de perfis prontos — portabilidade em LU-15 (Fase 10); galeria continua independente
+- [~] Importar/exportar perfis; galeria de perfis prontos — formato próprio em LU-15 (Fase 10). A galeria pronta continua independente
 - [ ] "Prompts rápidos" acessíveis por `/comando` na caixa de texto
 - [x] Projeto de trabalho: abrir/criar pasta pela tela inicial, pelo topo e por Ctrl+K, com projetos recentes e pasta sugerida em Documentos
 - [x] Conversas ligadas ao projeto (filtrar a lista lateral pelo projeto aberto) — LU-07 (Fase 10). Conversa antiga, sem projeto, continua na lista
@@ -78,7 +78,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [~] ⭐ "Descobrir o melhor agente": o Pesquisador consulta a web/benchmarks e sugere o modelo/servidor MCP ideal para uma tarefa, oferecendo configurar. Feito: skill `descobrir-agente` carregada sob demanda (tabela de modelos só ao carregar; não configura). Falta: configurar após confirmação (item abaixo)
 - [ ] Configurar modelo/servidor MCP sugerido após confirmação explícita do usuário (exige decisão: muda configuração e MCP executa código)
 - [ ] Revisão cruzada automática: ao terminar código, um segundo modelo revisa antes de entregar (opcional por perfil)
-- [ ] Tarefas agendadas e fila em segundo plano com notificação na bandeja — mesma entrega LU-11 (Fases 9 e 10)
+- [~] Tarefas agendadas e fila em segundo plano com notificação na bandeja — jobs com parada em LU-11 (Fases 9 e 10). Falta a agenda
 
 ## Fase 5 — Interface
 
@@ -182,7 +182,7 @@ Plano detalhado: [comparação, fontes fixadas, dependências, arquivos e crité
 Referência: Locally Uncensored 3.0.6, commit `961621610ba365160c99696edbc574c9bd5474f1`.
 Prioridades: P0 = primeiro pacote; P1 = próxima expansão; P2 = após as bases; P3 = avaliar por demanda.
 Os IDs abaixo são o detalhamento das entregas; quando citados nas fases anteriores, representam a mesma tarefa,
-não implementações adicionais. As ondas 1 e 2 estão no programa; o restante segue nas próximas entregas.
+não implementações adicionais. As ondas 1 a 3 estão no programa; o restante segue nas próximas entregas.
 
 - [x] Analisar arquitetura e licença da referência, comparar com o Órbita e registrar plano priorizado com critérios de aceite e estratégia de testes comparativos
 - [x] **LU-01 · P0** — Detectar e diagnosticar motores locais, começando por Ollama e LM Studio, sem substituir configuração existente
@@ -193,15 +193,15 @@ não implementações adicionais. As ondas 1 e 2 estão no programa; o restante 
 - [x] **LU-06 · P1** — Comparar modelos pelos mesmos casos (PT-BR, JSON, instrução, documento, código). Cancelamento, prazo e erro ficam fora do ranking. O script não troca o modelo ativo
 - [x] **LU-07 · P1** — Memória editável e por projeto, migração para `data/` e conversas associadas ao projeto (consolida Fases 2, 5, 7 e 9)
 - [x] **LU-08 · P1** — Biblioteca documental local (TXT, Markdown e PDF com texto) com citação de arquivo, página e seção. Sem token em comum, não há fonte. PDF sem texto pede OCR, que não está incluído
-- [ ] **LU-09 · P1** — Diff e aprovação de alterações antes da gravação, com leitura das propostas, detecção de conflitos e checkpoints existentes
-- [~] **LU-10 · P1** — Mapa compacto do repositório e status verificado ligado ao `verify_project`. Falta preservar pendências na compactação de forma explícita
-- [ ] **LU-11 · P2** — Jobs persistentes com estado, custo e cancelamento; depois agenda/recorrência com fuso e recuperação (consolida Fases 4 e 9)
+- [x] **LU-09 · P1** — Revisão opcional antes de gravar: diff, aplicar ou recusar. Duas edições se acumulam; mudança no disco vira conflito. Terminal e MCP ficam bloqueados nesse modo
+- [x] **LU-10 · P1** — Mapa compacto do repositório, status verificado ligado ao `verify_project`, e compactação que não corta um par de ferramenta. Tópico ausente no resumo estruturado fica marcado, sem inventar fato
+- [~] **LU-11 · P2** — Jobs persistentes com estado, parada e custo quando o agente informa. Fechar o app marca o job como interrompido e não repete. Falta a agenda
 - [ ] **LU-12 · P2** — ComfyUI opcional: conectar instalação existente, validar workflow texto→imagem e coordenar VRAM; instalação gerenciada depois
 - [ ] **LU-13 · P2** — Galeria persistente por projeto com metadados e reutilização, unificando APIs, toolbox e geração local
 - [ ] **LU-14 · P3** — Vídeo curto local e extensões de estúdio em experimentos separados: LoRA, edição, personagem, áudio e treinamento conforme demanda/hardware/licença
-- [ ] **LU-15 · P2** — Importar/exportar conversas e perfis em formato próprio versionado; importadores externos depois de fixtures (inclui Fase 2)
+- [x] **LU-15 · P2** — Exportar e importar conversas e perfis no formato do Órbita, com Markdown da conversa. Segredos ficam de fora. Importar duas vezes não duplica. Importadores de outros produtos ficam para depois
 - [ ] **LU-16 · P2** — Voz interrompível em português, latência medida e cancelamento propagado, preservando o stack atual
-- [~] **LU-17 · P1** — Escrita pode ficar limitada à pasta do projeto aberto. O terminal não entra nesse limite. Falta a pausa do controle do PC
+- [~] **LU-17 · P1** — Escrita pode ficar na pasta do projeto, e atalho para fora é recusado. O controle do PC pausa se o mouse sair do lugar e não volta sozinho. O terminal não é uma jaula. Falta limitar mouse e teclado a um programa só
 - [ ] **LU-18 · P1** — CI, instalador e canal de atualização autenticado, com componentes opcionais e preservação de dados (consolida Fases 7 e 8; CI pode iniciar no primeiro pacote)
 - [ ] **LU-19 · P3** — Avaliar API local autenticada para inferência em outros clientes, sem ferramentas do PC no MVP
 - [ ] **LU-20 · P3** — Avaliar cliente de celular pela LAN, com pareamento/revogação e sem aprovações de execução remotas; internet em etapa posterior
@@ -461,3 +461,4 @@ AGPL-3.0-only exige avaliação de obrigações se houver incorporação de cód
   e mapa de repositório entraram junto porque o loop já dependia deles. Sem versionar. Verificado: pyflakes sem avisos;
   pytest **296 aprovados, 2 pulados, 55,67 s**. Interface conferida pelo contrato dos eventos; janela real não aberta nesta etapa.
 - **2026-10-19 — Grok 4.7**: onda 2, qualidade e contexto. Memória e logs diários passam para `data/memory`, com cópia dos arquivos antigos sem apagá-los; cada fato tem id, origem e escopo, e o projeto B não recebe fatos do projeto A. O painel em Configurações lista, edita e apaga. Conversas com projeto ficam na lista só quando a pasta aberta é a mesma; conversa antiga continua aparecendo. Documentos TXT, Markdown e PDF com texto são citados por arquivo, página e seção; pergunta sem token em comum não ganha fonte, e PDF em branco avisa que OCR não está incluído. A comparação de modelos usa os mesmos cinco casos e deixa de fora cancelamento, prazo e erro; o script `avaliar_modelos.py` fala com o provedor pedido e não troca o modelo ativo. Voz local entra na fila da GPU. A escrita pode ser limitada à pasta do projeto; o terminal continua livre. Sem versionar. Verificado: pyflakes sem avisos; pytest **306 aprovados, 2 pulados, 69,16 s**. Interface da memória conferida pelo contrato dos eventos; janela real não aberta nesta etapa.
+- **2026-10-19 — Grok 4.7**: onda 3, programação. Revisão opcional antes de gravar: a proposta acumula edições, mostra o diff e só entra no disco ao aplicar; se o arquivo mudou no meio, nada é sobrescrito. Com essa revisão ligada, terminal e MCP ficam bloqueados. A compactação não parte um par de ferramenta e completa tópico faltante sem inventar. Tarefas em segundo plano guardam estado e param de verdade; se o app fecha, ficam interrompidas e não rodam de novo. Conversas e perfis exportam no formato do Órbita, sem chave, e importar o mesmo pacote não duplica. O controle do PC pausa quando o mouse sai do lugar e só volta com o botão Retomar. Sem versionar. Verificado: pyflakes sem avisos; pytest **318 aprovados, 2 pulados, 52,21 s**. Janela real não aberta nesta etapa.

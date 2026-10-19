@@ -72,6 +72,11 @@ def _is_binary(path: Path) -> bool:
         return b"\0" in handle.read(4096)
 
 
+def _staged(ctx: ToolContext) -> bool:
+    settings = getattr(ctx.session, "settings", None)
+    return bool(settings and settings.get("staged_writes") == "on")
+
+
 def _register_files(r: ToolRegistry) -> None:
 
     @tool(r, "read_file",
@@ -83,23 +88,29 @@ def _register_files(r: ToolRegistry) -> None:
           ["path"], group="arquivos")
     def read_file(args, ctx: ToolContext):
         path = ctx.resolve(args["path"])
-        if not path.exists():
-            return ToolResult.error(f"Arquivo não encontrado: {path}")
         if path.is_dir():
             return ToolResult.error(f"{path} é uma pasta. Use list_dir.")
-        if path.suffix.lower() in IMAGE_EXTENSIONS:
+        if path.suffix.lower() in IMAGE_EXTENSIONS and path.is_file():
             ctx.emit("preview", {"path": str(path)})
             return ToolResult(text=f"Imagem: {path} ({path.stat().st_size} bytes)", images=[str(path)])
-        if _is_binary(path):
+        proposed = None
+        if _staged(ctx):
+            from agent.core.staged_writes import get_store
+            proposed = get_store().read(path)
+        if proposed is None and not path.is_file():
+            return ToolResult.error(f"Arquivo não encontrado: {path}")
+        if proposed is None and _is_binary(path):
             return ToolResult.error(f"{path} parece binário ({path.stat().st_size} bytes).")
-        lines = _read_text(path)[0].splitlines()
+        source = proposed if proposed is not None else _read_text(path)[0]
+        lines = source.splitlines()
         offset = max(1, int(args.get("offset") or 1))
         limit = max(1, min(int(args.get("limit") or 400), 2000))
         chunk = lines[offset - 1: offset - 1 + limit]
         body = "\n".join(f"{n:>5}\t{line[:500]}" for n, line in enumerate(chunk, start=offset))
         more = len(lines) - (offset - 1 + len(chunk))
         footer = f"\n[... mais {more} linhas; use offset={offset + len(chunk)}]" if more > 0 else ""
-        return f"{path} ({len(lines)} linhas)\n{body}{footer}"
+        label = "PROPOSTA, ainda não está no disco" if proposed is not None else f"{len(lines)} linhas"
+        return f"{path} ({label})\n{body}{footer}"
 
     @tool(r, "write_file",
           "Create or overwrite a file with the given content (creates parent folders).",
@@ -110,6 +121,14 @@ def _register_files(r: ToolRegistry) -> None:
         blocked = ctx.reject_write(path)
         if blocked:
             return ToolResult.error(blocked)
+        if _staged(ctx):
+            from agent.core.staged_writes import get_store
+            try:
+                get_store().propose_write(path, args["content"])
+            except ValueError as error:
+                return ToolResult.error(str(error))
+            ctx.emit("staged", {"path": str(path)})
+            return f"Proposta criada, ainda não está no disco: {path} ({len(args['content'])} caracteres)"
         path.parent.mkdir(parents=True, exist_ok=True)
         existed = path.exists()
         path.write_text(args["content"], encoding="utf-8", newline="")
@@ -127,6 +146,13 @@ def _register_files(r: ToolRegistry) -> None:
         blocked = ctx.reject_write(path)
         if blocked:
             return ToolResult.error(blocked)
+        if _staged(ctx):
+            from agent.core.staged_writes import get_store
+            error = get_store().propose_edit(path, args["old_string"], args["new_string"], bool(args.get("replace_all")))
+            if error:
+                return ToolResult.error(error)
+            ctx.emit("staged", {"path": str(path)})
+            return f"Proposta atualizada, ainda não está no disco: {path}"
         if not path.is_file():
             return ToolResult.error(f"Arquivo não encontrado: {path}")
         text, encoding = _read_text(path)
@@ -562,6 +588,15 @@ def _register_web(r: ToolRegistry) -> None:
 # Controle do PC
 # ─────────────────────────────────────────────────────────────
 
+def _pc_call(action):
+    from agent.actions.system_control import PcPaused
+
+    try:
+        return action()
+    except PcPaused as error:
+        return ToolResult.error(str(error))
+
+
 def _register_pc(r: ToolRegistry, services) -> None:
 
     @tool(r, "open_app", "Open an application, file, folder or URL (e.g. 'photoshop', 'chrome', 'C:/x.pdf', 'https://...').",
@@ -593,23 +628,24 @@ def _register_pc(r: ToolRegistry, services) -> None:
            "clicks": {"type": "integer", "description": "2 = double click"}},
           ["x", "y"], risk="exec", group="pc")
     def mouse_click(args, ctx):
-        return services.system.click(int(args["x"]), int(args["y"]), args.get("button", "left"), int(args.get("clicks") or 1))
+        return _pc_call(lambda: services.system.click(
+            int(args["x"]), int(args["y"]), args.get("button", "left"), int(args.get("clicks") or 1)))
 
     @tool(r, "mouse_scroll", "Scroll the mouse wheel (positive = up).",
           {"amount": {"type": "integer"}, "x": {"type": "integer"}, "y": {"type": "integer"}},
           ["amount"], risk="exec", group="pc")
     def mouse_scroll(args, ctx):
-        return services.system.scroll(int(args["amount"]), args.get("x"), args.get("y"))
+        return _pc_call(lambda: services.system.scroll(int(args["amount"]), args.get("x"), args.get("y")))
 
     @tool(r, "type_text", "Type text into the focused window (supports accents and multiple lines).",
           {"text": {"type": "string"}}, ["text"], risk="exec", group="pc")
     def type_text(args, ctx):
-        return services.system.type_text(args["text"])
+        return _pc_call(lambda: services.system.type_text(args["text"]))
 
     @tool(r, "press_keys", "Press a key or shortcut, e.g. 'enter', 'ctrl+s', 'alt+tab', 'win+r'.",
           {"keys": {"type": "string"}}, ["keys"], risk="exec", group="pc")
     def press_keys(args, ctx):
-        return services.system.press_key(args["keys"].lower().replace(" ", ""))
+        return _pc_call(lambda: services.system.press_key(args["keys"].lower().replace(" ", "")))
 
     @tool(r, "clipboard", "Read the clipboard (no text) or write text to it.",
           {"text": {"type": "string", "description": "If given, copies this text"}}, group="pc")

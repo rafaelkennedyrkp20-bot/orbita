@@ -48,6 +48,10 @@ def register_image_tool(registry: ToolRegistry, services) -> None:
         blocked = refusal(services.settings, provider_name, cfg, what="a geração de imagem")
         if blocked:
             return ToolResult.error(blocked)
+        if services.settings.get("staged_writes") == "on":
+            return ToolResult.error(
+                "A revisão antes de gravar está ligada. A imagem não foi gerada, porque isso gravaria direto no disco."
+            )
         key = services.settings.api_key(cfg)
         if cfg.get("api_key_env") and not key:
             return ToolResult.error(f"Falta a chave {cfg['api_key_env']} para gerar imagens.")

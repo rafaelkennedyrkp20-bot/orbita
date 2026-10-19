@@ -31,6 +31,42 @@ def _gui():
         _pyautogui = pyautogui
     return _pyautogui
 
+
+class PcPaused(RuntimeError):
+    """A pessoa assumiu o computador. O controle não volta sozinho."""
+
+
+def _pointer():
+    try:
+        pos = _gui().position()
+        return (int(pos[0]), int(pos[1]))
+    except Exception:
+        return None
+
+
+def _refuse() -> None:
+    from agent.core.pc_pause import PC_PAUSE
+
+    reason = PC_PAUSE.before(_pointer())
+    if reason:
+        raise PcPaused(reason)
+
+
+def _remember(point) -> None:
+    from agent.core.pc_pause import PC_PAUSE
+
+    PC_PAUSE.after(point if point is not None else _pointer())
+
+
+def _failsafe(error: Exception) -> None:
+    if "FailSafe" not in type(error).__name__:
+        return
+    from agent.core.pc_pause import PC_PAUSE
+
+    PC_PAUSE.pause("O mouse foi para o canto da tela. O controle ficou pausado e não volta sozinho.")
+    raise PcPaused(PC_PAUSE.reason) from error
+
+
 SCREENSHOTS_DIR = DATA_DIR / "screenshots"
 
 
@@ -102,11 +138,16 @@ class SystemControl:
         Returns:
             Confirmação da ação.
         """
+        _refuse()
         try:
             _gui().click(x, y, button=button, clicks=clicks)
             logger.debug(f"Clique em ({x}, {y}) [{button}]")
+            _remember((int(x), int(y)))
             return f"Clique em ({x}, {y}) realizado."
+        except PcPaused:
+            raise
         except Exception as e:
+            _failsafe(e)
             logger.error(f"Erro ao clicar: {e}")
             return f"Erro ao clicar: {e}"
 
@@ -121,10 +162,15 @@ class SystemControl:
         Returns:
             Confirmação da ação.
         """
+        _refuse()
         try:
             _gui().moveTo(x, y, duration=duration)
+            _remember((int(x), int(y)))
             return f"Mouse movido para ({x}, {y})."
+        except PcPaused:
+            raise
         except Exception as e:
+            _failsafe(e)
             return f"Erro ao mover mouse: {e}"
 
     def scroll(self, amount: int, x: Optional[int] = None, y: Optional[int] = None) -> str:
@@ -138,14 +184,19 @@ class SystemControl:
         Returns:
             Confirmação da ação.
         """
+        _refuse()
         try:
             if x and y:
                 _gui().scroll(amount, x=x, y=y)
             else:
                 _gui().scroll(amount)
+            _remember(_pointer())
             direction = "cima" if amount > 0 else "baixo"
             return f"Scroll {direction} ({abs(amount)} unidades)."
+        except PcPaused:
+            raise
         except Exception as e:
+            _failsafe(e)
             return f"Erro no scroll: {e}"
 
     def get_mouse_position(self) -> Tuple[int, int]:
@@ -167,6 +218,7 @@ class SystemControl:
         Returns:
             Confirmação da ação.
         """
+        _refuse()
         try:
             if text.isascii() and "\n" not in text:
                 _gui().typewrite(text, interval=interval)
@@ -181,8 +233,12 @@ class SystemControl:
                 time.sleep(0.15)
                 pyperclip.copy(previous)
             logger.debug(f"Texto digitado: '{text[:30]}'")
+            _remember(_pointer())
             return f"Texto digitado: '{text[:50]}'"
+        except PcPaused:
+            raise
         except Exception as e:
+            _failsafe(e)
             logger.error(f"Erro ao digitar: {e}")
             return f"Erro ao digitar: {e}"
 
@@ -196,14 +252,19 @@ class SystemControl:
         Returns:
             Confirmação da ação.
         """
+        _refuse()
         try:
             if "+" in key:
                 keys = [k.strip() for k in key.split("+")]
                 _gui().hotkey(*keys)
             else:
                 _gui().press(key)
+            _remember(_pointer())
             return f"Tecla pressionada: {key}"
+        except PcPaused:
+            raise
         except Exception as e:
+            _failsafe(e)
             return f"Erro ao pressionar tecla '{key}': {e}"
 
     def hotkey(self, *keys: str) -> str:
@@ -216,11 +277,16 @@ class SystemControl:
         Returns:
             Confirmação da ação.
         """
+        _refuse()
         try:
             _gui().hotkey(*keys)
+            _remember(_pointer())
             combo = "+".join(keys)
             return f"Atalho executado: {combo}"
+        except PcPaused:
+            raise
         except Exception as e:
+            _failsafe(e)
             return f"Erro ao executar atalho: {e}"
 
     # ─────────────────────────────────────────────

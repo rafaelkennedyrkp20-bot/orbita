@@ -5,7 +5,10 @@ import threading
 import pytest
 
 import agent.core.agent_loop as loop
-from agent.core.agent_loop import AgentSession, _TagFilter, parse_prompted_tool_calls
+from agent.core.agent_loop import (
+    AgentSession, _TagFilter, complete_summary, parse_prompted_tool_calls, tool_pairs_intact,
+)
+from agent.core.staged_writes import Store
 from agent.core.providers import ChatResult, ToolsUnsupported
 
 
@@ -80,6 +83,43 @@ def test_denied_permission_returns_error_to_model(brain, provider, tmp_path):
     s.run("rode echo")
     tool_msg = next(m for m in s.messages if m["role"] == "tool")
     assert tool_msg.get("is_error") and "NEGOU" in tool_msg["content"]
+
+
+def test_summary_keeps_pending_heading_and_tool_pairs():
+    text = complete_summary("## Objetivo\nfazer\n## Feito\nnada")
+    assert "## Próximos passos" in text and "não apareceu" in text
+    assert tool_pairs_intact([
+        {"role": "user", "content": "oi"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}, {"id": "2"}]},
+        {"role": "tool", "content": "a"},
+        {"role": "tool", "content": "b"},
+    ])
+    assert not tool_pairs_intact([
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]},
+        {"role": "user", "content": "no meio"},
+        {"role": "tool", "content": "tarde"},
+    ])
+
+
+def test_staged_write_stays_off_disk_and_shell_is_blocked(brain, provider, tmp_path, monkeypatch):
+    store = Store(tmp_path / "staged.json")
+    monkeypatch.setattr("agent.core.staged_writes.get_store", lambda: store)
+    brain.settings.set("staged_writes", "on", save=False)
+    brain.settings.set("default_workspace", str(tmp_path), save=False)
+    target = tmp_path / "fora.txt"
+    marker = tmp_path / "shell.txt"
+    provider([
+        ChatResult(tool_calls=[call("write_file", path="fora.txt", content="proposta")]),
+        ChatResult(tool_calls=[call("run_shell", command=f"Set-Content -Path '{marker}' -Value vazou")]),
+        ChatResult(text="não gravei"),
+    ])
+    chat = session(brain, mode="livre")
+    assert chat.run("grave") == "não gravei"
+    assert not target.exists() and not marker.exists()
+    assert store.read(target) == "proposta"
+    texts = [m["content"] for m in chat.messages if m["role"] == "tool"]
+    assert any("ainda não está no disco" in text for text in texts)
+    assert any("terminal" in text.lower() for text in texts)
 
 
 def test_local_only_blocks_shell_before_it_runs(brain, provider, tmp_path):

@@ -143,6 +143,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "execution_policy": "open",
     # open: escreve nos caminhos pedidos | project: só dentro da pasta de trabalho
     "file_scope": "open",
+    # off: grava na hora | on: cria proposta e só grava quando a pessoa aplica
+    "staged_writes": "off",
 }
 
 PERMISSION_MODES = {
