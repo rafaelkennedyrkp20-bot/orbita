@@ -21,6 +21,9 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## [0.3.0-alpha] — 2026-10-19
 
 ### Melhorias
+- **Tarefas longas mais baratas no Claude**: o aviso de "muitos passos" não muda mais o prompt de sistema, e os
+  resultados antigos são encurtados de 6 em 6, não um por passo. Assim o que já foi enviado fica igual, e o Claude
+  mantém o raciocínio e o cache por mais tempo numa tarefa longa.
 - **Equipe fora do chat**: os ajudantes trabalham num painel flutuante "Equipe", com um cartão por ajudante
   (tarefa, ação atual, passos e relatório). Dá para arrastar, recolher e fechar; ele lembra o lugar e volta quando a
   equipe começa de novo. No chat fica só a linha "Delegando à equipe".
@@ -72,6 +75,9 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   tokens (entrega o que tem como PARTIAL), em vez de gastar o saldo testando sem fim.
 
 ### Corrigido
+- **Claude Opus 5.5 / Fable 5.1 em contas novas**: numa tarefa longa, o encurtamento de resultados antigos fazia o Claude
+  recusar a requisição (HTTP 400). O pensamento de um passo agora só é reenviado quando o histórico antes dele
+  não mudou.
 - **Compactação que não falha**: tenta o modelo econômico e depois o principal, dá mais espaço aos modelos que
   "pensam" e, se nenhum responder, resume a partir do próprio histórico. Também funciona numa tarefa longa de um
   pedido só, mantendo o pedido e os últimos passos.

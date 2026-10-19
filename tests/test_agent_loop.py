@@ -514,6 +514,113 @@ def test_reasoning_kept_in_current_turn_and_pruned_in_old(brain, provider):
     assert all("reasoning" not in m for m in old_assistants)
 
 
+class _Block:
+    def __init__(self, **data):
+        self.__dict__.update(data)
+
+    def model_dump(self, exclude_none=True):
+        return dict(self.__dict__)
+
+
+class _FakeClaudeStream:
+    def __init__(self, message):
+        self.message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __iter__(self):
+        return iter(())
+
+    def get_final_message(self):
+        return self.message
+
+
+class _FakeClaude:
+    """Cliente Anthropic falso: guarda cada requisição e responde com um bloco de pensamento assinado."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.requests = []
+        self.messages = self
+        self.beta = self
+
+    def stream(self, betas=None, fallbacks=None, **params):
+        import copy as copy_module
+
+        self.requests.append(copy_module.deepcopy(params))
+        step = len(self.requests) - 1
+        blocks = [_Block(type="thinking", thinking="", signature=f"sig{step}")] + self.replies.pop(0)
+        usage = _Block(input_tokens=1, output_tokens=1, cache_read_input_tokens=0, cache_creation_input_tokens=0)
+        stop = "tool_use" if any(b.type == "tool_use" for b in blocks) else "end_turn"
+        return _FakeClaudeStream(_Block(content=blocks, stop_reason=stop, usage=usage, stop_details=None))
+
+
+def _long_claude_turn(brain, monkeypatch, tmp_path, reads: int) -> list[dict]:
+    """Turno real com o AnthropicProvider e cliente falso: `reads` leituras de 6.000 caracteres e "fim"."""
+    from agent.core.providers import AnthropicProvider
+
+    big = tmp_path / "grande.txt"
+    big.write_text("linha de dados\n" * 400, encoding="utf-8")   # 6.000 caracteres: acima do encurtamento
+    replies = [[_Block(type="tool_use", id=f"r{i}", name="read_file", input={"path": str(big)})]
+               for i in range(reads)] + [[_Block(type="text", text="fim")]]
+    client = _FakeClaude(replies)
+    claude = AnthropicProvider("anthropic", {"type": "anthropic"})
+    monkeypatch.setattr(claude, "_sdk", lambda: (None, client))
+    monkeypatch.setattr(loop, "get_provider", lambda name, settings: claude)
+    brain.settings.set("permission_mode", "livre", save=False)
+    s = AgentSession(brain, brain.profiles.get("geral"), "anthropic", "claude-opus-5-5", approve=lambda r: "yes")
+    assert s.run("leia o arquivo várias vezes") == "fim"
+    assert len(client.requests) == reads + 1
+    return client.requests
+
+
+def _replayed_thinking(requests: list[dict]) -> int:
+    """Quantas mensagens do assistente levaram pensamento, somando todos os envios. Cada uma tem de ir com o
+    prefixo exato (sistema, ferramentas e mensagens) que a gerou."""
+    produced = {f"sig{n}": request for n, request in enumerate(requests)}
+    replayed = 0
+    for request in requests:
+        for i, message in enumerate(request["messages"]):
+            for j, block in enumerate(message["content"]):
+                if block.get("type") != "thinking":
+                    continue
+                origin = produced[block["signature"]]
+                assert j == 0 and request["messages"][:i] == origin["messages"], \
+                    f"{block['signature']} reenviado depois de um trecho editado"
+                assert request.get("system") == origin.get("system") and request.get("tools") == origin.get("tools")
+                replayed += 1
+    return replayed
+
+
+def test_claude_thinking_is_replayed_only_with_the_prefix_that_produced_it(brain, monkeypatch, tmp_path):
+    # Opus 5.5 / Fable 5.1: o bloco de pensamento só vale com o histórico exato que o gerou (contas novas: HTTP
+    # 400). O encurtamento do turno longo edita resultados antigos; o pensamento posterior não pode ir junto.
+    requests = _long_claude_turn(brain, monkeypatch, tmp_path, reads=13)
+    assert _replayed_thinking(requests), "o pensamento continua indo quando o histórico antes dele não mudou"
+    assert "encurtado" in str(requests[-1]["messages"])   # o encurtamento aconteceu de fato
+
+
+def test_long_claude_turn_keeps_most_thinking_and_the_same_system(brain, monkeypatch, tmp_path):
+    # Num turno de 32 passos com resultados grandes, o envio deve ser quase só acréscimo: o aviso de passos não
+    # muda o sistema (que invalidaria todo pensamento e o cache) e o encurtamento não desliza a cada passo.
+    requests = _long_claude_turn(brain, monkeypatch, tmp_path, reads=32)
+    replayed = _replayed_thinking(requests)
+    systems = len({r.get("system") for r in requests})
+    appended = sum(prev.get("system") == cur.get("system") and cur["messages"][:len(prev["messages"])] == prev["messages"]
+                   for prev, cur in zip(requests, requests[1:]))
+    print(f"\n[medição] envios={len(requests)} pensamento reenviado={replayed} só acréscimo={appended} "
+          f"sistemas distintos={systems}")
+    # Antes: 39 pensamentos reenviados, 9 sistemas distintos, 6 de 32 envios só acrescentavam.
+    assert systems == 1
+    last = str(requests[-1]["messages"])
+    assert "encurtado" in last and last.count("Aviso do ambiente") == 8   # passos 25 a 32, cópias antigas ficam
+    assert replayed >= 120 and appended >= 25
+
+
 
 def _project_skills(brain, monkeypatch):
     """Catálogo do projeto, sem skills do usuário (o teste não pode depender da máquina)."""

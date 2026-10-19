@@ -210,11 +210,12 @@ def test_long_turns_get_a_brake_from_the_environment():
 
 
 def test_old_observations_of_the_current_turn_are_masked(brain):
-    """Um turno longo não reenvia, a cada passo, arquivos inteiros que já foram lidos ou gravados."""
+    """Um turno longo não reenvia, a cada passo, arquivos inteiros que já foram lidos ou gravados. O encurtamento
+    anda em blocos de 6, para o que já foi enviado não mudar a cada passo (pensamento e cache do Claude)."""
     session = AgentSession(brain, brain.profiles.get("geral"), "river", "deepseek-v4", approve=lambda r: "yes")
     session.messages = [{"role": "user", "content": "faça o site"}]
     big = "x" * 9000
-    for n in range(10):
+    for n in range(12):
         session.messages.append({"role": "assistant", "content": "", "tool_calls": [
             {"id": f"c{n}", "name": "write_file", "arguments": {"path": f"f{n}.html", "content": big}}]})
         session.messages.append({"role": "tool", "tool_call_id": f"c{n}", "name": "read_file", "content": big,
@@ -222,16 +223,21 @@ def test_old_observations_of_the_current_turn_are_masked(brain):
     wire = session._wire_messages([])
     tools = [m for m in wire if m["role"] == "tool"]
     calls = [m for m in wire if m["role"] == "assistant"]
-    assert all(len(t["content"]) < 1200 for t in tools[:4])            # antigos: começo + nota
+    assert all(len(t["content"]) < 1200 for t in tools[:6])            # antigos: começo + nota
     assert all(t["content"].startswith(big) for t in tools[-6:])        # 6 mais recentes: inteiros
     assert "já gravados em f0.html" in calls[0]["tool_calls"][0]["arguments"]["content"]
     assert calls[-1]["tool_calls"][0]["arguments"]["content"] == big
     assert sum(1 for t in tools if t.get("images")) == 2                # só as 2 imagens mais recentes
     assert session.messages[2]["content"] == big                        # o histórico salvo não é alterado
-    full = sum(len(m.get("content") or "") for m in session.messages) + 10 * 9000
+    full = sum(len(m.get("content") or "") for m in session.messages) + 12 * 9000
     sent = sum(len(m.get("content") or "") for m in wire) + sum(
         len(str(c["arguments"])) for m in calls for c in m["tool_calls"])
     assert sent < full * 0.65
+    session.messages += [{"role": "assistant", "content": "", "tool_calls": [{"id": "c12", "name": "read_file",
+                                                                             "arguments": {"path": "f0.html"}}]},
+                         {"role": "tool", "tool_call_id": "c12", "name": "read_file", "content": big}]
+    after = [m for m in session._wire_messages([]) if m["role"] == "tool"]
+    assert [t["content"] for t in after[:7]] == [t["content"] for t in tools[:7]]   # o passo seguinte só acrescenta
 
 
 def test_manual_compaction_runs_below_the_limit_and_keeps_last_request(brain, monkeypatch):

@@ -19,6 +19,7 @@ Provedores:
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import math
@@ -525,6 +526,33 @@ class OpenAICompatProvider(Provider):
 # Anthropic (Claude) — SDK oficial
 # ─────────────────────────────────────────────────────────────
 
+THINKING_BLOCKS = ("thinking", "redacted_thinking")
+
+
+class _Prefix:
+    """Impressão digital do que vai antes de um ponto da requisição ao Claude: sistema, ferramentas e blocos.
+
+    Nos Claude atuais (Opus 5.5, Fable 5.1) um bloco de pensamento só vale com o prefixo exato que o gerou; editar
+    o meio do histórico (encurtar resultado antigo, cortar passos) dá HTTP 400 nas contas novas.
+    """
+
+    def __init__(self, system: str, tools: list[dict] | None):
+        self._hash = hashlib.sha256(json.dumps([system, tools or []], sort_keys=True, ensure_ascii=False).encode())
+
+    def add(self, role: str, blocks: list[dict]) -> "_Prefix":
+        for block in blocks:
+            self._hash.update(json.dumps([role, block], sort_keys=True, ensure_ascii=False).encode())
+        return self
+
+    def add_messages(self, messages: list[dict]) -> "_Prefix":
+        for message in messages:
+            self.add(message["role"], message["content"])
+        return self
+
+    def digest(self) -> str:
+        return self._hash.copy().hexdigest()[:32]
+
+
 class AnthropicProvider(Provider):
 
     # Modelos que aceitam o fallback automático do servidor em caso de recusa.
@@ -553,12 +581,14 @@ class AnthropicProvider(Provider):
         mime, data = _image_b64(path)
         return {"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}
 
-    def _convert(self, model: str, messages: list[dict]) -> tuple[str, list[dict]]:
-        system_parts: list[str] = []
+    def _convert(self, model: str, messages: list[dict], tools: list[dict] | None = None) -> tuple[str, list[dict]]:
+        system = "\n\n".join(msg.get("content") or "" for msg in messages if msg["role"] == "system")
         out: list[dict] = []
+        prefix = _Prefix(system, tools)
 
         def push(role: str, blocks: list[dict]):
             # A API exige alternância user/assistant: junta blocos consecutivos do mesmo papel.
+            prefix.add(role, blocks)
             if out and out[-1]["role"] == role:
                 out[-1]["content"].extend(blocks)
             else:
@@ -566,18 +596,21 @@ class AnthropicProvider(Provider):
 
         for msg in messages:
             role = msg["role"]
-            if role == "system":
-                system_parts.append(msg.get("content") or "")
-            elif role == "user":
+            if role == "user":
                 blocks = [self._image_block(p) for p in msg.get("images") or [] if Path(p).is_file()]
                 blocks.append({"type": "text", "text": msg.get("content") or "(vazio)"})
                 push("user", blocks)
             elif role == "assistant":
                 native = msg.get("_native") or {}
                 if native.get("provider") == "anthropic" and native.get("content"):
-                    # Devolve os blocos originais (inclusive "thinking") sem alterar.
-                    push("assistant", list(native["content"]))
-                    continue
+                    # Devolve os blocos originais sem alterar. O pensamento só vai se o que vem antes dele for
+                    # idêntico ao que gerou a resposta; senão sai só desta cópia (texto e chamadas ficam).
+                    blocks = list(native["content"])
+                    if native.get("prefix") != prefix.digest():
+                        blocks = [b for b in blocks if not (isinstance(b, dict) and b.get("type") in THINKING_BLOCKS)]
+                    if blocks:
+                        push("assistant", blocks)
+                        continue
                 blocks = []
                 if msg.get("content"):
                     blocks.append({"type": "text", "text": msg["content"]})
@@ -592,13 +625,18 @@ class AnthropicProvider(Provider):
                 if msg.get("is_error"):
                     block["is_error"] = True
                 push("user", [block])
-        return "\n\n".join(system_parts), out
+        return system, out
 
     @_coordinated_inference
     def chat(self, model, messages, tools=None, *, temperature=None, max_tokens=None,
              on_text=None, on_reasoning=None, cancel=None, effort: str | None = None, **extra) -> ChatResult:
         anthropic, client = self._sdk()
-        system, converted = self._convert(model, messages)
+        api_tools = [{
+            "name": t["name"], "description": t.get("description", ""),
+            "input_schema": t.get("parameters") or {"type": "object", "properties": {}},
+            "eager_input_streaming": True,
+        } for t in tools or []]
+        system, converted = self._convert(model, messages, api_tools)
         params: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens or 64000,
@@ -607,12 +645,8 @@ class AnthropicProvider(Provider):
         }
         if system:
             params["system"] = system
-        if tools:
-            params["tools"] = [{
-                "name": t["name"], "description": t.get("description", ""),
-                "input_schema": t.get("parameters") or {"type": "object", "properties": {}},
-                "eager_input_streaming": True,
-            } for t in tools]
+        if api_tools:
+            params["tools"] = api_tools
         if effort:
             params["output_config"] = {"effort": effort}
 
@@ -653,7 +687,9 @@ class AnthropicProvider(Provider):
             final = stream.get_final_message()
 
         blocks = [block.model_dump(exclude_none=True) for block in final.content]
-        result.native = {"provider": "anthropic", "model": params["model"], "content": blocks}
+        # Prefixo que gerou esta resposta: o pensamento dela só volta enquanto ele não mudar (ver _convert).
+        prefix = _Prefix(params.get("system", ""), params.get("tools")).add_messages(params["messages"]).digest()
+        result.native = {"provider": "anthropic", "model": params["model"], "content": blocks, "prefix": prefix}
         result.stop_reason = final.stop_reason or ""
         result.usage = {"input_tokens": final.usage.input_tokens, "output_tokens": final.usage.output_tokens,
                         # O cache fica fora de input_tokens: lido custa ~10%, gravado ~125% do preço de entrada.
