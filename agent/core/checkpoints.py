@@ -73,6 +73,13 @@ def eligible(workspace: Path) -> bool:
     return True
 
 
+def _too_big(path: Path) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size > MAX_FILE_MB * 1024 * 1024
+    except OSError:
+        return False
+
+
 class Checkpoints:
 
     def __init__(self, root: Path = ROOT):
@@ -184,23 +191,55 @@ class Checkpoints:
         """Volta os arquivos que a resposta mudou para como estavam antes.
 
         Tira uma foto antes e outra depois, então nada se perde: `redo` é o par que, passado de
-        novo a `undo`, refaz o que foi desfeito.
+        novo a `undo`, refaz o que foi desfeito. Sem a foto de segurança nada é tocado, e um
+        erro no meio do caminho devolve os arquivos ao estado dessa foto: em ambos os casos
+        sobe RuntimeError, e o chamador não anuncia sucesso.
         """
+        changes = self.changes(workspace, before, after)
+        too_big = [c.path for c in changes if _too_big(workspace / c.path)]
+        if too_big:   # a foto de segurança não guardaria a versão atual deles
+            raise RuntimeError("Não desfiz nada: arquivos grandes demais para a foto de segurança: "
+                               + ", ".join(too_big[:5]))
         safety = self.snapshot(workspace, "antes de desfazer")
+        if not safety:
+            raise RuntimeError("Não desfiz nada: a foto de segurança falhou.")
         restored, removed = [], []
-        for change in self.changes(workspace, before, after):
-            target = workspace / change.path
-            if change.status == "A":
-                if target.is_file():
-                    target.unlink()
-                    removed.append(change.path)
-                    self._prune_empty(workspace, target.parent)
-            else:
-                self._git(workspace, "checkout", before, "--", change.path)
-                restored.append(change.path)
+        try:
+            for change in changes:
+                target = workspace / change.path
+                if change.status == "A":
+                    if target.is_file():
+                        target.unlink()
+                        removed.append(change.path)
+                        self._prune_empty(workspace, target.parent)
+                else:
+                    self._git(workspace, "checkout", before, "--", change.path)
+                    restored.append(change.path)
+        except Exception as error:
+            stuck = self._rollback(workspace, safety, [c.path for c in changes])
+            state = (f"não consegui voltar {', '.join(stuck[:5])}; a foto de segurança é {safety[:12]}" if stuck
+                     else "os arquivos voltaram ao estado anterior")
+            raise RuntimeError(f"Desfazer falhou ({error}); {state}.") from error
         undone = self.snapshot(workspace, "desfeito")
         return {"restored": restored, "removed": removed,
-                "redo": [safety, undone] if safety and undone else None}
+                "redo": [safety, undone] if undone else None}
+
+    def _rollback(self, workspace: Path, safety: str, paths: list[str]) -> list[str]:
+        """Devolve `paths` ao que estava na foto de segurança; retorna os que não voltaram."""
+        kept = set(filter(None, self._git(workspace, "ls-tree", "-r", "--name-only", "-z", safety, check=False)
+                          .split("\0")))
+        stuck = []
+        for path in paths:
+            try:
+                if path in kept:
+                    self._git(workspace, "checkout", safety, "--", path)
+                elif (workspace / path).is_file():
+                    (workspace / path).unlink()
+                    self._prune_empty(workspace, (workspace / path).parent)
+            except Exception as error:
+                logger.error("Não consegui voltar %s para a foto de segurança %s: %s", path, safety, error)
+                stuck.append(path)
+        return stuck
 
     @staticmethod
     def _prune_empty(workspace: Path, folder: Path) -> None:

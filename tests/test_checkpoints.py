@@ -76,3 +76,57 @@ def test_home_and_drive_root_are_not_eligible(tmp_path):
     assert not cp.eligible(Path.home())
     assert not cp.eligible(Path(Path.home().anchor))
     assert cp.eligible(tmp_path)
+
+
+def _turn_then_user_work(ws, store):
+    """Resposta do agente e, depois dela, trabalho novo do usuário em cima."""
+    before = store.snapshot(ws, "antes")
+    _agent_edits(ws)
+    turn = store.finish(ws, before, "depois")
+    (ws / "app.py").write_text("trabalho novo do usuário\n", encoding="utf-8")
+    (ws / "novo" / "modulo.py").write_text("y = 2\n", encoding="utf-8")
+    return turn
+
+
+def _tree(ws):
+    return {p.relative_to(ws).as_posix(): p.read_bytes() for p in sorted(ws.rglob("*")) if p.is_file()}
+
+
+def test_undo_aborts_when_safety_snapshot_fails(project, monkeypatch):
+    ws, store = project
+    turn = _turn_then_user_work(ws, store)
+    state = _tree(ws)
+    monkeypatch.setattr(store, "snapshot", lambda *a, **k: None)   # disco cheio, git quebrado…
+
+    with pytest.raises(RuntimeError, match="segurança"):
+        store.undo(ws, turn.before, turn.after)
+    assert _tree(ws) == state                    # nada restaurado, nada apagado
+
+
+def test_undo_error_midway_rolls_back_and_fails(project, monkeypatch):
+    ws, store = project
+    turn = _turn_then_user_work(ws, store)
+    state = _tree(ws)
+    real_git = store._git
+
+    def flaky(workspace, *args, **kw):
+        if args[:1] == ("checkout",) and args[-1] == "app.py":
+            raise RuntimeError("falha simulada")
+        return real_git(workspace, *args, **kw)
+
+    monkeypatch.setattr(store, "_git", flaky)
+    with pytest.raises(RuntimeError, match="falha simulada"):
+        store.undo(ws, turn.before, turn.after)
+    assert _tree(ws) == state                    # o que já tinha voltado é desfeito de novo
+
+
+def test_undo_refuses_to_overwrite_file_too_big_for_safety_snapshot(project, monkeypatch):
+    ws, store = project
+    turn = _turn_then_user_work(ws, store)
+    monkeypatch.setattr(cp, "MAX_FILE_MB", 0.001)            # ~1 KiB
+    (ws / "app.py").write_bytes(b"x" * 4096)                 # trabalho do usuário fora da foto
+    state = _tree(ws)
+
+    with pytest.raises(RuntimeError, match="app.py"):
+        store.undo(ws, turn.before, turn.after)
+    assert _tree(ws) == state
