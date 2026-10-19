@@ -313,6 +313,7 @@ class Brain:
             "pinned_prompt": self.pinned_prompt,
             "created": existing.get("created") or datetime.now().isoformat(timespec="seconds"),
             "profile": self.profile.id, "provider": provider, "model": model,
+            "project": str(self.effective_workspace()) if (self.profile.workspace or self.settings.get("default_workspace")) else (existing.get("project") or ""),
             "messages": session.messages, "summary": session.summary,
             "external_session": session.external_session,
         })

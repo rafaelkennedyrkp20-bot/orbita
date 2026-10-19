@@ -7,16 +7,41 @@ core/conversations.py.
 import json
 import logging
 import os
+import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from agent.core.config import (
-    DAILY_LOGS_DIR, LONG_TERM_DIR,
+    DAILY_LOGS_DIR, LONG_TERM_DIR, LEGACY_DAILY_LOGS_DIR, LEGACY_LONG_TERM_DIR,
     DAILY_LOG_MAX_ENTRIES, USER_PROFILE,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def migrate_memory(daily_dir: Path, long_dir: Path, legacy_daily: Path, legacy_long: Path) -> None:
+    """Copia logs e fatos antigos para data/memory. Repetir não duplica nem apaga a origem."""
+    if legacy_long.resolve() == long_dir.resolve() and legacy_daily.resolve() == daily_dir.resolve():
+        return
+    long_dir.mkdir(parents=True, exist_ok=True)
+    daily_dir.mkdir(parents=True, exist_ok=True)
+    source = legacy_long / "memory.json"
+    target = long_dir / "memory.json"
+    if source.is_file() and not target.exists():
+        backup = long_dir / "backup"
+        backup.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, backup / "memory.json")
+        shutil.copy2(source, target)
+    if legacy_daily.is_dir():
+        for item in legacy_daily.iterdir():
+            if item.suffix.lower() not in {".json", ".jsonl"} or not item.is_file():
+                continue
+            dest = daily_dir / item.name
+            if dest.exists():
+                continue
+            shutil.copy2(item, dest)
 
 
 class MemoryManager:
@@ -26,11 +51,17 @@ class MemoryManager:
     - Longo prazo: padrões, preferências e resumos persistentes.
     """
 
-    def __init__(self):
-        # Garante que as pastas existem
-        DAILY_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        LONG_TERM_DIR.mkdir(parents=True, exist_ok=True)
-        USER_PROFILE.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, daily_dir: Path | None = None, long_dir: Path | None = None,
+                 legacy_daily: Path | None = None, legacy_long: Path | None = None,
+                 profile_path: Path | None = None):
+        self.daily_dir = Path(daily_dir or DAILY_LOGS_DIR)
+        self.long_dir = Path(long_dir or LONG_TERM_DIR)
+        self.profile_path = Path(profile_path or USER_PROFILE)
+        migrate_memory(self.daily_dir, self.long_dir, legacy_daily or LEGACY_DAILY_LOGS_DIR,
+                       legacy_long or LEGACY_LONG_TERM_DIR)
+        self.daily_dir.mkdir(parents=True, exist_ok=True)
+        self.long_dir.mkdir(parents=True, exist_ok=True)
+        self.profile_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Log da sessão atual (em memória)
         self._session_log: list[dict] = []
@@ -53,12 +84,12 @@ class MemoryManager:
     @property
     def _today_jsonl_file(self) -> Path:
         """Log append-only de hoje: uma interação por linha (nunca reescreve o arquivo inteiro)."""
-        return DAILY_LOGS_DIR / f"{self._today}.jsonl"
+        return self.daily_dir / f"{self._today}.jsonl"
 
     def _load_today(self):
         """Carrega as interações de hoje (JSON antigo, se existir, + JSONL) para o `recall`."""
         entries: list[dict] = []
-        legacy = DAILY_LOGS_DIR / f"{self._today}.json"
+        legacy = self.daily_dir / f"{self._today}.json"
         if legacy.exists():
             try:
                 entries += json.loads(legacy.read_text(encoding="utf-8")).get("interactions", [])
@@ -141,7 +172,7 @@ class MemoryManager:
 
     @property
     def _long_term_file(self) -> Path:
-        return LONG_TERM_DIR / "memory.json"
+        return self.long_dir / "memory.json"
 
     def _load_long_term(self) -> dict:
         """Carrega memória de longo prazo do disco."""
@@ -165,42 +196,111 @@ class MemoryManager:
         except Exception as e:
             logger.error(f"Erro ao salvar memória longa: {e}")
 
-    def remember_fact(self, fact: str):
-        """
-        Registra um fato importante na memória longa.
+    def _records(self) -> list[dict]:
+        raw = self._long_term.setdefault("facts", [])
+        changed = False
+        records = []
+        for index, item in enumerate(raw):
+            if isinstance(item, str):
+                item = {"fact": item}
+                changed = True
+            if not isinstance(item, dict):
+                continue
+            fact = str(item.get("fact") or "").strip()
+            if not fact:
+                continue
+            if not item.get("id"):
+                item["id"] = f"legacy-{index}-{uuid.uuid4().hex[:8]}"
+                changed = True
+            item["fact"] = fact
+            item["origin"] = item.get("origin") or "legacy"
+            if item.get("scope") not in ("global", "project"):
+                item["scope"] = "global"
+                changed = True
+            item["project"] = str(item.get("project") or "")
+            records.append(item)
+        if changed:
+            self._long_term["facts"] = records
+            self._facts_cache = None
+            self.save_long_term()
+        return records
 
-        Args:
-            fact: Fato a ser lembrado.
-        """
-        facts = self._long_term.setdefault("facts", [])
-        if any(item.get("fact", "").lower() == fact.lower() for item in facts):
+    def remember_fact(self, fact: str, scope: str = "global", project: str = "", origin: str = "user"):
+        """Registra um fato. Escopo project só volta quando o mesmo projeto está aberto."""
+        fact = (fact or "").strip()
+        if not fact:
             return
-        entry = {"fact": fact, "timestamp": datetime.now().isoformat()}
-        facts.append(entry)
-        # Limita a 100 fatos
-        if len(self._long_term["facts"]) > 100:
-            self._long_term["facts"] = self._long_term["facts"][-100:]
+        if scope not in ("global", "project"):
+            scope = "global"
+        project = str(Path(project).resolve()) if scope == "project" and project else ""
+        if scope == "project" and not project:
+            scope = "global"
+        facts = self._records()
+        if any(item.get("fact", "").lower() == fact.lower() and item.get("scope") == scope
+               and item.get("project") == project for item in facts):
+            return
+        facts.append({
+            "id": uuid.uuid4().hex[:12],
+            "fact": fact,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "origin": origin or "user",
+            "scope": scope,
+            "project": project,
+        })
+        self._long_term["facts"] = facts[-100:]
         self._facts_cache = None
         self.save_long_term()
-        logger.info(f"Fato registrado: {fact[:60]}")
+        logger.info("Fato registrado: %s", fact[:60])
 
-    def _all_facts(self) -> list[str]:
-        raw = self._long_term.get("facts", [])
-        if self._facts_cache is None or len(self._facts_cache) != len(raw):
-            self._facts_cache = [item.get("fact", "") for item in raw if item.get("fact")]
-        return self._facts_cache
+    def list_facts(self, project: str = "") -> list[dict]:
+        return [dict(item) for item in self._visible(project)]
 
-    def facts(self, limit: int = 40) -> list[str]:
-        """Fatos mais recentes, para o prompt de sistema."""
-        all_f = self._all_facts()
+    def update_fact(self, fact_id: str, fact: str) -> bool:
+        fact = (fact or "").strip()
+        if not fact:
+            return False
+        for item in self._records():
+            if item.get("id") == fact_id:
+                item["fact"] = fact[:500]
+                self._facts_cache = None
+                self.save_long_term()
+                return True
+        return False
+
+    def delete_fact(self, fact_id: str) -> bool:
+        records = self._records()
+        kept = [item for item in records if item.get("id") != fact_id]
+        if len(kept) == len(records):
+            return False
+        self._long_term["facts"] = kept
+        self._facts_cache = None
+        self.save_long_term()
+        return True
+
+    def _visible(self, project: str = "") -> list[dict]:
+        current = str(Path(project).resolve()) if project else ""
+        visible = []
+        for item in self._records():
+            if item.get("scope") != "project":
+                visible.append(item)
+            elif current and item.get("project") == current:
+                visible.append(item)
+        return visible
+
+    def _all_facts(self, project: str = "") -> list[str]:
+        return [item["fact"] for item in self._visible(project)]
+
+    def facts(self, limit: int = 40, project: str = "") -> list[str]:
+        """Fatos visíveis neste projeto: globais e os do projeto aberto."""
+        all_f = self._all_facts(project)
         return all_f[-limit:] if limit else list(all_f)
 
-    def search_facts(self, query: str, limit: int = 15) -> list[str]:
+    def search_facts(self, query: str, limit: int = 15, project: str = "") -> list[str]:
         words = {w for w in query.lower().split() if len(w) > 2}
         if not words:
             return []
         scored = []
-        for text in self._all_facts():
+        for text in self._all_facts(project):
             low = text.lower()
             score = sum(1 for w in words if w in low)
             if score:
@@ -210,9 +310,9 @@ class MemoryManager:
 
     def _load_profile(self) -> dict:
         """Carrega o perfil do usuário."""
-        if USER_PROFILE.exists():
+        if self.profile_path.exists():
             try:
-                with open(USER_PROFILE, "r", encoding="utf-8") as f:
+                with open(self.profile_path, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception:
                 pass
@@ -226,7 +326,7 @@ class MemoryManager:
     def save_profile(self):
         """Salva o perfil do usuário."""
         try:
-            with open(USER_PROFILE, "w", encoding="utf-8") as f:
+            with open(self.profile_path, "w", encoding="utf-8") as f:
                 json.dump(self._profile, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Erro ao salvar perfil: {e}")

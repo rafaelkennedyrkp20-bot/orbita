@@ -72,6 +72,9 @@ def register_image_tool(registry: ToolRegistry, services) -> None:
         path = save_artifact_bytes(data, ".png")
         if args.get("save_to"):
             target = ctx.resolve(args["save_to"])
+            blocked = ctx.reject_write(target)
+            if blocked:
+                return ToolResult.error(blocked)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             path = str(target)

@@ -50,6 +50,19 @@ class ToolContext:
             candidate = self.workspace / candidate
         return candidate.resolve()
 
+    def reject_write(self, path: Path) -> str | None:
+        """No escopo de projeto, escrita fora da pasta (inclusive via link) é recusada."""
+        session = self.session
+        settings = getattr(session, "settings", None)
+        if settings is None or settings.get("file_scope") != "project":
+            return None
+        root = Path(getattr(session, "workspace", self.workspace)).resolve()
+        try:
+            path.resolve().relative_to(root)
+        except ValueError:
+            return f"Escopo do projeto: escrita recusada fora de {root}."
+        return None
+
 
 @dataclass
 class Tool:

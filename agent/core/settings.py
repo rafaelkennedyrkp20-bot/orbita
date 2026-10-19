@@ -141,6 +141,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "image_model": "",
     # open: nuvem e local | local_only: só motores locais verificados, sem fallback
     "execution_policy": "open",
+    # open: escreve nos caminhos pedidos | project: só dentro da pasta de trabalho
+    "file_scope": "open",
 }
 
 PERMISSION_MODES = {

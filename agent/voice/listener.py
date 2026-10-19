@@ -246,16 +246,20 @@ class Listener:
         self._load_model()
 
         try:
-            segments, info = self._model.transcribe(
-                audio,
-                language=STT_LANGUAGE,
-                beam_size=5,
-                vad_filter=True,          # filtra silêncio automaticamente
-                vad_parameters={
-                    "min_silence_duration_ms": STT_VAD_MIN_SILENCE_MS,
-                    "speech_pad_ms": 200,
-                },
-            )
+            from agent.core.inference_queue import INFERENCE_QUEUE
+            with INFERENCE_QUEUE.slot("local-gpu") as acquired:
+                if not acquired:
+                    return ""
+                segments, info = self._model.transcribe(
+                    audio,
+                    language=STT_LANGUAGE,
+                    beam_size=5,
+                    vad_filter=True,          # filtra silêncio automaticamente
+                    vad_parameters={
+                        "min_silence_duration_ms": STT_VAD_MIN_SILENCE_MS,
+                        "speech_pad_ms": 200,
+                    },
+                )
 
             text = " ".join(seg.text.strip() for seg in segments)
             logger.debug(f"Transcrição: '{text}'")

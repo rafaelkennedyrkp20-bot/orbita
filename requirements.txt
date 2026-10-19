@@ -35,6 +35,7 @@ psutil>=6.0.0                  # CPU, RAM, processos
 pyperclip>=1.9.0               # Área de transferência
 
 # ─── Utilitários ────────────────────────────────
+pypdf>=5.0                     # Texto de PDF local (sem OCR e sem recurso remoto)
 python-dotenv>=1.0.1           # Chaves e opções do .env
 pytest>=8.0                    # Testes (python -m pytest tests)
 pyflakes>=3.0                  # Lint usado por verify_project e pelos gates de qualidade

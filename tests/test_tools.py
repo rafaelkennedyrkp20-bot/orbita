@@ -150,6 +150,30 @@ def test_generate_image_saves_sidecar_metadata(brain, tmp_path, monkeypatch):
 
 
 
+def test_project_scope_blocks_writes_outside_and_through_links(brain, tmp_path):
+    brain.settings.set("file_scope", "project")
+
+    class Session:
+        settings = brain.settings
+        workspace = tmp_path
+
+    context = ToolContext(workspace=tmp_path, session=Session())
+    inside = brain.registry.get("write_file").run({"path": "dentro.txt", "content": "ok"}, context)
+    assert not inside.is_error and (tmp_path / "dentro.txt").read_text(encoding="utf-8") == "ok"
+    outside = tmp_path.parent / "fora-do-projeto.txt"
+    blocked = brain.registry.get("write_file").run({"path": str(outside), "content": "nao"}, context)
+    assert blocked.is_error and "Escopo" in blocked.text
+    assert not outside.exists()
+    link = tmp_path / "atalho"
+    try:
+        link.symlink_to(tmp_path.parent, target_is_directory=True)
+    except OSError:
+        return
+    escaped = brain.registry.get("write_file").run({"path": str(link / "escapou.txt"), "content": "x"}, context)
+    assert escaped.is_error
+    assert not (tmp_path.parent / "escapou.txt").exists()
+
+
 def test_verify_project_needs_exec_permission(brain):
     tool = brain.registry.get("verify_project")
     assert tool.risk == "exec" and tool.group == "shell"
@@ -160,6 +184,8 @@ def test_daily_log_is_append_only_jsonl(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mm, "DAILY_LOGS_DIR", tmp_path)
     monkeypatch.setattr(mm, "LONG_TERM_DIR", tmp_path)
+    monkeypatch.setattr(mm, "LEGACY_DAILY_LOGS_DIR", tmp_path / "sem-legado-daily")
+    monkeypatch.setattr(mm, "LEGACY_LONG_TERM_DIR", tmp_path / "sem-legado-long")
     monkeypatch.setattr(mm, "USER_PROFILE", tmp_path / "profile.json")
     memory = mm.MemoryManager()
     memory.log_interaction("oi", "olá")

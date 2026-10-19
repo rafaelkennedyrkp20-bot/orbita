@@ -51,6 +51,7 @@ class ConversationStore:
             "updated": data.get("updated", ""),
             "profile": data.get("profile", ""),
             "model": data.get("model", ""),
+            "project": data.get("project") or "",
         }
 
     def save(self, data: dict) -> None:

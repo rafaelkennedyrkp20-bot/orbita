@@ -21,13 +21,13 @@ class FakeMemory:
     def __init__(self):
         self.saved = []
 
-    def facts(self, limit=40):
+    def facts(self, limit=40, project=""):
         return list(self.saved)[-limit:]
 
-    def remember_fact(self, fact):
+    def remember_fact(self, fact, scope="global", project="", origin="user"):
         self.saved.append(fact)
 
-    def search_facts(self, query):
+    def search_facts(self, query, limit=15, project=""):
         return [f for f in self.saved if any(w in f.lower() for w in query.lower().split())]
 
     def get_relevant_context(self, query, max_entries=5):

@@ -143,9 +143,13 @@ class _Whisper:
             model = self.get(size)
             on_gpu = not self._cpu_only and (size, "cuda") in self._models
             try:
-                segments, _ = model.transcribe(audio, language=STT_LANGUAGE, beam_size=5 if final else 1,
-                                               vad_filter=final, initial_prompt=PROMPT,
-                                               condition_on_previous_text=False)
+                from agent.core.inference_queue import INFERENCE_QUEUE
+                with INFERENCE_QUEUE.slot("local-gpu") as acquired:
+                    if not acquired:
+                        return ""
+                    segments, _ = model.transcribe(audio, language=STT_LANGUAGE, beam_size=5 if final else 1,
+                                                   vad_filter=final, initial_prompt=PROMPT,
+                                                   condition_on_previous_text=False)
                 return " ".join(s.text.strip() for s in segments).strip()
             except RuntimeError as error:
                 if attempt == 0 and on_gpu:
@@ -202,6 +206,17 @@ class Dictation:
         self._stop = threading.Event()
         self._cancel = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._emit_lock = threading.Lock()
+        self._closed = False
+
+    def _emit(self, event: dict, *, terminal: bool = False) -> None:
+        """Evento tardio do microfone não passa na frente do fim do ditado."""
+        with self._emit_lock:
+            if self._closed and not terminal:
+                return
+            if terminal:
+                self._closed = True
+            self.push(event)
 
     @property
     def active(self) -> bool:
@@ -215,6 +230,8 @@ class Dictation:
             self._frames = []
             self._stop.clear()
             self._cancel.clear()
+            with self._emit_lock:
+                self._closed = False
         self._thread = threading.Thread(target=self._run, name="ditado", daemon=True)
         self._thread.start()
         return None
@@ -236,7 +253,7 @@ class Dictation:
             self._record()
         except Exception as error:   # microfone ausente, driver, modelo...
             logger.exception("Ditado falhou")
-            self.push({"type": "dictation", "state": "error", "message": _friendly(error)})
+            self._emit({"type": "dictation", "state": "error", "message": _friendly(error)}, terminal=True)
         finally:
             self._active = False
 
@@ -262,7 +279,7 @@ class Dictation:
             now = time.time()
             if now - state["level_at"] >= 0.08:
                 state["level_at"] = now
-                self.push({"type": "dictation", "state": "level", "level": round(min(1.0, rms * 12), 3)})
+                self._emit({"type": "dictation", "state": "level", "level": round(min(1.0, rms * 12), 3)})
 
         # Local: os modelos carregam em paralelo à gravação, para estarem prontos quando a pessoa terminar.
         # Nuvem: nada para carregar — o PC só grava e envia (funciona em computador fraco).
@@ -281,7 +298,7 @@ class Dictation:
 
         started = time.time()
         with sd.InputStream(samplerate=STT_SAMPLE_RATE, channels=1, dtype="float32", blocksize=block, callback=callback):
-            self.push({"type": "dictation", "state": "recording", "engine": engine.get("label", "")})
+            self._emit({"type": "dictation", "state": "recording", "engine": engine.get("label", "")})
             last_partial, last_text = 0.0, ""
             while not self._stop.is_set():
                 time.sleep(0.05)
@@ -294,16 +311,16 @@ class Dictation:
                     last_partial = time.time()
                     if text and text != last_text:
                         last_text = text
-                        self.push({"type": "dictation", "state": "partial", "text": text})
+                        self._emit({"type": "dictation", "state": "partial", "text": text})
         if self._cancel.is_set():
-            self.push({"type": "dictation", "state": "cancelled"})
+            self._emit({"type": "dictation", "state": "cancelled"}, terminal=True)
             return
         audio = self._audio()
         if not state["spoke"] or len(audio) < STT_SAMPLE_RATE * 0.3:
-            self.push({"type": "dictation", "state": "done", "text": "",
-                       "message": "Não ouvi nada. Confira o microfone em Configurações › Voz."})
+            self._emit({"type": "dictation", "state": "done", "text": "",
+                        "message": "Não ouvi nada. Confira o microfone em Configurações › Voz."}, terminal=True)
             return
-        self.push({"type": "dictation", "state": "finishing"})
+        self._emit({"type": "dictation", "state": "finishing"})
         if cloud:
             try:
                 text = cloud_transcribe(engine, audio, timeout=60)
@@ -311,15 +328,15 @@ class Dictation:
                 if not last_text:
                     raise
                 # Sem internet ou chave recusada no fim: fica o último parcial, com aviso.
-                self.push({"type": "dictation", "state": "done", "text": last_text,
-                           "message": f"A transcrição final falhou ({error}); ficou o texto parcial."})
+                self._emit({"type": "dictation", "state": "done", "text": last_text,
+                            "message": f"A transcrição final falhou ({error}); ficou o texto parcial."}, terminal=True)
                 return
         else:
             loader.join()
             if final_loader.is_alive():
                 final_loader.join()
             text = WHISPER.transcribe(size, audio, final=True)
-        self.push({"type": "dictation", "state": "done", "text": text})
+        self._emit({"type": "dictation", "state": "done", "text": text}, terminal=True)
 
 
 def _safe(fn):

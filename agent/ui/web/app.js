@@ -449,7 +449,11 @@ function renameCurrentConv() {
 }
 function renderConvs() {
   const q = ($("#conv-search").value || "").toLowerCase();
-  const items = (S.conversations || []).filter(c => !q || c.title.toLowerCase().includes(q));
+  const ws = (S.workspace || "").replaceAll("\\", "/").toLowerCase();
+  const items = (S.conversations || []).filter(c => {
+    const project = (c.project || "").replaceAll("\\", "/").toLowerCase();
+    return (!q || c.title.toLowerCase().includes(q)) && (!project || project === ws);
+  });
   const groups = {};
   const localDay = ms => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
   const today = localDay(Date.now()), yest = localDay(Date.now() - 864e5), week = localDay(Date.now() - 7 * 864e5);
@@ -1070,6 +1074,7 @@ function onEvent(e) {
     case "pull": onPull(e); break;
     case "local_engines": localEngines = e.engines || []; engineScanActive = false; renderLocalEngines(); break;
     case "local_catalog": localCatalog = e; catalogScanActive = false; renderLocalCatalog(); break;
+    case "memories": if (settingsSection === "memoria") loadMemories(); break;
     case "ollama_action":
       toast(e.error ? "error" : "success", "Ollama", e.error || e.message);
       if (!e.error && settingsSection === "modelos") renderSettings();
@@ -1376,7 +1381,7 @@ async function onToolbox(e) {
 
 // ── Página: Configurações ──────────────────────────────────────────────────────
 const SECTIONS = [
-  ["geral", "user", "Geral"], ["modelos", "cpu", "Modelos"], ["api", "globe", "API manual"], ["chaves", "key", "Chaves de API"], ["grok", "bolt", "Conta Grok"],
+  ["geral", "user", "Geral"], ["modelos", "cpu", "Modelos"], ["memoria", "brain", "Memória"], ["api", "globe", "API manual"], ["chaves", "key", "Chaves de API"], ["grok", "bolt", "Conta Grok"],
   ["economia", "coins", "Economia de tokens"], ["permissoes", "shield", "Permissões"], ["voz", "wave", "Voz"], ["sobre", "info", "Sobre"],
 ];
 function renderSettings() {
@@ -1461,9 +1466,15 @@ function renderSettings() {
         <div class="group"><h3>Uso de hoje</h3>${Object.entries(usage).map(([k, u]) => `<div class="usage-row"><span class="mono" style="font-family:var(--mono);font-size:12px">${esc(k)}</span><div class="bar"><i style="width:${(u.input + u.output) / max * 100}%"></i></div><span>${fmt(u.input + u.output)}</span></div>`).join("") || `<div class="empty">Nada usado hoje ainda.</div>`}</div>`;
       break;
     }
+    case "memoria":
+      html = `<h1>Memória</h1><p class="lead">Fatos globais valem em todo projeto. Fatos de projeto só aparecem quando aquela pasta está aberta.</p>
+        <div class="group"><div id="memory-list"><div class="empty">Carregando…</div></div>
+        <div class="row" style="padding:12px 0"><input class="inp" style="flex:1" id="memory-new" placeholder="Novo fato global"><button class="btn" id="memory-add">Guardar</button></div></div>`;
+      break;
     case "permissoes":
       html = `<h1>Permissões</h1><p class="lead">Quanto o agente pode fazer sozinho.</p><div class="group">
         ${field("Modo", "Perguntar: confirma qualquer alteração. Automático: só comandos e controle do PC. Livre: nunca pergunta.", seg("permission_mode", [["perguntar", "Perguntar"], ["auto", "Automático"], ["livre", "Livre"]], st.permission_mode))}
+        ${field("Escopo dos arquivos", "No projeto, criar e editar só valem dentro da pasta aberta. Um atalho que aponta para fora também é recusado. O terminal ainda não fica preso a essa pasta.", seg("file_scope", [["open", "Aberto"], ["project", "Só o projeto"]], st.file_scope === "project" ? "project" : "open"))}
         ${field("Pontos de restauração", "Antes de cada resposta o Órbita guarda uma foto da pasta do projeto (fora dela, sem tocar no seu git). Dá para ver o que mudou e desfazer com um clique.", toggle("checkpoints", st.checkpoints !== false))}</div>`;
       break;
     case "voz":
@@ -1534,6 +1545,7 @@ function bindSettings() {
   if (upCheck) upCheck.onclick = () => { upCheck.disabled = true; upCheck.innerHTML = `<span class="spin"></span> Procurando…`; call("checkUpdate"); };
   const upOpen = $("#up-open"); if (upOpen) upOpen.onclick = () => updateModal(S.update);
   if (settingsSection === "modelos") bindModels();
+  if (settingsSection === "memoria") loadMemories();
 }
 // Chave de API colada no lugar do modelo (mesma regra do Python, em gui.looks_like_secret).
 function looksLikeKey(text) {
@@ -1655,6 +1667,28 @@ function renderLocalCatalog() {
     call("pullModel", name);
     toast("info", "Ollama", `Baixando ${name}…`);
   });
+}
+async function loadMemories() {
+  const box = $("#memory-list"); if (!box) return;
+  const rows = await call("listMemories") || [];
+  box.innerHTML = rows.length ? rows.map(item => `<div class="model-row" style="flex-wrap:wrap"><span class="nm">${esc(item.fact)}<br><small>${item.scope === "project" ? "deste projeto" : "global"} · ${esc(item.origin || "")}</small></span><button class="btn small" data-mem-edit="${esc(item.id)}">Editar</button><button class="btn small" data-mem-del="${esc(item.id)}">Apagar</button></div>`).join("") : `<div class="empty">Nenhum fato visível neste projeto.</div>`;
+  $$("[data-mem-del]", box).forEach(button => button.onclick = async () => {
+    if (!await confirmBox("Apagar memória", "Este fato sai da memória e não volta nas próximas conversas.")) return;
+    call("deleteMemory", button.dataset.memDel);
+    loadMemories();
+  });
+  $$("[data-mem-edit]", box).forEach(button => button.onclick = async () => {
+    const current = rows.find(item => item.id === button.dataset.memEdit);
+    const text = window.prompt("Editar fato", current ? current.fact : "");
+    if (text && text.trim()) { call("saveMemory", button.dataset.memEdit, text.trim()); loadMemories(); }
+  });
+  const add = $("#memory-add");
+  if (add) add.onclick = () => {
+    const text = ($("#memory-new").value || "").trim();
+    if (!text) return;
+    call("saveMemory", "", text);
+    loadMemories();
+  };
 }
 function bindModels() {
   renderLocalEngines();

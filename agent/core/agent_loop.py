@@ -395,7 +395,7 @@ class AgentSession:
         if "agentes" in groups:
             parts.append(self._team_text())
         if "memoria" in groups:
-            facts = brain.memory.facts(30)
+            facts = brain.memory.facts(30, project=str(self.workspace))
             if facts:
                 parts.append("## O que você sabe sobre o usuário (memória)\n" + "\n".join(f"- {f}" for f in facts))
         if self.prompted_tools:
@@ -554,7 +554,7 @@ class AgentSession:
         rules = [self.profile.system_prompt.strip()]
         if self.depth:
             rules.append("Você é um subagente: termine com um relatório conciso do que fez e dos resultados.")
-        facts = self.brain.memory.facts(15) if "memoria" in self.tool_groups() else []
+        facts = self.brain.memory.facts(15, project=str(self.workspace)) if "memoria" in self.tool_groups() else []
         if facts:
             rules.append("Sobre o usuário: " + "; ".join(facts))
         # Ponte MCP: o Grok usa a equipe, as skills e as ferramentas do Órbita (grok_bridge.py).

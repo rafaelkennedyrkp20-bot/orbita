@@ -175,12 +175,14 @@ class Speaker:
             return
 
         def run() -> None:
-            with self._lock:
-                if self._kokoro_available and self._speak_kokoro(clean):
-                    return
-                if self._piper_available and self._speak_piper(clean):
-                    return
-                self._speak_fallback(clean)
+            from agent.core.inference_queue import INFERENCE_QUEUE
+            with INFERENCE_QUEUE.slot("local-gpu"):
+                with self._lock:
+                    if self._kokoro_available and self._speak_kokoro(clean):
+                        return
+                    if self._piper_available and self._speak_piper(clean):
+                        return
+                    self._speak_fallback(clean)
 
         if blocking:
             run()

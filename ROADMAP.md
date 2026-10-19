@@ -43,7 +43,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [ ] Importar/exportar perfis; galeria de perfis prontos — portabilidade em LU-15 (Fase 10); galeria continua independente
 - [ ] "Prompts rápidos" acessíveis por `/comando` na caixa de texto
 - [x] Projeto de trabalho: abrir/criar pasta pela tela inicial, pelo topo e por Ctrl+K, com projetos recentes e pasta sugerida em Documentos
-- [ ] Conversas ligadas ao projeto (filtrar a lista lateral pelo projeto aberto) — consolidar em LU-07 (Fase 10)
+- [x] Conversas ligadas ao projeto (filtrar a lista lateral pelo projeto aberto) — LU-07 (Fase 10). Conversa antiga, sem projeto, continua na lista
 
 ## Fase 3 — MCP, Skills, Plugins e contas
 
@@ -99,7 +99,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Modo plano (Plan/Act): botão Planejar; ferramentas que alteram ficam bloqueadas no turno; botões Executar plano / Ajustar
 - [x] Dica de conversa longa: sugere conversa nova para assunto novo (menos deriva e menos tokens)
 - [x] ⭐ Desbloquear confirmação pendente (`AgentWorker.approve`) ao fechar o modal com `Esc` ou clicar em `Parar` (`agent/gui.py`, `agent/ui/web/app.js`)
-- [ ] ⭐ Painel na interface para listar, editar e apagar memórias salvas por `remember` (`agent/memory/memory_manager.py`, `agent/ui/web`) — consolidar em LU-07 (Fase 10)
+- [x] ⭐ Painel na interface para listar, editar e apagar memórias salvas por `remember` (`agent/memory/memory_manager.py`, `agent/ui/web`) — LU-07 (Fase 10)
 - [x] Conversas: menu próprio no botão direito (Renomear na linha, Apagar com confirmação) e "Renomear" no Ctrl+K
 - [x] Prompt fixo por conversa (`pinned_prompt`, salvo na conversa, injetado como "## Instruções fixas desta conversa")
 - [x] Busca de modelos (sem acento/maiúscula, por partes, contagem, setas + Enter) em Configurações › Modelos e no editor de perfil
@@ -127,7 +127,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Log diário só em JSONL (uma linha por interação, sem reescrever o arquivo); lê o JSON antigo do dia se existir
 - [x] Cancelamento em meio a chamada de ferramenta não grava `tool_calls` órfãos no histórico; `_TagFilter` faz `flush()` de `<` residual no fim do stream; links `file:` vindos de Markdown externo bloqueados (`agent/core/agent_loop.py`, `agent/ui/render.py`)
 - [x] Otimização de velocidade medida (`scripts/medir_velocidade.py`, `tests/test_performance.py`): import preguiçoso de `httpx`, `asyncio` e `image_gen`; cliente HTTP compartilhado; cache de catálogo, provedores, credenciais do Grok CLI, conversas (`os.scandir`) e `platform.uname` no Windows (inicialização 159,04 ms → 95,54 ms, TTFT 853,69 ms → 28,12 ms, custo por turno 116,42 ms → 5,97 ms)
-- [ ] ⭐ Mover memória e logs diários de `agent/memory/{daily_logs,long_term}` para `data/` (migrando arquivos existentes) e remover o `USER_PROFILE` morto (`agent/memory/memory_manager.py`, `agent/core/config.py`) — primeira etapa de LU-07 (Fase 10)
+- [x] ⭐ Mover memória e logs diários de `agent/memory/{daily_logs,long_term}` para `data/` (migrando arquivos existentes). O perfil em `data/user_profile/profile.json` permanece: é de lá que sai o nome do usuário (`agent/memory/memory_manager.py`, `agent/core/config.py`) — LU-07 (Fase 10)
 - [ ] Sandbox opcional para o shell; lista de comandos proibidos
 - [ ] Empacotar como `.exe` (PyInstaller) com instalador — consolidar em LU-18 (Fase 10)
 - [ ] Avaliar casca Tauri (Rust) reaproveitando `agent/ui/web`, para distribuir um `.exe` leve (baixa prioridade; o motor continua em Python)
@@ -182,17 +182,17 @@ Plano detalhado: [comparação, fontes fixadas, dependências, arquivos e crité
 Referência: Locally Uncensored 3.0.6, commit `961621610ba365160c99696edbc574c9bd5474f1`.
 Prioridades: P0 = primeiro pacote; P1 = próxima expansão; P2 = após as bases; P3 = avaliar por demanda.
 Os IDs abaixo são o detalhamento das entregas; quando citados nas fases anteriores, representam a mesma tarefa,
-não implementações adicionais. A onda 1 está no programa; o restante segue nas próximas entregas.
+não implementações adicionais. As ondas 1 e 2 estão no programa; o restante segue nas próximas entregas.
 
 - [x] Analisar arquitetura e licença da referência, comparar com o Órbita e registrar plano priorizado com critérios de aceite e estratégia de testes comparativos
 - [x] **LU-01 · P0** — Detectar e diagnosticar motores locais, começando por Ollama e LM Studio, sem substituir configuração existente
 - [x] **LU-02 · P0** — Catálogo pequeno com capacidades, licenças, quantizações e recomendação por RAM/VRAM/disco, distinguindo estimativa de medição
 - [~] **LU-03 · P0** — Pull Ollama cancelável, inventário, descarregar e remover. Falta: download GGUF verificado e motor gerenciado
 - [x] **LU-04 · P0** — Política somente local nos fluxos gerenciados e destino explícito dos dados, sem fallback silencioso para nuvem. Terminal, web e MCP ficam bloqueados nesse modo
-- [~] **LU-05 · P1** — Fila compartilhada para chat, equipe e resumo no mesmo recurso local. Falta incluir voz e embeddings
-- [ ] **LU-06 · P1** — Comparar modelos por qualidade em PT-BR, ferramentas, latência, tokens e custo no hardware do usuário (inclui medição da Fase 1)
-- [ ] **LU-07 · P1** — Memória editável e por projeto, migração para `data/` e conversas associadas ao projeto (consolida Fases 2, 5, 7 e 9)
-- [ ] **LU-08 · P1** — Biblioteca documental local com extração, busca por embeddings e fontes de arquivo/página/seção; TXT/Markdown/PDF textual primeiro
+- [x] **LU-05 · P1** — Fila compartilhada para chat, equipe, resumo e voz no mesmo recurso local. O embedding de documentos é um hash na CPU e não ocupa essa fila
+- [x] **LU-06 · P1** — Comparar modelos pelos mesmos casos (PT-BR, JSON, instrução, documento, código). Cancelamento, prazo e erro ficam fora do ranking. O script não troca o modelo ativo
+- [x] **LU-07 · P1** — Memória editável e por projeto, migração para `data/` e conversas associadas ao projeto (consolida Fases 2, 5, 7 e 9)
+- [x] **LU-08 · P1** — Biblioteca documental local (TXT, Markdown e PDF com texto) com citação de arquivo, página e seção. Sem token em comum, não há fonte. PDF sem texto pede OCR, que não está incluído
 - [ ] **LU-09 · P1** — Diff e aprovação de alterações antes da gravação, com leitura das propostas, detecção de conflitos e checkpoints existentes
 - [~] **LU-10 · P1** — Mapa compacto do repositório e status verificado ligado ao `verify_project`. Falta preservar pendências na compactação de forma explícita
 - [ ] **LU-11 · P2** — Jobs persistentes com estado, custo e cancelamento; depois agenda/recorrência com fuso e recuperação (consolida Fases 4 e 9)
@@ -201,7 +201,7 @@ não implementações adicionais. A onda 1 está no programa; o restante segue n
 - [ ] **LU-14 · P3** — Vídeo curto local e extensões de estúdio em experimentos separados: LoRA, edição, personagem, áudio e treinamento conforme demanda/hardware/licença
 - [ ] **LU-15 · P2** — Importar/exportar conversas e perfis em formato próprio versionado; importadores externos depois de fixtures (inclui Fase 2)
 - [ ] **LU-16 · P2** — Voz interrompível em português, latência medida e cancelamento propagado, preservando o stack atual
-- [ ] **LU-17 · P1** — Permissões por projeto/pasta/ferramenta; controle do PC com escopo e pausa por intervenção humana, mantendo riscos atuais (inclui Fase 9)
+- [~] **LU-17 · P1** — Escrita pode ficar limitada à pasta do projeto aberto. O terminal não entra nesse limite. Falta a pausa do controle do PC
 - [ ] **LU-18 · P1** — CI, instalador e canal de atualização autenticado, com componentes opcionais e preservação de dados (consolida Fases 7 e 8; CI pode iniciar no primeiro pacote)
 - [ ] **LU-19 · P3** — Avaliar API local autenticada para inferência em outros clientes, sem ferramentas do PC no MVP
 - [ ] **LU-20 · P3** — Avaliar cliente de celular pela LAN, com pareamento/revogação e sem aprovações de execução remotas; internet em etapa posterior
@@ -460,3 +460,4 @@ AGPL-3.0-only exige avaliação de obrigações se houver incorporação de cód
   Grok e imagem; terminal, web e MCP ficam bloqueados porque a saída deles não é controlável. Fila de GPU para chat local
   e mapa de repositório entraram junto porque o loop já dependia deles. Sem versionar. Verificado: pyflakes sem avisos;
   pytest **296 aprovados, 2 pulados, 55,67 s**. Interface conferida pelo contrato dos eventos; janela real não aberta nesta etapa.
+- **2026-10-19 — Grok 4.7**: onda 2, qualidade e contexto. Memória e logs diários passam para `data/memory`, com cópia dos arquivos antigos sem apagá-los; cada fato tem id, origem e escopo, e o projeto B não recebe fatos do projeto A. O painel em Configurações lista, edita e apaga. Conversas com projeto ficam na lista só quando a pasta aberta é a mesma; conversa antiga continua aparecendo. Documentos TXT, Markdown e PDF com texto são citados por arquivo, página e seção; pergunta sem token em comum não ganha fonte, e PDF em branco avisa que OCR não está incluído. A comparação de modelos usa os mesmos cinco casos e deixa de fora cancelamento, prazo e erro; o script `avaliar_modelos.py` fala com o provedor pedido e não troca o modelo ativo. Voz local entra na fila da GPU. A escrita pode ser limitada à pasta do projeto; o terminal continua livre. Sem versionar. Verificado: pyflakes sem avisos; pytest **306 aprovados, 2 pulados, 69,16 s**. Interface da memória conferida pelo contrato dos eventos; janela real não aberta nesta etapa.

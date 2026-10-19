@@ -52,7 +52,8 @@ WEB_INDEX = brand.WEB_DIR / "index.html"
 SETTABLE = {"theme", "user_name", "default_workspace", "native_notifications", "show_reasoning", "permission_mode",
             "economy_mode", "turn_token_budget", "daily_token_budget", "voice_replies", "auto_routing",
             "cheap_model", "image_model", "ollama_num_ctx", "ollama_keep_alive", "checkpoints", "update_check",
-            "team_model", "stt_model", "stt_engine", "team_max_parallel", "execution_policy"}
+            "team_model", "stt_model", "stt_engine", "team_max_parallel", "execution_policy",
+            "file_scope"}
 # Modo plano: vai junto da mensagem; as ferramentas que alteram algo ficam bloqueadas no turno.
 PLAN_NOTE = ("\n\n[Modo plano] Ainda NÃO execute: não crie, edite nem apague arquivos e não rode comandos que "
              "alterem algo — essas ferramentas estão bloqueadas neste turno. Leia e pesquise o que precisar e "
@@ -463,6 +464,8 @@ class Api(QObject):
         from agent.voice import dictation
         settings = self.brain.settings
         choice = settings.get("stt_engine") or "auto"
+        if settings.get("execution_policy") == "local_only":
+            choice = "local"
         if choice in ("auto", "cloud"):
             for name, model in dictation.CLOUD_MODELS.items():
                 try:
@@ -845,6 +848,31 @@ class Api(QObject):
         from agent.core.model_manager import get_manager
 
         get_manager().cancel(name)
+
+    @pyqtSlot(result=str)
+    def listMemories(self) -> str:
+        project = ""
+        try:
+            project = str(self.brain.effective_workspace())
+        except Exception:
+            project = ""
+        records = self.brain.memory.list_facts(project)
+        public = [{"id": item.get("id"), "fact": item.get("fact"), "scope": item.get("scope"),
+                   "origin": item.get("origin"), "project": item.get("project") or ""} for item in records]
+        return json.dumps(public, ensure_ascii=False)
+
+    @pyqtSlot(str, str)
+    def saveMemory(self, fact_id: str, text: str) -> None:
+        if fact_id:
+            self.brain.memory.update_fact(fact_id, text)
+        elif text.strip():
+            self.brain.memory.remember_fact(text.strip(), scope="global", origin="user")
+        self.push({"type": "memories"})
+
+    @pyqtSlot(str)
+    def deleteMemory(self, fact_id: str) -> None:
+        self.brain.memory.delete_fact(fact_id)
+        self.push({"type": "memories"})
 
     @pyqtSlot(result=str)
     def modelJobs(self) -> str:
