@@ -71,6 +71,8 @@ def _mask_old_observations(history: list[dict], start: int) -> None:
     tool_idx = [i for i in range(start, len(history)) if history[i]["role"] == "tool"]
     old_tools = set(tool_idx[:-KEEP_RECENT_RESULTS]) if len(tool_idx) > KEEP_RECENT_RESULTS else set()
     for i in old_tools:
+        if history[i].get("name") == "use_skill":
+            continue   # o protocolo da skill vale o turno inteiro, e use_skill não recarrega no mesmo pedido
         content = history[i].get("content") or ""
         if len(content) > MASK_OVER_CHARS:
             history[i]["content"] = (content[:MASK_KEEP_CHARS] + f"\n[... resultado antigo deste turno encurtado "

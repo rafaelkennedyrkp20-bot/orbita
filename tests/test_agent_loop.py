@@ -299,6 +299,21 @@ def test_profile_limits_apply_to_mcp_tools(brain, provider):
     assert len(denied) == 2 and all("não está liberada" in text for text in denied)
 
 
+def test_loaded_skill_is_not_masked_in_long_turn(brain, provider, tmp_path):
+    from agent.core.skills import Skill
+
+    folder = tmp_path / "longa"
+    folder.mkdir()
+    body = "PASSO " * 800   # 4.800 caracteres: acima do limite de encurtamento
+    (folder / "SKILL.md").write_text(f"---\nname: longa\ndescription: d\n---\n{body}", encoding="utf-8")
+    brain.skills.skills = {"longa": Skill("longa", "d", folder / "SKILL.md", "projeto")}
+    reads = [ChatResult(tool_calls=[call("list_dir", path=str(tmp_path))]) for _ in range(7)]
+    fake = provider([ChatResult(tool_calls=[{"id": "c_skill", "name": "use_skill", "arguments": {"name": "longa"}}]), *reads, ChatResult(text="fim")])
+    session(brain).run("siga a skill")
+    sent = next(m for m in fake.calls[-1]["messages"] if m.get("name") == "use_skill")
+    assert body.strip() in sent["content"]
+
+
 def test_find_tools_stays_inside_profile_servers(brain):
     from agent.core.tools import Tool
 
