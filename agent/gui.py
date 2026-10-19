@@ -54,7 +54,7 @@ SETTABLE = {"theme", "user_name", "default_workspace", "native_notifications", "
             "cheap_model", "image_model", "image_backend", "comfyui_url", "comfyui_checkpoint",
             "ollama_num_ctx", "ollama_keep_alive", "checkpoints", "update_check",
             "team_model", "stt_model", "stt_engine", "team_max_parallel", "execution_policy",
-            "file_scope", "staged_writes"}
+            "file_scope", "staged_writes", "local_api", "remote_access"}
 # Modo plano: vai junto da mensagem; as ferramentas que alteram algo ficam bloqueadas no turno.
 PLAN_NOTE = ("\n\n[Modo plano] Ainda NÃO execute: não crie, edite nem apague arquivos e não rode comandos que "
              "alterem algo — essas ferramentas estão bloqueadas neste turno. Leia e pesquise o que precisar e "
@@ -679,8 +679,29 @@ class Api(QObject):
                 value = value if value in ("api", "comfy") else "api"
             elif key in ("comfyui_url", "comfyui_checkpoint"):
                 value = str(value or "").strip()[:512]
+            elif key in ("local_api", "remote_access"):
+                value = "on" if value == "on" else "off"
             self.brain.settings.set(key, value)
+            if key in ("local_api", "remote_access"):
+                self.win.refresh_network()
         return self._state_json()
+
+    @pyqtSlot(result=str)
+    def createPairCode(self) -> str:
+        if self.brain.settings.get("remote_access") != "on":
+            return json.dumps({"error": "Ligue o acesso na rede antes de gerar um código."}, ensure_ascii=False)
+        code = self.win._pairing().issue(str(self.brain.effective_workspace()))
+        return json.dumps({"code": code, "minutes": 5}, ensure_ascii=False)
+
+    @pyqtSlot(result=str)
+    def listRemoteDevices(self) -> str:
+        return json.dumps({"devices": self.win._pairing().public_devices()}, ensure_ascii=False)
+
+    @pyqtSlot(str, result=str)
+    def revokeRemoteDevice(self, device_id: str) -> str:
+        store = self.win._pairing()
+        ok = store.revoke((device_id or "").strip())
+        return json.dumps({"ok": ok, "devices": store.public_devices()}, ensure_ascii=False)
 
     @pyqtSlot(str, str, result=str)
     def saveApiKey(self, env: str, value: str) -> str:
@@ -1332,6 +1353,11 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1080, 680)
 
         self.api = Api(self)
+        self._local_api = None
+        self._remote = None
+        self._pairing_store = None
+        self._remote_host = ""
+        self.refresh_network()
         self.worker = AgentWorker(brain, self.api.push)
         self.worker.raw_event.connect(self.on_agent_event)
         self.worker.busy.connect(self.on_busy)
@@ -1509,7 +1535,71 @@ class MainWindow(QMainWindow):
             self.notify(data.get("title", ""), data.get("text", ""))
             QApplication.alert(self, 0)
 
+    def _pairing(self):
+        if self._pairing_store is None:
+            from agent.core.remote_access import Pairing
+            self._pairing_store = Pairing(DATA_DIR / "remote_devices.json")
+        return self._pairing_store
+
+    def _local_chat(self, provider, model, messages, cancel, on_text) -> str:
+        from agent.core.local_api import default_chat
+        return default_chat(self.brain.settings, provider, model, messages, cancel, on_text)
+
+    def _remote_chat(self, messages, _project) -> str:
+        """Responde com o modelo desta janela. Não troca de projeto nem executa ferramenta."""
+        from agent.core.local_api import LocalApiError, default_chat
+        provider, model = self.brain.current_model
+        if not provider or not model:
+            return "Nenhum modelo está selecionado neste computador."
+        try:
+            return default_chat(self.brain.settings, provider, model, messages, threading.Event(), None)
+        except LocalApiError as error:
+            return str(error)
+        except Exception:
+            logger.warning("Chat remoto falhou.", exc_info=True)
+            return "Não consegui responder agora."
+
+    def _stop_network(self) -> None:
+        local, remote = self._local_api, self._remote
+        self._local_api = None
+        self._remote = None
+        for server in (local, remote):
+            if server is None:
+                continue
+            try:
+                server.stop()
+            except Exception:
+                logger.warning("Não consegui parar um serviço de rede.", exc_info=True)
+
+    def refresh_network(self) -> None:
+        """Religa os serviços opcionais. Desligados, não abrem porta."""
+        self._stop_network()
+        settings = self.brain.settings
+        try:
+            from agent.core.local_api import maybe_start
+            self._local_api = maybe_start(settings, chat=self._local_chat)
+        except Exception as error:
+            self._local_api = None
+            logger.warning("API local não abriu: %s", error)
+            self.api.push({"type": "toast", "kind": "warn", "title": "API local", "text": str(error)})
+        try:
+            from agent.core.remote_access import lan_address, open_remote
+            if settings.get("remote_access") == "on":
+                host = lan_address() or "127.0.0.1"
+                self._remote_host = host
+                self._remote = open_remote(settings, self._pairing(), chat=self._remote_chat, host=host)
+                if host == "127.0.0.1":
+                    self.api.push({"type": "toast", "kind": "info", "title": "Acesso na rede",
+                                   "text": "Não achei um endereço privado. O acesso ficou só neste computador."})
+            else:
+                self._remote = None
+        except Exception as error:
+            self._remote = None
+            logger.warning("Acesso na rede não abriu: %s", error)
+            self.api.push({"type": "toast", "kind": "warn", "title": "Acesso na rede", "text": str(error)})
+
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        self._stop_network()
         if getattr(self.api, "_jobs", None) is not None:
             self.api._jobs.shutdown()
         self.api.cancelEngineDiscovery()

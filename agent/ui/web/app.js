@@ -1511,7 +1511,12 @@ function renderSettings() {
         ${field("Modo", "Perguntar: confirma qualquer alteração. Automático: só comandos e controle do PC. Livre: nunca pergunta.", seg("permission_mode", [["perguntar", "Perguntar"], ["auto", "Automático"], ["livre", "Livre"]], st.permission_mode))}
         ${field("Escopo dos arquivos", "No projeto, criar e editar só valem dentro da pasta aberta. Um atalho que aponta para fora também é recusado. O terminal ainda não fica preso a essa pasta.", seg("file_scope", [["open", "Aberto"], ["project", "Só o projeto"]], st.file_scope === "project" ? "project" : "open"))}
         ${field("Revisão antes de gravar", "Ligado: criar e editar viram proposta. O arquivo só muda quando você aplica. O terminal e o MCP ficam bloqueados nesse modo, porque eles gravariam sem passar pela proposta.", seg("staged_writes", [["off", "Gravar na hora"], ["on", "Revisar"]], st.staged_writes === "on" ? "on" : "off"))}
-        ${field("Pontos de restauração", "Antes de cada resposta o Órbita guarda uma foto da pasta do projeto (fora dela, sem tocar no seu git). Dá para ver o que mudou e desfazer com um clique.", toggle("checkpoints", st.checkpoints !== false))}</div>
+        ${field("Pontos de restauração", "Antes de cada resposta o Órbita guarda uma foto da pasta do projeto (fora dela, sem tocar no seu git). Dá para ver o que mudou e desfazer com um clique.", toggle("checkpoints", st.checkpoints !== false))}
+        ${field("API local", "Desligada por padrão. Ligada, escuta só em 127.0.0.1. O token fica no .env (ORBITA_LOCAL_API_TOKEN), nunca nesta tela. Não executa ferramenta nem aprova controle do PC.", seg("local_api", [["off", "Desligada"], ["on", "Ligada"]], st.local_api === "on" ? "on" : "off"))}
+        ${field("Acesso na rede", "Desligado por padrão. O código expira em 5 minutos, cinco erros queimam o código e revogar corta na hora. O celular não aprova execução nem controle do PC e não vê outro projeto. Não escuta em todas as interfaces.", seg("remote_access", [["off", "Desligado"], ["on", "Ligado"]], st.remote_access === "on" ? "on" : "off"))}</div>
+        <div class="group"><h3>Aparelhos na rede</h3><p class="sub">O código aparece uma vez aqui e não vai para o log. Revogar vale na hora, mesmo que o aparelho já esteja pareado.</p>
+        <div class="row" style="padding-bottom:8px"><button class="btn" id="pair-create">Gerar código</button></div>
+        <div id="pair-code"></div><div id="remote-list"><div class="empty">Nenhum aparelho pareado.</div></div></div>
         <div class="group"><h3>Propostas</h3><div id="proposal-list"><div class="empty">Nenhuma proposta.</div></div></div>
         <div class="group"><h3>Controle do PC</h3><p class="sub" id="pc-pause-text">Se você mexer no mouse, o Órbita para e não volta sozinho.</p><button class="btn" id="pc-resume">Retomar controle</button></div>`;
       break;
@@ -1593,7 +1598,15 @@ function bindSettings() {
     call("comfyStatus");
   };
   if (settingsSection === "tarefas") loadJobs();
-  if (settingsSection === "permissoes") { loadProposals(); loadPcPause(); }
+  if (settingsSection === "permissoes") { loadProposals(); loadPcPause(); loadRemoteDevices(); }
+  const pairCreate = $("#pair-create");
+  if (pairCreate) pairCreate.onclick = async () => {
+    const result = await call("createPairCode");
+    const box = $("#pair-code");
+    if (!box) return;
+    if (result && result.code) box.innerHTML = `<p>Código <b>${esc(result.code)}</b> — vale ${esc(result.minutes)} minutos, só para o projeto aberto.</p>`;
+    else box.textContent = (result && result.error) || "Não foi possível gerar o código.";
+  };
   const exportConv = $("#export-conv");
   if (exportConv) exportConv.onclick = async () => {
     const result = await call("exportCurrentConversation");
@@ -1806,6 +1819,17 @@ async function loadProposals() {
   </div>`).join("") : `<div class="empty">Nenhuma proposta.</div>`;
   $$("[data-apply]", box).forEach(button => button.onclick = async () => { await call("applyProposal", button.dataset.apply); loadProposals(); });
   $$("[data-reject]", box).forEach(button => button.onclick = async () => { await call("rejectProposal", button.dataset.reject); loadProposals(); });
+}
+async function loadRemoteDevices() {
+  const box = $("#remote-list");
+  if (!box) return;
+  const data = await call("listRemoteDevices");
+  const devices = (data && data.devices) || [];
+  box.innerHTML = devices.length ? devices.map(device => `<div class="row" style="padding:8px 0"><span style="flex:1">${esc(device.project || "projeto")}${device.revoked ? " · revogado" : ""}</span><button class="btn small" data-revoke="${esc(device.id)}" ${device.revoked ? "disabled" : ""}>Revogar</button></div>`).join("") : `<div class="empty">Nenhum aparelho pareado.</div>`;
+  $$("[data-revoke]", box).forEach(button => button.onclick = async () => {
+    await call("revokeRemoteDevice", button.dataset.revoke);
+    loadRemoteDevices();
+  });
 }
 async function loadPcPause() {
   const text = $("#pc-pause-text");

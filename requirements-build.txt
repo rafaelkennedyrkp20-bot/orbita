@@ -1,0 +1,2 @@
+# Ambiente isolado de build: instalar requirements.txt antes deste arquivo.
+PyInstaller>=6.11,<7

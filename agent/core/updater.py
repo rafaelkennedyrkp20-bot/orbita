@@ -14,12 +14,17 @@ O GitHub é a âncora: não há servidor próprio. Duas formas de instalação:
 Nunca tocados: `data/` (conversas, configurações, perfis), `.env` (chaves), memória,
 `models/`, `venv/`. Só biblioteca padrão: este módulo também roda sozinho, com o programa
 fechado (`python -m agent.core.updater apply --pid N`).
+
+O botão do GitHub continua nesse caminho público, sem selo. `apply_verified` é outra
+rota: HMAC-SHA256 com chave que não mora no repositório. Selo ruim não grava nada.
+Um aplicativo já empacotado não se atualiza por cima dos próprios arquivos.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -398,7 +403,96 @@ def _first_existing(path: Path) -> Path:
     return path.anchor and Path(path.anchor) or path
 
 
+def restore_backup(root: Path, backup: Path, rels: list[str]) -> None:
+    """Devolve arquivos do programa. Caminho protegido no backup não volta por cima dos dados."""
+    for rel in rels:
+        rel = str(rel).replace("\\", "/")
+        if is_protected(rel) or not rel or rel.startswith("/") or ".." in rel.split("/") or ":" in rel:
+            continue
+        source = backup / rel
+        if not source.is_file():
+            continue
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+
+def apply_verified(root: Path, zip_path: Path, manifest: dict, signature: str, key: bytes) -> dict:
+    """Confere o selo e os hashes antes de gravar. Caminho protegido nunca é escrito.
+
+    A chave é compartilhada (HMAC-SHA256), não uma assinatura de chave pública.
+    O hash conferido é o SHA-256 dos bytes do arquivo, não o hash de blob do git.
+    """
+    from agent.core.update_auth import UpdateAuthError, verify_manifest
+
+    verify_manifest(manifest, signature, key)
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(files, dict) or not files:
+        raise UpdateAuthError("Manifesto sem arquivos. Nada foi alterado.")
+    try:
+        archive = zipfile.ZipFile(zip_path)
+    except (OSError, zipfile.BadZipFile) as error:
+        raise UpdateAuthError(f"Pacote ilegível. Nada foi alterado. ({error})") from error
+    try:
+        members = _safe_members(archive)
+        payloads: dict[str, bytes] = {}
+        for rel, expected in files.items():
+            rel_norm = str(rel).replace("\\", "/")
+            if not rel_norm or rel_norm.startswith("/") or ".." in rel_norm.split("/") or ":" in rel_norm:
+                raise UpdateAuthError("Caminho recusado. Nada foi alterado.")
+            if is_protected(rel_norm):
+                continue
+            if not isinstance(expected, str) or len(expected) != 64:
+                raise UpdateAuthError(f"Hash inválido em {rel_norm}. Nada foi alterado.")
+            item = members.get(rel_norm)
+            if item is None:
+                raise UpdateAuthError(f"Arquivo ausente no pacote: {rel_norm}. Nada foi alterado.")
+            data = archive.read(item)
+            digest = hashlib.sha256(data).hexdigest()
+            if not hmac.compare_digest(digest, expected.lower()):
+                raise UpdateAuthError(f"Hash não confere em {rel_norm}. Nada foi alterado.")
+            payloads[rel_norm] = data
+    finally:
+        archive.close()
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = updates_dir(root) / f"backup-{stamp}"
+    replaced: list[str] = []
+    added: list[str] = []
+    backed: list[str] = []
+    written_new: list[str] = []
+    try:
+        for rel, data in sorted(payloads.items()):
+            target = root / rel
+            if target.is_file():
+                _backup(root, backup, rel)
+                backed.append(rel)
+                replaced.append(rel)
+            else:
+                added.append(rel)
+                written_new.append(rel)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+    except OSError as error:
+        for rel in written_new:
+            try:
+                (root / rel).unlink(missing_ok=True)
+            except OSError:
+                pass
+        restore_backup(root, backup, backed)
+        raise UpdateAuthError(
+            "A gravação foi interrompida e os arquivos anteriores voltaram. Nada ficou pela metade."
+        ) from error
+    return {"replaced": replaced, "added": added, "removed": [],
+            "backup": str(backup) if replaced else ""}
+
+
 def apply(root: Path = ROOT, sha: Optional[str] = None, keep_local: bool = False) -> dict:
+    if getattr(sys, "frozen", False):
+        raise RuntimeError(
+            "O aplicativo empacotado não atualiza por cima dos próprios arquivos. "
+            "Instale um pacote novo. Conversas, chaves e modelos não foram tocados."
+        )
     mode = install_mode(root)
     problem = write_problem(root, mode)
     if problem:

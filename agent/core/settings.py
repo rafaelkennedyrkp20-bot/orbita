@@ -149,6 +149,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "file_scope": "open",
     # off: grava na hora | on: cria proposta e só grava quando a pessoa aplica
     "staged_writes": "off",
+    # off: não escuta | on: API só em 127.0.0.1, com token no ambiente e sem ferramentas
+    "local_api": "off",
+    # off: não escuta | on: outro aparelho na rede local, com pareamento e sem aprovar execução
+    "remote_access": "off",
 }
 
 PERMISSION_MODES = {
