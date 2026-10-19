@@ -86,3 +86,91 @@ def test_missing_file_drops_from_the_index_and_empty_pdf_needs_ocr(tmp_path):
     rows, warning = documents.extract_document(pdf)
     assert rows == []
     assert warning and "OCR" in warning
+
+
+def _pdf_with_text(path, pages_text):
+    """PDF com uma linha de texto por página, stream comprimido com Flate."""
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+    writer = PdfWriter()
+    for text in pages_text:
+        page = writer.add_blank_page(width=600, height=800)
+        font = DictionaryObject({
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        })
+        page[NameObject("/Resources")] = DictionaryObject({
+            NameObject("/Font"): DictionaryObject({NameObject("/F1"): font}),
+        })
+        stream = DecodedStreamObject()
+        stream.set_data(b"BT /F1 12 Tf 20 700 Td (" + text.encode("latin-1") + b") Tj ET")
+        page[NameObject("/Contents")] = writer._add_object(stream.flate_encode())
+    with path.open("wb") as handle:
+        writer.write(handle)
+    return path
+
+
+def test_long_line_is_split_and_no_chunk_passes_the_limit(tmp_path):
+    giant = {"text": "A" * (1024 * 1024), "page": 1, "section": ""}
+    chunks = documents.chunk_segments([giant])
+    assert chunks and len(chunks) <= documents.MAX_CHUNKS
+    assert max(len(chunk["text"]) for chunk in chunks) <= documents.CHUNK_CHARS
+
+    path = tmp_path / "linha.txt"
+    path.write_text("palavra comprida " * 20_000 + "\ncurta\n", encoding="utf-8")
+    rows, warning = documents.extract_document(path)
+    assert warning is None
+    chunks = documents.chunk_segments(rows)
+    assert len(chunks) == documents.MAX_CHUNKS
+    assert all(len(chunk["text"]) <= documents.CHUNK_CHARS for chunk in chunks)
+    # A divisão respeita palavras quando há espaço.
+    assert all(not chunk["text"].endswith("palav") for chunk in chunks)
+
+    root = tmp_path / "index"
+    assert documents.index_file(tmp_path, path, root=root) is None
+    assert documents.search(tmp_path, "palavra comprida", root=root)
+
+
+def test_small_pdf_with_huge_expansion_is_refused_with_a_clear_message(tmp_path):
+    pdf = _pdf_with_text(tmp_path / "bomba.pdf", ["A" * (1024 * 1024)])
+    assert pdf.stat().st_size < 16 * 1024
+    rows, warning = documents.extract_document(pdf)
+    assert rows == []
+    assert warning and "limite" in warning.lower() and "página 1" in warning
+    root = tmp_path / "index"
+    note = documents.index_file(tmp_path, pdf, root=root)
+    assert note == warning
+    assert documents.search(tmp_path, "AAAA", root=root) == []
+
+
+def test_many_pages_respect_page_and_document_quotas(tmp_path):
+    normal = _pdf_with_text(tmp_path / "longo.pdf", [f"pagina numero {n} texto comum" for n in range(1, 46)])
+    rows, warning = documents.extract_document(normal)
+    assert warning is None
+    assert max(row["page"] for row in rows) == documents.MAX_PAGES
+    assert any("não foram lidas" in row["text"] for row in rows)
+    assert all(len(c["text"]) <= documents.CHUNK_CHARS for c in documents.chunk_segments(rows))
+
+    per_page = documents.MAX_DOC_CHARS // 30
+    assert per_page < documents.MAX_PAGE_CHARS
+    heavy = _pdf_with_text(tmp_path / "pesado.pdf", ["B " * (per_page // 2)] * 35)
+    rows, warning = documents.extract_document(heavy)
+    assert rows == []
+    assert warning and "limite" in warning.lower() and "documento" in warning.lower()
+
+
+def test_pdf_extraction_has_a_deadline(tmp_path, monkeypatch):
+    pdf = _pdf_with_text(tmp_path / "lento.pdf", ["texto qualquer"] * 3)
+    monkeypatch.setattr(documents, "MAX_EXTRACT_SECONDS", 0)
+    rows, warning = documents.extract_document(pdf)
+    assert rows == []
+    assert warning and "tempo" in warning.lower()
+
+
+def test_decompressed_stream_has_its_own_ceiling(tmp_path, monkeypatch):
+    pdf = _pdf_with_text(tmp_path / "stream.pdf", ["C" * 50_000])
+    monkeypatch.setattr(documents, "MAX_STREAM_BYTES", 4096)
+    rows, warning = documents.extract_document(pdf)
+    assert rows == []
+    assert warning and "stream" in warning.lower()

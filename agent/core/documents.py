@@ -11,7 +11,9 @@ import json
 import math
 import os
 import re
+import time
 import zlib
+from contextlib import nullcontext
 from pathlib import Path
 
 from agent.core.config import DATA_DIR
@@ -21,7 +23,12 @@ DIM = 256
 MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_PAGES = 40
 MAX_CHUNKS = 80
-CHUNK_CHARS = 700
+CHUNK_CHARS = 700  # teto de cada chunk; segmentos maiores são divididos
+# Cotas do PDF: o arquivo de 8 MB é comprimido e pode expandir muito.
+MAX_PAGE_CHARS = 100_000  # texto de uma página (uma página A4 densa tem ~5 mil)
+MAX_DOC_CHARS = 400_000  # texto somado de todas as páginas lidas
+MAX_STREAM_BYTES = 16 * 1024 * 1024  # stream descomprimido (o padrão do pypdf é 75 MB)
+MAX_EXTRACT_SECONDS = 30
 _TOKEN = re.compile(r"[0-9A-Za-zÀ-ÿ]{3,}", re.IGNORECASE)
 
 
@@ -72,24 +79,124 @@ def _sections(text: str, page: int) -> list[dict]:
     return rows
 
 
+def _count(value: int) -> str:
+    return f"{value:,}".replace(",", ".")
+
+
+class _QuotaExceeded(Exception):
+    """Cota de extração estourada; a mensagem vai ao usuário."""
+
+
+class _Budget:
+    """Conta o texto antes de o pypdf montar a string da página.
+
+    O pypdf engole exceções dentro de XObjects; por isso o erro fica guardado
+    e é relançado depois da extração.
+    """
+
+    def __init__(self) -> None:
+        self.deadline = time.monotonic() + MAX_EXTRACT_SECONDS
+        self.doc = 0
+        self.page = 0
+        self.number = 0
+        self.error: _QuotaExceeded | None = None
+
+    def start_page(self, number: int) -> None:
+        self.number, self.page = number, 0
+        self.check_time()
+
+    def check_time(self) -> None:
+        if time.monotonic() >= self.deadline:
+            self.fail(f"A leitura do PDF passou do tempo limite de {MAX_EXTRACT_SECONDS} s. Nada foi indexado.")
+
+    def add(self, amount: int) -> None:
+        self.page += amount
+        self.doc += amount
+        if self.page > MAX_PAGE_CHARS:
+            self.fail(f"A página {self.number} do PDF passou do limite de {_count(MAX_PAGE_CHARS)} caracteres "
+                      "de texto. Nada foi indexado.")
+        if self.doc > MAX_DOC_CHARS:
+            self.fail(f"O texto do documento passou do limite de {_count(MAX_DOC_CHARS)} caracteres "
+                      "(PDF com expansão grande demais). Nada foi indexado.")
+
+    def fail(self, message: str) -> None:
+        self.error = self.error or _QuotaExceeded(message)
+        raise self.error
+
+    def before_operator(self, operator, operands, *_matrices) -> None:
+        if self.error:
+            raise self.error
+        self.check_time()
+        if operator in (b"Tj", b"TJ", b"'", b'"'):
+            size = 0
+            for operand in operands:
+                for item in operand if isinstance(operand, list) else (operand,):
+                    if isinstance(item, (str, bytes)):
+                        size += len(item)
+            if size:
+                self.add(size)
+
+
+def _pdf_limits():
+    """Teto de descompressão por stream, só durante esta leitura (contextvar do pypdf)."""
+    try:
+        import dataclasses
+
+        from pypdf import apply_configuration, get_configuration
+    except ImportError:  # pypdf antigo: fica com os limites internos dele
+        return nullcontext()
+    names = {field.name for field in dataclasses.fields(get_configuration())}
+    limits = {name: MAX_STREAM_BYTES for name in (
+        "zlib_maximum_output_length", "lzw_maximum_output_length", "run_length_maximum_output_length",
+        "brotli_maximum_output_length", "array_based_stream_maximum_output_length",
+        "maximum_declared_stream_length",
+    ) if name in names}
+    return apply_configuration(**limits)
+
+
 def _pdf(path: Path) -> tuple[list[dict], str | None]:
     try:
         from pypdf import PdfReader
     except ImportError:
         return [], "PDF textual precisa do pacote pypdf. OCR não está incluído."
     try:
+        from pypdf.errors import LimitReachedError
+    except ImportError:  # pypdf antigo
+        LimitReachedError = _QuotaExceeded
+    try:
+        with _pdf_limits():
+            return _pdf_rows(PdfReader, path, LimitReachedError)
+    except _QuotaExceeded as error:
+        return [], str(error)
+
+
+def _pdf_rows(PdfReader, path: Path, LimitReachedError) -> tuple[list[dict], str | None]:
+    try:
         reader = PdfReader(str(path))
+    except LimitReachedError:
+        raise _QuotaExceeded("O PDF tem um stream grande demais depois de descomprimido. Nada foi indexado.")
     except Exception:
         return [], "Não foi possível abrir este PDF."
     if getattr(reader, "is_encrypted", False):
         return [], "PDF protegido por senha não é lido."
+    budget = _Budget()
     rows = []
     total = min(len(reader.pages), MAX_PAGES)
     for index in range(total):
+        budget.start_page(index + 1)
         try:
-            text = reader.pages[index].extract_text() or ""
+            text = reader.pages[index].extract_text(visitor_operand_before=budget.before_operator) or ""
+        except _QuotaExceeded:
+            raise
+        except LimitReachedError:
+            budget.fail(f"A página {index + 1} do PDF tem um stream grande demais depois de descomprimido. "
+                        "Nada foi indexado.")
         except Exception:
             text = ""
+        if budget.error:  # estourou dentro de um XObject, onde o pypdf engole a exceção
+            raise budget.error
+        # O mapa de fontes pode expandir um código em vários caracteres: confere o resultado também.
+        budget.add(max(0, len(text) - budget.page))
         rows.extend(_sections(text, page=index + 1))
     if len(reader.pages) > MAX_PAGES:
         rows.append({"text": f"[páginas após {MAX_PAGES} não foram lidas]", "page": MAX_PAGES, "section": ""})
@@ -98,24 +205,40 @@ def _pdf(path: Path) -> tuple[list[dict], str | None]:
     return rows, None
 
 
+def _split(text: str):
+    """Fatias de no máximo CHUNK_CHARS, cortando no último espaço quando houver."""
+    start, end_of_text = 0, len(text)
+    while end_of_text - start > CHUNK_CHARS:
+        limit = start + CHUNK_CHARS
+        cut = text.rfind(" ", start + 1, limit + 1)
+        if cut <= start:
+            cut = limit
+        head = text[start:cut].strip()
+        if head:
+            yield head
+        start = cut
+    tail = text[start:].strip()
+    if tail:
+        yield tail
+
+
 def chunk_segments(segments: list[dict]) -> list[dict]:
+    """Agrupa segmentos em até MAX_CHUNKS chunks; nenhum passa de CHUNK_CHARS caracteres."""
     chunks, current, meta = [], [], None
     size = 0
     for segment in segments:
-        piece = segment.get("text") or ""
-        if not piece:
-            continue
-        if meta is None:
-            meta = {"page": segment.get("page") or 1, "section": segment.get("section") or ""}
-        if size and size + len(piece) > CHUNK_CHARS:
-            chunks.append({**meta, "text": " ".join(current)})
-            current, size = [], 0
-            meta = {"page": segment.get("page") or 1, "section": segment.get("section") or ""}
-            if len(chunks) >= MAX_CHUNKS:
-                break
-        current.append(piece)
-        size += len(piece) + 1
-    if current and len(chunks) < MAX_CHUNKS and meta:
+        info = {"page": segment.get("page") or 1, "section": segment.get("section") or ""}
+        for piece in _split(segment.get("text") or ""):
+            if size and size + len(piece) > CHUNK_CHARS:
+                chunks.append({**meta, "text": " ".join(current)})
+                if len(chunks) >= MAX_CHUNKS:
+                    return chunks
+                current, size = [], 0
+            if not current:
+                meta = info
+            current.append(piece)
+            size += len(piece) + 1
+    if current and len(chunks) < MAX_CHUNKS:
         chunks.append({**meta, "text": " ".join(current)})
     return chunks
 
