@@ -18,6 +18,10 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## [Não lançado]
 
+### Correções
+- **DeepSeek V4 enxerga imagem**: a imagem anexada não chegava ao `DeepSeek-V4.1-Flash` (ex.: pelo river), e o modelo
+  respondia que nada tinha sido enviado. Agora ela vai; nos DeepSeek só-texto, o modelo é avisado de que havia imagem.
+
 ## [0.3.0-alpha] — 2026-10-19
 
 ### Melhorias

@@ -36,12 +36,25 @@ def test_openai_tool_images_follow_tool_messages(tmp_path):
     assert out[5]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
-def test_deepseek_drops_images(tmp_path):
+def test_deepseek_text_only_drops_images_with_notice(tmp_path):
     image = tmp_path / "s.png"
     image.write_bytes(b"x")
     history = [{"role": "user", "content": "veja", "images": [str(image)]}]
     out = OpenAICompatProvider("deepseek", {"base_url": "https://api.deepseek.com"})._convert("deepseek-chat", history)
-    assert out == [{"role": "user", "content": "veja"}]
+    assert out[0]["content"].startswith("veja\n[imagem anexada não enviada")
+
+
+def test_deepseek_v4_sends_images(tmp_path):
+    """Caso real (river): DeepSeek-V4.1-Flash lê imagem, mas o Órbita a descartava em silêncio."""
+    image = tmp_path / "s.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    p = OpenAICompatProvider("river", {"base_url": "https://api.river.ai/v1"})
+    for model in ("deepseek-ai/DeepSeek-V4.1-Flash", "deepseek-ai/DeepSeek-V4.1-Flash-1017"):
+        out = p._convert(model, [{"role": "user", "content": "veja", "images": [str(image)]}])
+        assert out[0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    for model in ("deepseek-chat", "deepseek-reasoner", "deepseek-ai/DeepSeek-R1", "deepseek-v3.2", "deepseek-coder"):
+        assert not p.supports_vision(model)
+    assert p.supports_vision("deepseek-ai/deepseek-vl2")
 
 
 def test_anthropic_groups_tool_results_in_one_user_turn():

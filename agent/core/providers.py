@@ -24,6 +24,7 @@ import json
 import logging
 import math
 import mimetypes
+import re
 import threading
 import time
 import uuid
@@ -359,13 +360,14 @@ class OpenAICompatProvider(Provider):
     def base_url(self) -> str:
         return self.cfg.get("base_url", "https://api.openai.com/v1").rstrip("/")
 
+    # DeepSeek só-texto: API oficial (chat/reasoner) e gerações até a V3/R1. A V4 lê imagem.
+    DEEPSEEK_TEXT_ONLY = re.compile(r"deepseek-(chat|reasoner|coder|r1|v2|v3)")
+
     def supports_vision(self, model: str) -> bool:
         if "vision" in self.cfg:
             return bool(self.cfg["vision"])
         lowered = model.lower()
-        if "deepseek" in lowered and "vl" not in lowered:
-            return False
-        return True
+        return "vl" in lowered or not self.DEEPSEEK_TEXT_ONLY.search(lowered)
 
     def _headers(self) -> dict:
         headers = {"Content-Type": "application/json"}
@@ -415,6 +417,9 @@ class OpenAICompatProvider(Provider):
                         mime, data = _image_b64(path)
                         parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}})
                 out.append({"role": "user", "content": parts})
+            elif role == "user" and msg.get("images"):
+                out.append({"role": "user", "content": (msg.get("content") or "")
+                            + "\n[imagem anexada não enviada: este modelo não tem visão]"})
             else:
                 out.append({"role": role, "content": msg.get("content") or ""})
         flush_images()
