@@ -130,3 +130,43 @@ def test_undo_refuses_to_overwrite_file_too_big_for_safety_snapshot(project, mon
     with pytest.raises(RuntimeError, match="app.py"):
         store.undo(ws, turn.before, turn.after)
     assert _tree(ws) == state
+
+
+def _blob_stored(store, ws, data: bytes) -> bool:
+    """O conteúdo `data` virou objeto no repositório sombra (mesmo que fora do commit)?"""
+    sha = subprocess.run(["git", "hash-object", "--stdin"], input=data, capture_output=True,
+                         check=True).stdout.decode().strip()
+    shadow = store._git_dir(ws)
+    return subprocess.run(["git", "--git-dir", str(shadow), "cat-file", "-e", sha]).returncode == 0
+
+
+def test_new_file_above_limit_is_left_out(project, monkeypatch):
+    ws, store = project
+    monkeypatch.setattr(cp, "MAX_FILE_MB", 0.001)            # ~1 KiB, sem criar 21 MiB
+    big = b"g" * 4096
+    (ws / "enorme.dat").write_bytes(big)
+    (ws / "ação [1].dat").write_bytes(big + b"!")            # nome com acento e colchetes (sem glob)
+    (ws / "ação 1.dat").write_bytes(b"pequeno\n")
+    snap = store.snapshot(ws, "foto")
+    names = store._git(ws, "ls-tree", "-r", "--name-only", "-z", snap).split("\0")
+    assert "enorme.dat" not in names and "ação [1].dat" not in names
+    assert "ação 1.dat" in names and "app.py" in names
+    assert not _blob_stored(store, ws, big)
+    assert (ws / "enorme.dat").read_bytes() == big           # o arquivo do usuário fica onde está
+
+
+def test_tracked_file_that_grew_above_limit_keeps_old_blob(project, monkeypatch):
+    ws, store = project
+    monkeypatch.setattr(cp, "MAX_FILE_MB", 0.001)
+    (ws / "cresce.log").write_bytes(b"pouco\n")
+    before = store.snapshot(ws, "antes")
+    big = b"c" * 4096
+    (ws / "cresce.log").write_bytes(big)
+    _agent_edits(ws)
+    turn = store.finish(ws, before, "depois")
+    assert not _blob_stored(store, ws, big)
+    assert "cresce.log" not in {c.path for c in turn.changes}   # fora da foto, fora do desfazer
+
+    store.undo(ws, turn.before, turn.after)                    # os arquivos normais ainda desfazem
+    assert (ws / "app.py").read_text(encoding="utf-8") == "print('oi')\n"
+    assert (ws / "cresce.log").read_bytes() == big

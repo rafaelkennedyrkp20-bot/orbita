@@ -123,16 +123,22 @@ class Checkpoints:
         return self._eligible[key]
 
     def _large_files(self, workspace: Path) -> list[str]:
-        """Arquivos novos ou alterados acima do limite: ficam fora da foto."""
-        out = self._git(workspace, "ls-files", "--others", "--modified", "--exclude-standard", "-z", check=False)
-        big = []
-        for rel in filter(None, out.split("\0")):
-            try:
-                if (workspace / rel).stat().st_size > MAX_FILE_MB * 1024 * 1024:
-                    big.append(rel)
-            except OSError:
-                continue
-        return big
+        """Arquivos novos ou alterados acima do limite: ficam fora da foto.
+
+        Tem de rodar ANTES do `git add`: depois dele nada mais aparece como novo ou alterado.
+        """
+        out = self._git(workspace, "ls-files", "--others", "--modified", "--exclude-standard", "-z")
+        return [rel for rel in dict.fromkeys(filter(None, out.split("\0"))) if _too_big(workspace / rel)]
+
+    def _add_all(self, workspace: Path) -> None:
+        """`git add --all`, menos os arquivos acima do limite (nem o blob deles é gravado).
+
+        O rastreado que cresceu fica no índice com a versão antiga: para a foto, não mudou.
+        """
+        specs = ["."] + [f":(exclude,literal){rel}" for rel in self._large_files(workspace)]
+        listing = self._git_dir(workspace) / "orbita-add.txt"   # sem limite de tamanho da linha de comando
+        listing.write_bytes("\0".join(specs).encode("utf-8"))
+        self._git(workspace, "add", "--all", f"--pathspec-from-file={listing}", "--pathspec-file-nul")
 
     # ── API ──────────────────────────────────────────────────
 
@@ -142,10 +148,7 @@ class Checkpoints:
             return None
         try:
             self._ensure_repo(workspace)
-            self._git(workspace, "add", "--all", "--", ".")
-            big = self._large_files(workspace)
-            if big:
-                self._git(workspace, "reset", "--quiet", "--", *big, check=False)
+            self._add_all(workspace)
             self._git(workspace, "commit", "--quiet", "--allow-empty", "--no-verify", "-m", label[:200])
             return self._git(workspace, "rev-parse", "HEAD").strip()
         except Exception as error:   # checkpoint nunca pode derrubar a resposta
