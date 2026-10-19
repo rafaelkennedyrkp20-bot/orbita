@@ -231,9 +231,18 @@ class AgentWorker(QThread):
         folder = project_folder(self.brain) if self.brain.settings.get("checkpoints", True) else None
         label = " ".join(_visible_user_text(text).split())[:120]
         before = self.checkpoints.snapshot(folder, f"antes: {label}") if folder and not plan else None
+        failed = False
+
+        def report(kind: str, data: dict) -> None:
+            nonlocal failed
+            if kind == "error":
+                failed = True
+            self.events(kind, data)
+
         with self._plan_mode(plan):
-            response = self.brain.run_turn(text, images, events=self.events, approve=self.approve)
-        self.events("turn_end", {"text": response, "plan": plan})
+            response = self.brain.run_turn(text, images, events=report, approve=self.approve)
+        plan_ready = bool(plan and not failed and response.strip() and not response.startswith("⚠️"))
+        self.events("turn_end", {"text": response, "plan": plan, "plan_ready": plan_ready})
         turn = self.checkpoints.finish(folder, before, f"depois: {label}") if before else None
         if turn:
             self.events("checkpoint", {"workspace": turn.workspace, "before": turn.before, "after": turn.after,

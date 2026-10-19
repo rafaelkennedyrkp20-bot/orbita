@@ -1218,7 +1218,7 @@ function onEvent(e) {
       }
       else toast("error", "A atualização não foi aplicada", e.result.error || "Erro desconhecido. Nada foi alterado.", 0);
       break;
-    case "turn_end": { const last = turnEl; closeTurn(); if ((e.outputs || []).length) outputsCard(last, e.outputs); if (e.plan) planActions(); } refreshConvs().then(() => { S.conversation_id = e.conversation_id || S.conversation_id; S.conversation_title = e.title || S.conversation_title; renderTopbar(); renderConvs(); }); break;
+    case "turn_end": { const last = turnEl; closeTurn(); if ((e.outputs || []).length) outputsCard(last, e.outputs); if (e.plan_ready) planActions(); } refreshConvs().then(() => { S.conversation_id = e.conversation_id || S.conversation_id; S.conversation_title = e.title || S.conversation_title; renderTopbar(); renderConvs(); }); break;
     case "error": note("⚠ " + e.message, "err"); toast("error", "Erro", e.message); break;
     case "compacted": note(`Histórico compactado: ${e.messages} mensagens antigas viraram um resumo`); break;
     case "approval": approval(e); break;

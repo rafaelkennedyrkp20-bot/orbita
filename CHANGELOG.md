@@ -62,6 +62,11 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   tokens (entrega o que tem como PARTIAL), em vez de gastar o saldo testando sem fim.
 
 ### Corrigido
+- Falhas de conexão com a API agora passam pelas tentativas previstas e chegam ao usuário como erro compreensível;
+  limites 429 com `Retry-After` em data HTTP não interrompem a tentativa, e erro 401 em JSON de lista ainda orienta
+  a conferir a chave.
+- O modo plano só mostra **Executar plano** e **Ajustar o plano** quando o turno termina com texto e sem erro; uma
+  falha da API não deixa esses botões na conversa.
 - **Linux: o Órbita não abria.** Num Ubuntu/Debian sem `libxkbfile1` (e outras bibliotecas da janela), o programa
   fechava com um erro técnico antes de aparecer, e por isso nem dava para pôr a chave de API. Agora ele diz qual
   biblioteca falta e o comando para instalar, ao abrir e no `./iniciar_orbita.sh --check`; o README lista o comando.

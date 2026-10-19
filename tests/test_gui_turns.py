@@ -59,7 +59,21 @@ def test_plan_turn_blocks_changes_and_restores_permissions(setup):
     assert brain.settings.get("permission_mode") == "livre"   # volta ao que era
     assert brain.session.always_allowed == {"write_file"}
     assert not (ws / "novo.py").exists()
-    assert ("turn_end", {"text": "pronto", "plan": True}) in events
+    assert ("turn_end", {"text": "pronto", "plan": True, "plan_ready": True}) in events
+
+
+def test_plan_turn_provider_error_has_no_plan_actions(setup):
+    brain, worker, events, _ws = setup
+
+    def fail(_text, _images, events, _approve=None, **_kwargs):
+        events("error", {"message": "API indisponível"})
+        return "⚠️ API indisponível"
+
+    brain.run_turn = fail
+    worker._turn("faça um plano", [], False, plan=True)
+    finished = next(data for kind, data in events if kind == "turn_end")
+    assert finished["plan"] is True
+    assert finished["plan_ready"] is False
 
 
 @pytest.mark.skipif(not checkpoints.git_available(), reason="git não instalado")
