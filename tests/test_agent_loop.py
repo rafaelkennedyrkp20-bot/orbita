@@ -867,3 +867,96 @@ def test_mcp_risk_lowered_only_by_explicit_hint_or_config(brain, tmp_path):
     assert _register_mcp(brain, tmp_path, {}, additive)[0].risk == "write"
     vague = SimpleNamespace(read_only_hint=False, destructive_hint=None)   # pela especificação, destrutivo
     assert _register_mcp(brain, tmp_path, {}, vague)[0].risk == "exec"
+
+
+class _StatefulMCP:
+    """Servidor MCP simulado com um alvo aberto por vez, como o REA (open_binary → binary_overview)."""
+
+    def __init__(self, brain):
+        from agent.core.tools import Tool, ToolResult
+
+        self.target = ""
+        self.gate = threading.Barrier(2, timeout=1)
+        self.running = self.peak = 0
+        self.lock = threading.Lock()
+
+        def tracked(func):
+            def run(args, ctx):
+                with self.lock:
+                    self.running += 1
+                    self.peak = max(self.peak, self.running)
+                try:
+                    return func(args)
+                finally:
+                    with self.lock:
+                        self.running -= 1
+            return run
+
+        def open_binary(args):
+            self.target = args["path"]
+            try:
+                self.gate.wait()       # força o outro ajudante a abrir o alvo dele no meio
+            except threading.BrokenBarrierError:
+                pass
+            return ToolResult(f"aberto {self.target}")
+
+        brain.registry.register(Tool("mcp__s__open_binary", "abre", {"type": "object"}, tracked(open_binary),
+                                     risk="read", source="mcp:s", group="mcp"))
+        brain.registry.register(Tool("mcp__s__binary_overview", "resumo", {"type": "object"},
+                                     tracked(lambda args: ToolResult(f"overview {self.target}")),
+                                     risk="read", source="mcp:s", group="mcp"))
+
+
+def test_delegates_do_not_share_mcp_target_under_interleaving(brain, monkeypatch):
+    """#12: dois ajudantes no mesmo servidor MCP; A recebia o overview do alvo de B."""
+    from agent.core.mcp_hub import SERVER_LEASES
+
+    _StatefulMCP(brain)
+    reports = {}
+
+    class Team:
+        supports_native_tools = True
+
+        def supports_vision(self, model):
+            return True
+
+        def chat(self, model, messages, tools=None, **kwargs):
+            task = next(m["content"] for m in messages if m["role"] == "user")
+            tool_msgs = [m for m in messages if m["role"] == "tool"]
+            if task == "analise":
+                if not tool_msgs:
+                    return ChatResult(tool_calls=[call("delegate_task", tasks=[
+                        {"task": "alvo A.exe"}, {"task": "alvo B.exe"}])])
+                return ChatResult(text="fim")
+            target = "A.exe" if task.startswith("alvo A.exe") else "B.exe"
+            if len(tool_msgs) == 0:
+                return ChatResult(tool_calls=[call("mcp__s__open_binary", path=target)])
+            if len(tool_msgs) == 1:
+                return ChatResult(tool_calls=[call("mcp__s__binary_overview")])
+            reports[target] = tool_msgs[-1]["content"]
+            return ChatResult(text="**Status**: DONE")
+
+    monkeypatch.setattr(loop, "get_provider", lambda name, settings: Team())
+    s = session(brain)
+    assert s.run("analise") == "fim"
+    assert reports == {"A.exe": "overview A.exe", "B.exe": "overview B.exe"}
+    assert SERVER_LEASES.owner("s") is None          # nenhuma reserva presa no fim
+
+
+def test_cancelled_agent_releases_mcp_reservation(brain, provider):
+    from agent.core.mcp_hub import SERVER_LEASES
+
+    _StatefulMCP(brain)
+    s = session(brain)
+
+    def stop_after_open(messages, tools):
+        assert SERVER_LEASES.owner("s") is s           # quem abriu o alvo segura o servidor
+        s.cancel.set()
+        return ChatResult(text="parado")
+
+    provider([ChatResult(tool_calls=[call("mcp__s__open_binary", path="A.exe")]), stop_after_open])
+    s.run("x")
+    assert SERVER_LEASES.owner("s") is None
+    other = session(brain)
+    provider([ChatResult(tool_calls=[call("mcp__s__binary_overview")]), ChatResult(text="ok")])
+    assert other.run("y") == "ok"                        # outro agente usa o servidor em seguida

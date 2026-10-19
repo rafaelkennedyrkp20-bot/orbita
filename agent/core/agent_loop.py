@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from agent.core import capabilities, grok_bridge, grok_cli, integration, repo_map, routing, teamwork
+from agent.core.mcp_hub import SERVER_LEASES
 from agent.core.profiles import Profile
 from agent.core.providers import ChatResult, ProviderError, ToolsUnsupported, get_provider, new_call_id
 from agent.core.settings import resolve_workspace
@@ -670,6 +671,12 @@ class AgentSession:
 
     def run(self, text: str, images: Optional[list[str]] = None) -> str:
         """Processa um pedido até a resposta final (pode encadear várias ferramentas)."""
+        try:
+            return self._run_turn(text, images)
+        finally:
+            SERVER_LEASES.release_all(self)   # fim do turno (ou cancelamento): o servidor MCP fica livre
+
+    def _run_turn(self, text: str, images: Optional[list[str]] = None) -> str:
         if self.depth == 0:
             self.cancel.clear()
             # O ambiente avisa quando o pedido é grande o bastante para dividir em equipe (teamwork.py).
@@ -1061,6 +1068,11 @@ class AgentSession:
             return tool.risk == "exec"
         return tool.risk in ("write", "exec")
 
+    def _lease(self, server: str) -> bool:
+        """Segura o servidor MCP até o fim do turno; outro agente com o mesmo servidor espera a vez."""
+        return SERVER_LEASES.acquire(server, self, cancel=self.cancel, on_wait=lambda: self.events(
+            "status", {"text": f"Aguardando outro agente largar o servidor MCP '{server}'…", "agent": self.label}))
+
     def _authorize(self, tool: Tool, args: dict, denied: str = "") -> Optional[ToolResult]:
         """Único caminho de autorização (loop, ponte do Grok, verificação da equipe). None = pode rodar."""
         from agent.core.local_policy import tool_block
@@ -1101,7 +1113,14 @@ class AgentSession:
                 return ToolResult.error(f"Ferramenta '{call['name']}' não existe ou não está liberada neste perfil.")
             args = call.get("arguments") or {}
             ctx.call_id = call["id"]   # liga o progresso da ferramenta (ex.: aquecimento do REA) a este passo
-            return self._authorize(tool, args) or tool.run(args, ctx)
+            denied = self._authorize(tool, args)
+            if denied:
+                return denied
+            if tool.source.startswith("mcp:") and not self._lease(tool.source[4:]):
+                return ToolResult.error("Cancelado pelo usuário." if self.cancel.is_set() else
+                                        f"O servidor MCP '{tool.source[4:]}' continua em uso por outro agente. "
+                                        "Tente de novo mais tarde ou siga sem ele.")
+            return tool.run(args, ctx)
 
         for call, tool in runnable:
             self.events("tool_start", {"id": call["id"], "name": call["name"], "args": call.get("arguments", {}),
@@ -1205,6 +1224,8 @@ class AgentSession:
             return (f"## {label} ({provider}:{model} | {sub.turn_tokens} tok)\n{report[:8000]}{handoff_note(report)}",
                     {"agent": label, "tokens": sub.turn_tokens})
 
+        # Os ajudantes podem usar o mesmo servidor MCP: quem delega larga o dele (o alvo aberto pode mudar).
+        SERVER_LEASES.release_all(self)
         workers = min(self.parallel_cap, len(tasks))
         if len(tasks) > workers:
             self.events("status", {"text": f"{len(tasks)} ajudantes, {workers} por vez (os demais na fila)…",

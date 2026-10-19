@@ -77,6 +77,45 @@ RETRY_AFTER_MS = 5000
 # O modelo não tem como esperar: repete na hora. A mesma chamada repetida aguarda a execução pendente até
 # REPEAT_WAIT antes de devolver `warming_up` de novo, para não gastar um passo do modelo por segundo.
 REPEAT_WAIT = 30.0
+LEASE_WAIT = 600   # quanto um agente espera outro largar o servidor MCP antes de desistir da chamada
+
+
+class ServerLeases:
+    """Um agente por servidor MCP. O estado do servidor (alvo aberto no REA, página no navegador) é um só:
+    quem chama primeiro segura o servidor até o fim do turno, ou até delegar. Um lock por chamada não
+    basta: ainda deixaria `open A → open B → overview de A`."""
+
+    def __init__(self):
+        self._condition = threading.Condition()
+        self._owners: dict[str, object] = {}
+
+    def owner(self, server: str):
+        with self._condition:
+            return self._owners.get(server)
+
+    def acquire(self, server: str, owner, cancel: Optional[threading.Event] = None,
+                timeout: float = LEASE_WAIT, on_wait: Optional[Callable[[], None]] = None) -> bool:
+        deadline = time.monotonic() + timeout
+        warned = False
+        with self._condition:
+            while self._owners.get(server) not in (None, owner):
+                if (cancel is not None and cancel.is_set()) or time.monotonic() >= deadline:
+                    return False
+                if not warned and on_wait:
+                    warned = True
+                    on_wait()
+                self._condition.wait(0.1)
+            self._owners[server] = owner
+            return True
+
+    def release_all(self, owner) -> None:
+        with self._condition:
+            for server in [s for s, o in self._owners.items() if o is owner]:
+                del self._owners[server]
+            self._condition.notify_all()
+
+
+SERVER_LEASES = ServerLeases()
 
 DEFAULT_MCP_CONFIG: dict[str, Any] = {
     "mcpServers": {
