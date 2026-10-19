@@ -41,6 +41,34 @@ def test_safe_tool_names():
     assert len(_safe_name("servidor", "x" * 100)) == 64
 
 
+def test_cassandra_catalog_routes_and_attack_skills_stay_out(monkeypatch):
+    import agent.core.skills as skills_module
+    from agent.core.profiles import DEFAULT_PROFILES
+
+    monkeypatch.setattr(skills_module, "USER_SKILL_DIRS", [])
+    monkeypatch.setattr(skills_module, "PLUGINS_DIR", skills_module.PROJECT_SKILLS / "nao-existe")
+    profile = next(item for item in DEFAULT_PROFILES if item.id == "cassandra")
+    prompt = profile.system_prompt.lower()
+    assert profile.in_team and profile.provider == "" and profile.model == ""
+    assert "regra 0" not in prompt and "nunca me nego" not in prompt
+    assert "cassandra-catalogo" in profile.system_prompt
+
+    manager = SkillManager()
+    banned = {
+        "benchmark", "computer-use", "blocked-page-recovery", "web-search", "soul",
+        "standard-exploit-web-sqli", "cassandra-anti-censor", "decepticon-exploit",
+    }
+    assert banned.isdisjoint(manager.skills)
+    assert manager.skills["cassandra-catalogo"].when
+    assert manager.skills["humanizer"].when == ""
+    router = manager.router_text()
+    assert "cassandra-catalogo:" in router
+    assert router.count("\n- ") < 20
+    for skill in skills_module.PROJECT_SKILLS.glob("*/SKILL.md"):
+        text = skill.read_text(encoding="utf-8", errors="replace").lower()
+        assert "regra 0" not in text and "nunca me nego" not in text
+
+
 def test_project_core_skills_are_valid():
     manager = SkillManager()
     expected = {"spec-plan-tdd", "code-review-simplify", "debug-recovery", "creative-pipeline",
