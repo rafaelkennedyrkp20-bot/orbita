@@ -62,18 +62,17 @@ class LocalApi:
         return {"object": "list", "data": rows}
 
     def complete(self, provider: str, model: str, messages: list, cancel: threading.Event, on_text) -> str:
-        from agent.core.inference_queue import INFERENCE_QUEUE
-        from agent.core.local_policy import data_destination
-
-        cfg = self.settings.provider(provider)
-        resource = "local-gpu" if data_destination(provider, cfg) == "local" else None
-        with INFERENCE_QUEUE.slot(resource, cancel=cancel) as acquired:
-            if not acquired:
-                raise LocalApiError("Geração cancelada.", 499)
-            try:
-                return self.chat(provider, model, messages, cancel, on_text) or ""
-            finally:
-                self.releases += 1
+        # A vaga na fila de inferência é reservada uma vez só, no Provider.chat (_coordinated_inference).
+        # Reservar aqui também travava: a fila não é reentrante.
+        if cancel.is_set():
+            raise LocalApiError("Geração cancelada.", 499)
+        try:
+            text = self.chat(provider, model, messages, cancel, on_text) or ""
+        finally:
+            self.releases += 1
+        if not text and cancel.is_set():
+            raise LocalApiError("Geração cancelada.", 499)
+        return text
 
 
 def maybe_start(settings, chat=None) -> LocalApi | None:

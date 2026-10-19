@@ -290,3 +290,82 @@ def test_chat_endpoints_refuse_external_agent_without_starting_it(monkeypatch):
     assert status == 404 and "grok:grok-build" not in {row["id"] for row in api.model_list()["data"]}
     assert started == []
 
+
+class _FakeStream:
+    def __init__(self, lines):
+        self._lines = lines
+
+    def iter_lines(self):
+        return iter(self._lines)
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize("provider", ["ollama", "lmstudio"])
+def test_local_endpoint_reserves_the_gpu_queue_once(monkeypatch, provider):
+    """#8: a API local e o provedor reservavam local-gpu duas vezes; a fila não é reentrante e travava."""
+    from agent.core import providers
+    from agent.core.inference_queue import INFERENCE_QUEUE
+
+    calls = []
+
+    def fake_stream(client, url, payload, headers, attempts=3, timeout=None):
+        calls.append(url)
+        if url.endswith("/api/chat"):
+            return _FakeStream([json.dumps({"message": {"content": "ok"}, "done": True})])
+        return _FakeStream([])
+
+    monkeypatch.setattr(providers, "_stream_request", fake_stream)
+    monkeypatch.setattr(providers.OpenAICompatProvider, "_consume",
+                        staticmethod(lambda response, on_text, on_reasoning, cancel: providers.ChatResult(text="ok")))
+    settings = _RealSettings()
+    api = LocalApi(settings, lambda p, m, msgs, c, t: default_chat(settings, p, m, msgs, c, t), token=TOKEN)
+    cancel = threading.Event()
+    out = {}
+    worker = threading.Thread(target=lambda: out.setdefault(
+        "text", api.complete(provider, "llama", [{"role": "user", "content": "oi"}], cancel, None)), daemon=True)
+    try:
+        worker.start()
+        worker.join(5)
+        stuck = worker.is_alive()
+        cancel.set()
+        worker.join(5)
+    finally:
+        api._httpd.server_close()
+    assert not stuck, "a chamada ficou presa na fila de inferência"
+    assert out["text"] == "ok" and len(calls) == 1
+    state = INFERENCE_QUEUE.snapshot()["local-gpu"]
+    assert state["active"] == 0 and state["waiting"] == 0
+
+
+def test_local_endpoint_still_serializes_concurrent_requests(monkeypatch):
+    from agent.core import providers
+
+    lock, running, peak = threading.Lock(), [0], [0]
+
+    def fake_stream(client, url, payload, headers, attempts=3, timeout=None):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        threading.Event().wait(0.2)
+        with lock:
+            running[0] -= 1
+        return _FakeStream([json.dumps({"message": {"content": "ok"}, "done": True})])
+
+    monkeypatch.setattr(providers, "_stream_request", fake_stream)
+    settings = _RealSettings()
+    api = LocalApi(settings, lambda p, m, msgs, c, t: default_chat(settings, p, m, msgs, c, t), token=TOKEN)
+    results = []
+    workers = [threading.Thread(target=lambda: results.append(
+        api.complete("ollama", "llama", [{"role": "user", "content": "oi"}], threading.Event(), None)), daemon=True)
+        for _ in range(3)]
+    try:
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(10)
+    finally:
+        api._httpd.server_close()
+    assert results == ["ok", "ok", "ok"]
+    assert peak[0] == 1
