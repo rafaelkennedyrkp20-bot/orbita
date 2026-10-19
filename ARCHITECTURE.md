@@ -66,6 +66,8 @@ Você ──► GUI (agent/gui.py) / terminal / voz
 - **Economia**: resultados antigos de ferramentas são encurtados, turnos velhos saem do contexto,
   saídas longas são cortadas e o freio pergunta antes de ultrapassar o orçamento por tarefa/dia. Se nem o turno
   atual cabe (modelo local), `_fit_turn` encurta o excesso e descarta passos antigos; skill carregada fica inteira.
+  O teto é o menor entre o modo de economia e a janela do modelo (`capabilities.context_window`), até 1M. A
+  compactação nunca desiste: modelo econômico, principal e, por fim, resumo extraído do histórico.
 - **Subagentes** compartilham o botão Parar e o orçamento do principal; profundidade máxima 2.
 
 ## Dados (pasta `data/`)

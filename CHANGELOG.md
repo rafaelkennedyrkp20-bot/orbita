@@ -19,6 +19,14 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## [Não lançado]
 
 ### Melhorias
+- **Equipe fora do chat**: os ajudantes trabalham num painel flutuante "Equipe", com um cartão por ajudante
+  (tarefa, ação atual, passos e relatório). Dá para arrastar, recolher e fechar; ele lembra o lugar e volta quando a
+  equipe começa de novo. No chat fica só a linha "Delegando à equipe".
+- **Tamanho da interface**: Configurações › Geral (90% a 140%) ou Ctrl + / Ctrl − / Ctrl 0. A largura das barras
+  laterais muda arrastando a borda (duplo clique volta ao padrão).
+- **Contexto até 1 milhão de tokens** nos modelos que aceitam (Claude 4.6 em diante, Gemini, GPT-4.1, Llama 4);
+  os outros usam o limite real deles. O orçamento por tarefa passa a 1 milhão (quem estava no padrão antigo de 400
+  mil sobe junto).
 - **Cache do Claude entre pedidos**: o mapa do projeto e a sugestão do ambiente vão junto do pedido, e o prompt de
   sistema fica igual de um pedido para o outro (o cache do histórico deixa de ser reescrito a cada pedido).
 - **"Criado nesta resposta"**: no fim do turno, o que a resposta criou (página, imagem, vídeo, modelo) aparece num
@@ -62,6 +70,9 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
   tokens (entrega o que tem como PARTIAL), em vez de gastar o saldo testando sem fim.
 
 ### Corrigido
+- **Compactação que não falha**: tenta o modelo econômico e depois o principal, dá mais espaço aos modelos que
+  "pensam" e, se nenhum responder, resume a partir do próprio histórico. Também funciona numa tarefa longa de um
+  pedido só, mantendo o pedido e os últimos passos.
 - Falhas de conexão com a API agora passam pelas tentativas previstas e chegam ao usuário como erro compreensível;
   limites 429 com `Retry-After` em data HTTP não interrompem a tentativa, e erro 401 em JSON de lista ainda orienta
   a conferir a chave.
