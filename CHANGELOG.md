@@ -34,6 +34,38 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 - **REA sem travar o agente** (issue #4): o motor do REA aquece em segundo plano. Enquanto ele sobe, a ferramenta responde na hora
   que está aquecendo, em vez de prender o agente por minutos; repetir a mesma chamada entrega o resultado quando sai.
 
+### Segurança e confiabilidade (auditoria de 19/10, issues #7 a #23)
+- **Agente externo fora do chat sem ferramentas** (#7): a API local e o acesso pela rede recusam o Grok Build, que
+  roda com as próprias ferramentas; ele também some da lista `/v1/models`.
+- **API local responde com Ollama e LM Studio** (#8): a fila da placa era reservada duas vezes e a chamada travava.
+- **Revisão antes de gravar vale para o Grok Build** (#9): com a revisão ligada, ele não é iniciado (principal,
+  ajudante ou uso direto), porque grava sem passar pela proposta.
+- **Ferramenta MCP desconhecida pede aprovação** (#10): sem anotação, conta como execução (`exec`). Risco menor só
+  com `risk` no `mcp.json` ou anotação explícita do servidor.
+- **Somente local bloqueia a conferência de páginas** (#11): `check_web_page` não abre mais o navegador nesse modo.
+- **Ajudantes não trocam o alvo do MCP** (#12): um agente segura o servidor MCP até o fim do turno; outro que
+  precise do mesmo servidor espera a vez. Antes, o ajudante A podia receber o resumo do binário do ajudante B.
+- **Clipboard separado** (#13): `clipboard` só lê; copiar virou `set_clipboard`, que pede aprovação e respeita o
+  modo plano.
+- **Desfazer sem foto de segurança não mexe em nada** (#14): se a foto falha, os arquivos ficam como estão e a
+  interface mostra o erro; uma falha no meio volta tudo.
+- **Atualização por ZIP é tudo ou nada** (#15): colisões são vistas antes de gravar e qualquer falha devolve os
+  arquivos anteriores; o manifesto não avança.
+- **Teto de 20 MiB dos checkpoints funciona** (#16): arquivo grande não entra mais no repositório sombra.
+- **`.env`, `data/`, `models/` e `venv/` protegidos de verdade** (#17): o atualizador ignora maiúsculas onde o
+  sistema de arquivos ignora e confere o destino real (links incluídos) antes de gravar ou restaurar.
+- **Parar um trabalho antes do início vale** (#18): a sessão não apaga mais o cancelamento vindo do trabalho.
+- **Trabalho grava no projeto salvo nele** (#19): trocar de projeto depois não muda o destino; projeto que sumiu
+  vira erro explícito.
+- **Cache do Claude conta no orçamento** (#20): tokens lidos e gravados no cache entram no total da tarefa, do dia
+  e dos ajudantes, e o freio age.
+- **Argumentos encurtados continuam encurtados no envio ao Claude** (#21): o payload não recoloca mais o conteúdo
+  inteiro de `write_file` que a estimativa já tinha cortado.
+- **Parar o Claude guarda o texto já mostrado** (#22): a resposta parcial fica na conversa; ferramenta pela metade
+  não roda.
+- **Biblioteca de documentos com cotas** (#23): nenhum trecho passa de 700 caracteres, e PDF que expande demais
+  (texto por página, por documento, stream e prazo) é recusado com aviso.
+
 ### Mudanças
 - **Ghidra instalado sozinho** (issue #3): com o REA ligado, o Órbita aponta o Ghidra ou, se falta, baixa a versão oficial em
   segundo plano (SHA-256 conferido; nada pela metade se cair). O `.env` não é mais alterado. Sem JDK 21+, não baixa
