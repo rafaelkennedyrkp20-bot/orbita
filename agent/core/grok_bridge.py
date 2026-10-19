@@ -30,7 +30,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-from agent.core.config import DATA_DIR, PROJECT_ROOT
+from agent.core.config import DATA_DIR, RESOURCE_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ def bridge_python() -> str:
 
 
 def registration_command(grok_exe: str) -> list[str]:
-    return [grok_exe, "mcp", "add", SERVER_NAME, "-e", f"PYTHONPATH={PROJECT_ROOT}",
+    return [grok_exe, "mcp", "add", SERVER_NAME, "-e", f"PYTHONPATH={RESOURCE_ROOT}",
             "--", bridge_python(), "-m", "agent.core.grok_bridge"]
 
 

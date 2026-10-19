@@ -21,7 +21,6 @@ jobs:
       QT_QPA_PLATFORM: offscreen
       QTWEBENGINE_CHROMIUM_FLAGS: --disable-gpu
       PYTHONUTF8: '1'
-      ORBITA_HOME: ${{ runner.temp }}/orbita-ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,10 +29,13 @@ jobs:
           cache: pip
       - name: Bibliotecas Qt e áudio no Linux
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libopengl0 libportaudio2 libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libnss3 libasound2t64
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libopengl0 libportaudio2 libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libnss3 libasound2t64 libxkbfile1 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libpcsclite1
       - name: Instalar dependências
         run: python -m pip install -r requirements.txt
       - name: Pyflakes (sem avisos)
         run: python -m pyflakes agent tests launcher.py setup_voz.py scripts/build_package.py packaging/orbita_entry.py
       - name: Testes
+        # `runner` não existe no env do job (o arquivo inteiro era recusado); no passo, existe.
+        env:
+          ORBITA_HOME: ${{ runner.temp }}/orbita-ci
         run: python -m pytest tests -q

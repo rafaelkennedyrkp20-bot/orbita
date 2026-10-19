@@ -39,7 +39,7 @@ from agent.core import checkpoints, ghidra_setup, grok_cli, mentions, routing, t
 from agent.core.brain import Brain
 from agent.core.config import (
     DATA_DIR, GUI_VOICE_MAX_RECORD_SECONDS, GUI_VOICE_NO_SPEECH_TIMEOUT, GUI_VOICE_SILENCE_SECONDS, LOGS_DIR,
-    PROJECT_ROOT,
+    PROJECT_ROOT, RESOURCE_ROOT,
 )
 from agent.core.profiles import ALL_GROUPS, Profile
 from agent.core.providers import probe_compat_models
@@ -1295,7 +1295,7 @@ class Api(QObject):
     @pyqtSlot(str)
     def openPath(self, target: str) -> None:
         named = {"mcp": self.brain.mcp.config_path, "data": DATA_DIR, "logs": LOGS_DIR,
-                 "roadmap": PROJECT_ROOT / "ROADMAP.md", "license": PROJECT_ROOT / "LICENSE",
+                 "roadmap": RESOURCE_ROOT / "ROADMAP.md", "license": RESOURCE_ROOT / "LICENSE",
                  "catalog": routing.CATALOG_FILE}
         if target == "catalog":
             routing.load_catalog()

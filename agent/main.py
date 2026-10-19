@@ -5,6 +5,7 @@ Liga todos os módulos e inicia o agente no modo escolhido.
 
 import argparse
 import logging
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -65,6 +66,38 @@ Modos de execução:
     return parser.parse_args()
 
 
+# Bibliotecas do sistema que a janela (QtWebEngine) usa no Linux e que distros enxutas não trazem.
+# Medido num Ubuntu 24.04 do WSL: sem libxkbfile1 o Órbita fechava com ImportError antes de abrir.
+LINUX_QT_PACKAGES = {
+    "libxkbfile.so.1": "libxkbfile1", "libxcb-icccm.so.4": "libxcb-icccm4",
+    "libxcb-keysyms.so.1": "libxcb-keysyms1", "libxcb-shape.so.0": "libxcb-shape0",
+    "libxcb-cursor.so.0": "libxcb-cursor0", "libxkbcommon-x11.so.0": "libxkbcommon-x11-0",
+    "libEGL.so.1": "libegl1", "libOpenGL.so.0": "libopengl0", "libnss3.so": "libnss3",
+    "libpcsclite.so.1": "libpcsclite1",
+}
+LINUX_QT_APT = "sudo apt install " + " ".join(LINUX_QT_PACKAGES.values())
+
+
+def window_problem(error: ImportError | None = None) -> str:
+    """Por que a janela não abre, em texto para a pessoa; vazio quando abre."""
+    if error is None:
+        try:
+            import importlib
+
+            importlib.import_module("PyQt6.QtWebEngineWidgets")
+            return ""
+        except ImportError as exc:
+            error = exc
+    missing = re.search(r"([\w.+-]+\.so[\w.]*): cannot open shared object file", str(error))
+    if not missing:
+        return f"{error} → pip install -r requirements.txt"
+    library = missing.group(1)
+    package = LINUX_QT_PACKAGES.get(library)
+    return (f"falta a biblioteca do sistema {library}" + (f" (pacote {package})" if package else "") + ".\n"
+            f"   → Debian/Ubuntu: {LINUX_QT_APT}\n"
+            f"   → Fedora/Arch: instale o pacote que fornece {library}")
+
+
 def run_health_check():
     """Verifica se todas as dependências estão ok."""
     print("\n" + "═" * 60)
@@ -107,17 +140,22 @@ def run_health_check():
         print(f"{'✅' if found else '❌'} {label}: {'instalado.' if found else 'não instalado. → ' + hint}")
         checks.append(found)
 
-    # 3. Silero VAD
+    # 3. Janela (QtWebEngine): no Linux depende de bibliotecas do sistema
+    problem = window_problem()
+    print("✅ Janela (Qt WebEngine): carrega." if not problem else f"❌ Janela (Qt WebEngine): {problem}")
+    checks.append(not problem)
+
+    # Silero VAD é opcional (saiu do requirements: puxava o PyTorch); sem ele o ditado usa o volume
     try:
         import torch
         from silero_vad import load_silero_vad
         load_silero_vad(onnx=True)
         device = "CUDA" if torch.cuda.is_available() else "CPU"
         print(f"✅ Silero VAD: instalado ({device}).")
-        checks.append(True)
+    except ImportError:
+        print("ℹ️  Silero VAD: não instalado (opcional; o ditado detecta a fala pelo volume).")
     except Exception as e:
-        print(f"❌ Silero VAD: erro ({e})")
-        checks.append(False)
+        print(f"⚠️  Silero VAD: erro ({e}); o ditado detecta a fala pelo volume.")
 
     # 4. sounddevice
     try:
@@ -249,7 +287,12 @@ def main():
     logger.info(f"Modo: {mode} | perfil: {brain.profile.name} | modelo: {':'.join(brain.current_model)}")
 
     if mode == "gui":
-        from agent.gui import launch_gui
+        try:
+            from agent.gui import launch_gui
+        except ImportError as error:
+            logger.exception("A janela não abriu")
+            print(f"\n[Órbita] A janela não abre: {window_problem(error)}\n", file=sys.stderr, flush=True)
+            sys.exit(1)
         launch_gui(brain)
     elif mode == "voice":
         brain.run_voice_mode()

@@ -43,6 +43,8 @@ O repositório é só o código. Modelos, o ambiente Python (`venv`), chaves, co
 ```bash
 # Debian/Ubuntu (Fedora: sudo dnf install python3 git portaudio · Arch: sudo pacman -S python git portaudio)
 sudo apt install python3 python3-venv git libportaudio2 xdg-utils
+# Bibliotecas da janela (sem elas o Órbita não abre; o --check diz qual falta)
+sudo apt install libxkbfile1 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-cursor0 libxkbcommon-x11-0 libegl1 libopengl0 libnss3 libpcsclite1
 git clone https://github.com/rafaelkennedyrkp20-bot/orbita.git
 cd orbita
 ./iniciar_orbita.sh
