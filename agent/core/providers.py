@@ -213,9 +213,12 @@ def _stream_request(client: "httpx.Client", url: str, payload: dict, headers: di
 def _http_error(status: int, body: str) -> ProviderError:
     try:
         detail = json.loads(body)
-        detail = detail.get("error", detail)
+        if isinstance(detail, dict):
+            detail = detail.get("error", detail)
         if isinstance(detail, dict):
             detail = detail.get("message") or json.dumps(detail, ensure_ascii=False)
+        elif isinstance(detail, list):
+            detail = json.dumps(detail, ensure_ascii=False)[:500]
     except json.JSONDecodeError:
         detail = body[:500]
     text = f"HTTP {status}: {detail}"

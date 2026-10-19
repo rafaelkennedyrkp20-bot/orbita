@@ -118,3 +118,10 @@ def test_retry_after_http_date_retries_instead_of_raising(monkeypatch):
     assert len(attempts) == 2
     assert len(waits) == 1 and 0 < waits[0] <= 20
 
+
+def test_http_error_list_still_explains_authentication():
+    error = _http_error(401, '[{"message": "chave inválida"}]')
+    assert isinstance(error, ProviderError)
+    assert "HTTP 401" in str(error)
+    assert "Verifique a chave de API" in str(error)
+
