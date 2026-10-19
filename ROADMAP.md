@@ -29,7 +29,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Memória de longo prazo (`remember`/`recall`) injetada no prompt
 - [x] Lê `AGENTS.md` / `CLAUDE.md` da pasta de trabalho
 - [x] Compactação inteligente: turnos antigos viram resumo (modelo econômico) ao passar de 85% do orçamento; se falhar, volta ao corte simples
-- [ ] Contagem real de tokens por provedor (hoje: estimativa chars/3,5 quando a API não informa)
+- [ ] Contagem real de tokens por provedor (hoje: estimativa chars/3,5 quando a API não informa) — integrar à medição LU-06 (Fase 10)
 - [ ] Bloco de "raciocínio" recolhível na interface (hoje mostra só um resumo/contagem)
 - [x] DeepSeek reasoner com ferramentas: `reasoning_content` preservado nas chamadas de ferramentas do turno ativo e podado em turnos antigos (`core/providers.py`, `core/agent_loop.py`)
 
@@ -40,10 +40,10 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Perfis prontos: Assistente Geral, Líder de Desenvolvimento, Programador, Revisor, Pesquisador, Designer, Grok Build, Engenharia Reversa, Automação do PC
 - [x] Editor de perfis na interface
 - [ ] Variáveis no prompt (`{workspace}`, `{user_name}`...) — hoje o ambiente é injetado automaticamente
-- [ ] Importar/exportar perfis; galeria de perfis prontos
+- [ ] Importar/exportar perfis; galeria de perfis prontos — portabilidade em LU-15 (Fase 10); galeria continua independente
 - [ ] "Prompts rápidos" acessíveis por `/comando` na caixa de texto
 - [x] Projeto de trabalho: abrir/criar pasta pela tela inicial, pelo topo e por Ctrl+K, com projetos recentes e pasta sugerida em Documentos
-- [ ] Conversas ligadas ao projeto (filtrar a lista lateral pelo projeto aberto)
+- [ ] Conversas ligadas ao projeto (filtrar a lista lateral pelo projeto aberto) — consolidar em LU-07 (Fase 10)
 
 ## Fase 3 — MCP, Skills, Plugins e contas
 
@@ -74,11 +74,11 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Subagentes compartilham botão Parar e orçamento de tokens; profundidade máxima 2
 - [x] Roteamento automático por especialidade (`core/routing.py` + `data/model_catalog.json`): notas por especialidade e custo; escolha muda com o modo de economia e só usa modelos com acesso; tabela de capacidades vai no prompt do principal; `generate_image` escolhe o modelo de imagem sozinho
 - [x] Roteador de skills (`when` no frontmatter), handoff que exige Status DONE e resultado aprovado na Verificação (PARTIAL/BLOCKED não é entrega) e subagente que não redelega
-- [ ] Vincular `DONE` ao resultado real de `verify_project` quando `verify=True`; hoje o parser também aceita o resultado positivo autodeclarado no texto do handoff
+- [ ] Vincular `DONE` ao resultado real de `verify_project` quando `verify=True`; hoje o parser também aceita o resultado positivo autodeclarado no texto do handoff — consolidar em LU-10 (Fase 10)
 - [~] ⭐ "Descobrir o melhor agente": o Pesquisador consulta a web/benchmarks e sugere o modelo/servidor MCP ideal para uma tarefa, oferecendo configurar. Feito: skill `descobrir-agente` carregada sob demanda (tabela de modelos só ao carregar; não configura). Falta: configurar após confirmação (item abaixo)
 - [ ] Configurar modelo/servidor MCP sugerido após confirmação explícita do usuário (exige decisão: muda configuração e MCP executa código)
 - [ ] Revisão cruzada automática: ao terminar código, um segundo modelo revisa antes de entregar (opcional por perfil)
-- [ ] Tarefas agendadas e fila em segundo plano com notificação na bandeja
+- [ ] Tarefas agendadas e fila em segundo plano com notificação na bandeja — mesma entrega LU-11 (Fases 9 e 10)
 
 ## Fase 5 — Interface
 
@@ -99,7 +99,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Modo plano (Plan/Act): botão Planejar; ferramentas que alteram ficam bloqueadas no turno; botões Executar plano / Ajustar
 - [x] Dica de conversa longa: sugere conversa nova para assunto novo (menos deriva e menos tokens)
 - [x] ⭐ Desbloquear confirmação pendente (`AgentWorker.approve`) ao fechar o modal com `Esc` ou clicar em `Parar` (`agent/gui.py`, `agent/ui/web/app.js`)
-- [ ] ⭐ Painel na interface para listar, editar e apagar memórias salvas por `remember` (`agent/memory/memory_manager.py`, `agent/ui/web`)
+- [ ] ⭐ Painel na interface para listar, editar e apagar memórias salvas por `remember` (`agent/memory/memory_manager.py`, `agent/ui/web`) — consolidar em LU-07 (Fase 10)
 - [x] Conversas: menu próprio no botão direito (Renomear na linha, Apagar com confirmação) e "Renomear" no Ctrl+K
 - [x] Prompt fixo por conversa (`pinned_prompt`, salvo na conversa, injetado como "## Instruções fixas desta conversa")
 - [x] Busca de modelos (sem acento/maiúscula, por partes, contagem, setas + Enter) em Configurações › Modelos e no editor de perfil
@@ -127,9 +127,9 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Log diário só em JSONL (uma linha por interação, sem reescrever o arquivo); lê o JSON antigo do dia se existir
 - [x] Cancelamento em meio a chamada de ferramenta não grava `tool_calls` órfãos no histórico; `_TagFilter` faz `flush()` de `<` residual no fim do stream; links `file:` vindos de Markdown externo bloqueados (`agent/core/agent_loop.py`, `agent/ui/render.py`)
 - [x] Otimização de velocidade medida (`scripts/medir_velocidade.py`, `tests/test_performance.py`): import preguiçoso de `httpx`, `asyncio` e `image_gen`; cliente HTTP compartilhado; cache de catálogo, provedores, credenciais do Grok CLI, conversas (`os.scandir`) e `platform.uname` no Windows (inicialização 159,04 ms → 95,54 ms, TTFT 853,69 ms → 28,12 ms, custo por turno 116,42 ms → 5,97 ms)
-- [ ] ⭐ Mover memória e logs diários de `agent/memory/{daily_logs,long_term}` para `data/` (migrando arquivos existentes) e remover o `USER_PROFILE` morto (`agent/memory/memory_manager.py`, `agent/core/config.py`)
+- [ ] ⭐ Mover memória e logs diários de `agent/memory/{daily_logs,long_term}` para `data/` (migrando arquivos existentes) e remover o `USER_PROFILE` morto (`agent/memory/memory_manager.py`, `agent/core/config.py`) — primeira etapa de LU-07 (Fase 10)
 - [ ] Sandbox opcional para o shell; lista de comandos proibidos
-- [ ] Empacotar como `.exe` (PyInstaller) com instalador
+- [ ] Empacotar como `.exe` (PyInstaller) com instalador — consolidar em LU-18 (Fase 10)
 - [ ] Avaliar casca Tauri (Rust) reaproveitando `agent/ui/web`, para distribuir um `.exe` leve (baixa prioridade; o motor continua em Python)
 
 ---
@@ -151,7 +151,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Aviso de atualização e atualização com um clique usando o GitHub como âncora: git (`pull --ff-only`, recusa com alteração local) ou ZIP (substitui só o programa, cópia de segurança, manifesto para remoções); dados nunca tocados (`agent/core/updater.py`)
 - [x] Versionamento SemVer alfa (`agent/__init__.py`, `CHANGELOG.md`, regras no AGENTS.md); versão atual 0.2.0-alpha
 - [x] Prompt padrão para evoluir o projeto com qualquer IA (`docs/PROMPT_EVOLUCAO.md`)
-- [ ] Integração contínua no GitHub (rodar pyflakes + pytest a cada envio)
+- [ ] Integração contínua no GitHub (rodar pyflakes + pytest a cada envio) — primeira etapa de LU-18 (Fase 10)
 - [ ] Renomear pasta/arquivos `.bat` para Órbita (mantidos por compatibilidade por enquanto)
 - [ ] Sons sutis de notificação; animação do logo enquanto trabalha
 
@@ -169,12 +169,47 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] ⭐ **Skills de criação** junto com a caixa (Claude): `editar-imagem`, `modelagem-3d`, `jogos-godot`,
   `jogos-web` (Canvas/Three.js, sem instalar nada) e `video-ffmpeg`, cada uma com fluxo testável e exemplos
 - [ ] ⭐ Memória por projeto: o agente lembra sozinho decisões e estado de cada pasta de projeto entre conversas
-  (junto com o painel de memórias já listado na Fase 5)
-- [ ] ⭐ Tarefas agendadas/recorrentes ("todo dia às 9h, resuma meus e-mails"), com histórico e pausa
-- [ ] Permissões por pasta: liberar escrita só no projeto aberto e leitura no resto, configurável
+  (junto com o painel de memórias já listado na Fase 5; consolidar em LU-07, Fase 10)
+- [ ] ⭐ Tarefas agendadas/recorrentes ("todo dia às 9h, resuma meus e-mails"), com histórico e pausa — mesma entrega LU-11 da Fase 4
+- [ ] Permissões por pasta: liberar escrita só no projeto aberto e leitura no resto, configurável — consolidar em LU-17 (Fase 10)
 - [ ] Servidores MCP populares com um clique (Playwright, GitHub, Blender MCP, Godot MCP), com explicação do que fazem
 - [ ] Perguntar antes da compactação automática (hoje compacta e avisa), com opção "sempre automático"
 - [x] Equipe com modelos reais: DeepSeek, GLM e Nemotron testados, custo medido por rodada (Diário 2026-10-16)
+
+## Fase 10 — Modelos locais e estúdio integrado (análise de 2026-10-18)
+
+Plano detalhado: [comparação, fontes fixadas, dependências, arquivos e critérios de aceite](docs/PLANO_MODELOS_LOCAIS_E_ESTUDIO.md).
+Referência: Locally Uncensored 3.0.6, commit `961621610ba365160c99696edbc574c9bd5474f1`.
+Prioridades: P0 = primeiro pacote; P1 = próxima expansão; P2 = após as bases; P3 = avaliar por demanda.
+Os IDs abaixo são o detalhamento das entregas; quando citados nas fases anteriores, representam a mesma tarefa,
+não implementações adicionais. Somente a análise está concluída; nenhum recurso abaixo foi implementado nesta sessão.
+
+- [x] Analisar arquitetura e licença da referência, comparar com o Órbita e registrar plano priorizado com critérios de aceite e estratégia de testes comparativos
+- [ ] **LU-01 · P0** — Detectar e diagnosticar motores locais, começando por Ollama e LM Studio, sem substituir configuração existente
+- [ ] **LU-02 · P0** — Catálogo pequeno com capacidades, licenças, quantizações e recomendação por RAM/VRAM/disco, distinguindo estimativa de medição
+- [ ] **LU-03 · P0** — Evoluir o gerenciador de modelos: pull Ollama cancelável, inventário e ciclo de vida; downloads GGUF verificados e motor gerenciado em etapas posteriores
+- [ ] **LU-04 · P0** — Política somente local nos fluxos gerenciados e destino explícito dos dados, sem fallback silencioso para nuvem
+- [ ] **LU-05 · P1** — Coordenar chat, equipe, resumo, embeddings e voz pelo recurso local compartilhado, com fila cancelável e prevenção de deadlock
+- [ ] **LU-06 · P1** — Comparar modelos por qualidade em PT-BR, ferramentas, latência, tokens e custo no hardware do usuário (inclui medição da Fase 1)
+- [ ] **LU-07 · P1** — Memória editável e por projeto, migração para `data/` e conversas associadas ao projeto (consolida Fases 2, 5, 7 e 9)
+- [ ] **LU-08 · P1** — Biblioteca documental local com extração, busca por embeddings e fontes de arquivo/página/seção; TXT/Markdown/PDF textual primeiro
+- [ ] **LU-09 · P1** — Diff e aprovação de alterações antes da gravação, com leitura das propostas, detecção de conflitos e checkpoints existentes
+- [ ] **LU-10 · P1** — Mapa compacto do repositório, compactação que preserva pendências e status verificado ligado ao resultado real dos testes (inclui item da Fase 4)
+- [ ] **LU-11 · P2** — Jobs persistentes com estado, custo e cancelamento; depois agenda/recorrência com fuso e recuperação (consolida Fases 4 e 9)
+- [ ] **LU-12 · P2** — ComfyUI opcional: conectar instalação existente, validar workflow texto→imagem e coordenar VRAM; instalação gerenciada depois
+- [ ] **LU-13 · P2** — Galeria persistente por projeto com metadados e reutilização, unificando APIs, toolbox e geração local
+- [ ] **LU-14 · P3** — Vídeo curto local e extensões de estúdio em experimentos separados: LoRA, edição, personagem, áudio e treinamento conforme demanda/hardware/licença
+- [ ] **LU-15 · P2** — Importar/exportar conversas e perfis em formato próprio versionado; importadores externos depois de fixtures (inclui Fase 2)
+- [ ] **LU-16 · P2** — Voz interrompível em português, latência medida e cancelamento propagado, preservando o stack atual
+- [ ] **LU-17 · P1** — Permissões por projeto/pasta/ferramenta; controle do PC com escopo e pausa por intervenção humana, mantendo riscos atuais (inclui Fase 9)
+- [ ] **LU-18 · P1** — CI, instalador e canal de atualização autenticado, com componentes opcionais e preservação de dados (consolida Fases 7 e 8; CI pode iniciar no primeiro pacote)
+- [ ] **LU-19 · P3** — Avaliar API local autenticada para inferência em outros clientes, sem ferramentas do PC no MVP
+- [ ] **LU-20 · P3** — Avaliar cliente de celular pela LAN, com pareamento/revogação e sem aprovações de execução remotas; internet em etapa posterior
+- [ ] Reconciliar o item antigo de raciocínio recolhível da Fase 1: `thought()`/`endThought()` já existem; verificar visualmente antes de marcar feito
+
+Primeiro pacote recomendado: **LU-01 + LU-02 + LU-03(a)**, com LU-04 especificado antes de chamar qualquer fluxo de offline.
+Preservar Python/PyQt6/QWebEngine; sem migração Tauri, novos pesos ou instalação da referência para concluir o plano.
+AGPL-3.0-only exige avaliação de obrigações se houver incorporação de código; esta etapa só registra ideias e fontes.
 
 ## Diário
 
@@ -407,3 +442,13 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
   calling; `auto/best-chat` e `oc/*` falham sem provedor conectado. Aviso de 401 com/sem chave e pesquisa na lista do
   API manual (janela real conferida). Achados: o OmniRoute escuta em 0.0.0.0 por padrão e lê o `.env` da pasta atual.
   pytest 192 + 2 pulados.
+- **2026-10-18 — Codex (GPT-6)**: análise comparativa do Órbita com Locally Uncensored 3.0.6
+  (`961621610ba365160c99696edbc574c9bd5474f1`), por leitura de código e exemplos de testes, sem executar
+  a referência. Plano em `docs/PLANO_MODELOS_LOCAIS_E_ESTUDIO.md`: matriz de lacunas, 20 entregas com
+  prioridade/dependências/arquivos/aceite, cinco ondas, primeiro pacote local e roteiro de comparação real.
+  Fase 10 criada e itens antigos de memória, projetos, jobs, permissões, portabilidade, verificação e distribuição
+  vinculados aos mesmos IDs para evitar implementações duplicadas. Registrada AGPL-3.0-only da referência e
+  distinção entre ideias, código e licenças de modelos/componentes. Sem alteração de código, prompts, skills,
+  configurações, licença ou versão; `.claude/` preexistente preservada. Verificação: pyflakes sem avisos;
+  pytest **192 aprovados, 2 pulados, 64,75 s**; backup de settings fora do repositório; fontes/caminhos e diff
+  documental conferidos. As funcionalidades LU-01 a LU-20 continuam pendentes.
