@@ -470,6 +470,8 @@ class AgentSession:
         self.approve = approve
         self.label = label
         self.cancel = cancel or threading.Event()
+        # Evento recebido de fora (job, delegação) é de quem o criou: Parar antes do início vale.
+        self._owns_cancel = cancel is None
         self.messages: list[dict] = []
         self.activated: set[str] = set()
         self.always_allowed: set[str] = set()
@@ -677,8 +679,11 @@ class AgentSession:
             SERVER_LEASES.release_all(self)   # fim do turno (ou cancelamento): o servidor MCP fica livre
 
     def _run_turn(self, text: str, images: Optional[list[str]] = None) -> str:
-        if self.depth == 0:
+        if self.depth == 0 and self._owns_cancel:
             self.cancel.clear()
+        if self.cancel.is_set():
+            return "(interrompido)"
+        if self.depth == 0:
             # O ambiente avisa quando o pedido é grande o bastante para dividir em equipe (teamwork.py).
             asked = text.split("\n\n---\nArquivos citados", 1)[0]   # sem o anexo de @arquivos
             self._turn_hint = (teamwork.turn_hint(asked, self.tier, self.parallel_cap)
