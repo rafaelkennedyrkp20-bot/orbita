@@ -2,4 +2,4 @@
 
 # Versão do programa (SemVer, fase alfa). Regras em AGENTS.md › "Registro, commits e versão"
 # e histórico em CHANGELOG.md. Correções pequenas NÃO mudam a versão.
-__version__ = "0.3.0-alpha"
+__version__ = "0.4.0-alpha"

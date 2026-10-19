@@ -18,6 +18,11 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## [Não lançado]
 
+## [0.4.0-alpha] — 2026-10-19
+
+Imagens no DeepSeek V4 e no Grok Build, capítulo de manhwa no chat, issues #3 a #6 (turno longo em modelo local, REA e
+Ghidra pelo backend, plano de modelos locais), chamadas MCP lentas e as 17 falhas da auditoria de 19/10 (#7 a #23).
+
 ### Correções
 - **DeepSeek V4 enxerga imagem**: a imagem anexada não chegava ao `DeepSeek-V4.1-Flash` (ex.: pelo river), e o modelo
   respondia que nada tinha sido enviado. Agora ela vai; nos DeepSeek só-texto, o modelo é avisado de que havia imagem.
