@@ -492,14 +492,16 @@ class MCPHub:
         for mcp_tool in tools:
             schema = getattr(mcp_tool, "input_schema", None) or getattr(mcp_tool, "inputSchema", None) or {}
             annotations = getattr(mcp_tool, "annotations", None)
+            # Desconhecido é exec (pode rodar código). Menos que isso só por "risk" no mcp.json ou por
+            # anotação explícita: readOnlyHint → read; destructiveHint=false (só acrescenta) → write.
             if cfg.get("risk"):
                 risk = cfg["risk"]
-            elif annotations is not None and getattr(annotations, "read_only_hint", False):
+            elif annotations is not None and getattr(annotations, "read_only_hint", None) is True:
                 risk = "read"
-            elif annotations is not None and getattr(annotations, "destructive_hint", False):
-                risk = "exec"
-            else:
+            elif annotations is not None and getattr(annotations, "destructive_hint", None) is False:
                 risk = "write"
+            else:
+                risk = "exec"
             name = _safe_name(state.name, mcp_tool.name)
             self.registry.register(Tool(
                 name=name,

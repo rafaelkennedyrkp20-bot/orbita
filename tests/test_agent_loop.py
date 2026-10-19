@@ -829,3 +829,41 @@ def test_grok_build_does_not_start_while_staged_writes_is_on(brain, monkeypatch,
     brain.settings.set("staged_writes", "off", save=False)
     s.run("agora pode")
     assert len(started) == 1 and started[0][started[0].index("--permission-mode") + 1] == "bypassPermissions"
+
+
+def _register_mcp(brain, tmp_path, cfg, annotations=None):
+    from types import SimpleNamespace
+    from agent.core.mcp_hub import MCPHub, ServerState
+    from agent.core.tools import ToolResult
+
+    hub = MCPHub(brain.registry, config_path=tmp_path / "mcp.json")
+    invoked = []
+    hub.call = lambda server, tool, args, **kw: invoked.append((server, tool, args)) or ToolResult("rodou")
+    tool = SimpleNamespace(name="run_code", description="executa código", inputSchema={"type": "object"},
+                           annotations=annotations)
+    hub._register_tools(ServerState("s", cfg), [tool])
+    return brain.registry.get("mcp__s__run_code"), invoked
+
+
+def test_unannotated_mcp_tool_is_exec_and_needs_approval_in_auto(brain, provider, tmp_path):
+    """#10: MCP sem anotações virava write e rodava sem pedir aprovação no modo auto."""
+    tool, invoked = _register_mcp(brain, tmp_path, {})
+    assert tool.risk == "exec"
+    s = session(brain, mode="auto")            # approve sempre nega
+    asked = []
+    s.approve = lambda request: asked.append(request) or "no"
+    provider([ChatResult(tool_calls=[call("mcp__s__run_code", code="1")]), ChatResult(text="ok")])
+    s.run("x")
+    assert len(asked) == 1 and invoked == []
+
+
+def test_mcp_risk_lowered_only_by_explicit_hint_or_config(brain, tmp_path):
+    from types import SimpleNamespace
+
+    read = SimpleNamespace(read_only_hint=True, destructive_hint=None)
+    assert _register_mcp(brain, tmp_path, {}, read)[0].risk == "read"
+    assert _register_mcp(brain, tmp_path, {"risk": "read"})[0].risk == "read"
+    additive = SimpleNamespace(read_only_hint=False, destructive_hint=False)
+    assert _register_mcp(brain, tmp_path, {}, additive)[0].risk == "write"
+    vague = SimpleNamespace(read_only_hint=False, destructive_hint=None)   # pela especificação, destrutivo
+    assert _register_mcp(brain, tmp_path, {}, vague)[0].risk == "exec"
