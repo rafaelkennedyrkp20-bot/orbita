@@ -82,6 +82,20 @@ def test_denied_permission_returns_error_to_model(brain, provider, tmp_path):
     assert tool_msg.get("is_error") and "NEGOU" in tool_msg["content"]
 
 
+def test_local_only_blocks_shell_before_it_runs(brain, provider, tmp_path):
+    brain.settings.set("execution_policy", "local_only")
+    marker = tmp_path / "ran.txt"
+    provider([
+        ChatResult(tool_calls=[call("run_shell", command=f"Set-Content -Path '{marker}' -Value vazou")]),
+        ChatResult(text="não executei"),
+    ])
+    chat = session(brain, mode="livre")
+    assert chat.run("rode") == "não executei"
+    assert not marker.exists()
+    tool_msg = next(m for m in chat.messages if m["role"] == "tool")
+    assert "somente local" in tool_msg["content"].lower()
+
+
 def test_always_allow_skips_future_prompts(brain, provider, tmp_path):
     asked = []
     provider([

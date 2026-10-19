@@ -18,12 +18,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from agent.core.config import PROJECT_ROOT
+from agent.core.config import PROJECT_ROOT, RESOURCE_ROOT
 
 logger = logging.getLogger(__name__)
 
 HOME = Path.home()
-PROJECT_SKILLS = PROJECT_ROOT / "skills"
+PROJECT_SKILLS = RESOURCE_ROOT / "skills"
 PLUGINS_DIR = PROJECT_ROOT / "plugins"
 USER_SKILL_DIRS = [HOME / ".claude" / "skills", HOME / ".agents" / "skills", HOME / ".codex" / "skills"]
 

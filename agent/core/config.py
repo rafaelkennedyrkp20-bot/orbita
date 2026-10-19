@@ -4,14 +4,24 @@ Edite este arquivo para personalizar o comportamento do agente.
 """
 
 import os
+import sys
 from pathlib import Path
 
 # ─────────────────────────────────────────────
 # PATHS
 # ─────────────────────────────────────────────
 
-# Raiz do projeto (pasta AgentePessoal)
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Recursos são somente leitura no pacote; preferências e modelos ficam com a pessoa.
+RESOURCE_ROOT = Path(__file__).resolve().parents[2]
+if os.environ.get("ORBITA_HOME"):
+    PROJECT_ROOT = Path(os.environ["ORBITA_HOME"]).expanduser().resolve()
+elif getattr(sys, "frozen", False):
+    if os.name == "nt":
+        PROJECT_ROOT = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Orbita"
+    else:
+        PROJECT_ROOT = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "orbita"
+else:
+    PROJECT_ROOT = RESOURCE_ROOT
 
 # Variáveis do .env (chaves de API, LLM_MODEL, LOG_LEVEL...) valem para todo o programa.
 try:

@@ -43,6 +43,11 @@ def register_image_tool(registry: ToolRegistry, services) -> None:
                                     "ou defina o modelo em Configurações → Modelos e economia.")
         provider_name, model = ref.split(":", 1)
         cfg = services.settings.provider(provider_name)
+        from agent.core.local_policy import refusal
+
+        blocked = refusal(services.settings, provider_name, cfg, what="a geração de imagem")
+        if blocked:
+            return ToolResult.error(blocked)
         key = services.settings.api_key(cfg)
         if cfg.get("api_key_env") and not key:
             return ToolResult.error(f"Falta a chave {cfg['api_key_env']} para gerar imagens.")

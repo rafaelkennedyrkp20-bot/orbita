@@ -139,6 +139,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "cheap_model": "",
     # "provedor:modelo" para a ferramenta generate_image (ex.: openai:gpt-image-1)
     "image_model": "",
+    # open: nuvem e local | local_only: só motores locais verificados, sem fallback
+    "execution_policy": "open",
 }
 
 PERMISSION_MODES = {

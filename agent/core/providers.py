@@ -26,8 +26,11 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
+
+from agent.core import inference_queue
 
 if TYPE_CHECKING:
     import httpx
@@ -81,6 +84,28 @@ class ChatResult:
     stop_reason: str = ""
     native: Optional[dict] = None
     usage: dict = field(default_factory=dict)
+
+
+def _coordinated_inference(chat):
+    """Reserva apenas a chamada ao modelo, nunca ferramentas ou subagentes."""
+    @wraps(chat)
+    def run(self, *args, **kwargs):
+        on_event = kwargs.pop("on_inference_event", None)
+        cfg = dict(self.cfg)
+        if isinstance(self, OllamaProvider):
+            cfg["type"] = "ollama"
+        from agent.core.local_policy import refusal
+
+        blocked = refusal(getattr(self, "settings", None), self.name, cfg)
+        if blocked:
+            raise ProviderError(blocked)
+        resource = inference_queue.inference_resource(cfg, self.name)
+        with inference_queue.INFERENCE_QUEUE.slot(resource, cancel=kwargs.get("cancel"),
+                                                  on_event=on_event) as acquired:
+            if not acquired:
+                return ChatResult(stop_reason="cancelled")
+            return chat(self, *args, **kwargs)
+    return run
 
 
 def new_call_id() -> str:
@@ -230,6 +255,7 @@ class OllamaProvider(Provider):
             out.append(item)
         return out
 
+    @_coordinated_inference
     def chat(self, model, messages, tools=None, *, temperature=None, max_tokens=None,
              on_text=None, on_reasoning=None, cancel=None, **extra) -> ChatResult:
         settings = self.settings
@@ -379,6 +405,7 @@ class OpenAICompatProvider(Provider):
         flush_images()
         return out
 
+    @_coordinated_inference
     def chat(self, model, messages, tools=None, *, temperature=None, max_tokens=None,
              on_text=None, on_reasoning=None, cancel=None, **extra) -> ChatResult:
         payload: dict[str, Any] = {"model": model, "messages": self._convert(model, messages), "stream": True}
@@ -553,6 +580,7 @@ class AnthropicProvider(Provider):
                 push("user", [block])
         return "\n\n".join(system_parts), out
 
+    @_coordinated_inference
     def chat(self, model, messages, tools=None, *, temperature=None, max_tokens=None,
              on_text=None, on_reasoning=None, cancel=None, effort: str | None = None, **extra) -> ChatResult:
         anthropic, client = self._sdk()

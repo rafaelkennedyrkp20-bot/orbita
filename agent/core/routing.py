@@ -133,7 +133,21 @@ def candidate_refs(settings, current: Optional[tuple[str, str]] = None, catalog:
             prov = ref.partition(":")[0]
             if prov in providers and _has_cred(prov):
                 refs.append(ref)
-    return list(dict.fromkeys(refs))
+    refs = list(dict.fromkeys(refs))
+    if settings.get("execution_policy") == "local_only":
+        from agent.core.local_policy import data_destination
+
+        kept = []
+        for ref in refs:
+            provider_name = ref.partition(":")[0]
+            try:
+                cfg = settings.provider(provider_name)
+            except (KeyError, AttributeError):
+                continue
+            if data_destination(provider_name, cfg) == "local":
+                kept.append(ref)
+        return kept
+    return refs
 
 
 def specialty_for(profile=None, explicit: str = "") -> str:

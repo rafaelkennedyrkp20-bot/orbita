@@ -74,7 +74,7 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 - [x] Subagentes compartilham botão Parar e orçamento de tokens; profundidade máxima 2
 - [x] Roteamento automático por especialidade (`core/routing.py` + `data/model_catalog.json`): notas por especialidade e custo; escolha muda com o modo de economia e só usa modelos com acesso; tabela de capacidades vai no prompt do principal; `generate_image` escolhe o modelo de imagem sozinho
 - [x] Roteador de skills (`when` no frontmatter), handoff que exige Status DONE e resultado aprovado na Verificação (PARTIAL/BLOCKED não é entrega) e subagente que não redelega
-- [ ] Vincular `DONE` ao resultado real de `verify_project` quando `verify=True`; hoje o parser também aceita o resultado positivo autodeclarado no texto do handoff — consolidar em LU-10 (Fase 10)
+- [x] Vincular `DONE` ao resultado real de `verify_project` quando `verify=True`; SKIP, falha, ausência ou recusa viram PARTIAL (LU-10)
 - [~] ⭐ "Descobrir o melhor agente": o Pesquisador consulta a web/benchmarks e sugere o modelo/servidor MCP ideal para uma tarefa, oferecendo configurar. Feito: skill `descobrir-agente` carregada sob demanda (tabela de modelos só ao carregar; não configura). Falta: configurar após confirmação (item abaixo)
 - [ ] Configurar modelo/servidor MCP sugerido após confirmação explícita do usuário (exige decisão: muda configuração e MCP executa código)
 - [ ] Revisão cruzada automática: ao terminar código, um segundo modelo revisa antes de entregar (opcional por perfil)
@@ -182,19 +182,19 @@ Plano detalhado: [comparação, fontes fixadas, dependências, arquivos e crité
 Referência: Locally Uncensored 3.0.6, commit `961621610ba365160c99696edbc574c9bd5474f1`.
 Prioridades: P0 = primeiro pacote; P1 = próxima expansão; P2 = após as bases; P3 = avaliar por demanda.
 Os IDs abaixo são o detalhamento das entregas; quando citados nas fases anteriores, representam a mesma tarefa,
-não implementações adicionais. Somente a análise está concluída; nenhum recurso abaixo foi implementado nesta sessão.
+não implementações adicionais. A onda 1 está no programa; o restante segue nas próximas entregas.
 
 - [x] Analisar arquitetura e licença da referência, comparar com o Órbita e registrar plano priorizado com critérios de aceite e estratégia de testes comparativos
-- [ ] **LU-01 · P0** — Detectar e diagnosticar motores locais, começando por Ollama e LM Studio, sem substituir configuração existente
-- [ ] **LU-02 · P0** — Catálogo pequeno com capacidades, licenças, quantizações e recomendação por RAM/VRAM/disco, distinguindo estimativa de medição
-- [ ] **LU-03 · P0** — Evoluir o gerenciador de modelos: pull Ollama cancelável, inventário e ciclo de vida; downloads GGUF verificados e motor gerenciado em etapas posteriores
-- [ ] **LU-04 · P0** — Política somente local nos fluxos gerenciados e destino explícito dos dados, sem fallback silencioso para nuvem
-- [ ] **LU-05 · P1** — Coordenar chat, equipe, resumo, embeddings e voz pelo recurso local compartilhado, com fila cancelável e prevenção de deadlock
+- [x] **LU-01 · P0** — Detectar e diagnosticar motores locais, começando por Ollama e LM Studio, sem substituir configuração existente
+- [x] **LU-02 · P0** — Catálogo pequeno com capacidades, licenças, quantizações e recomendação por RAM/VRAM/disco, distinguindo estimativa de medição
+- [~] **LU-03 · P0** — Pull Ollama cancelável, inventário, descarregar e remover. Falta: download GGUF verificado e motor gerenciado
+- [x] **LU-04 · P0** — Política somente local nos fluxos gerenciados e destino explícito dos dados, sem fallback silencioso para nuvem. Terminal, web e MCP ficam bloqueados nesse modo
+- [~] **LU-05 · P1** — Fila compartilhada para chat, equipe e resumo no mesmo recurso local. Falta incluir voz e embeddings
 - [ ] **LU-06 · P1** — Comparar modelos por qualidade em PT-BR, ferramentas, latência, tokens e custo no hardware do usuário (inclui medição da Fase 1)
 - [ ] **LU-07 · P1** — Memória editável e por projeto, migração para `data/` e conversas associadas ao projeto (consolida Fases 2, 5, 7 e 9)
 - [ ] **LU-08 · P1** — Biblioteca documental local com extração, busca por embeddings e fontes de arquivo/página/seção; TXT/Markdown/PDF textual primeiro
 - [ ] **LU-09 · P1** — Diff e aprovação de alterações antes da gravação, com leitura das propostas, detecção de conflitos e checkpoints existentes
-- [ ] **LU-10 · P1** — Mapa compacto do repositório, compactação que preserva pendências e status verificado ligado ao resultado real dos testes (inclui item da Fase 4)
+- [~] **LU-10 · P1** — Mapa compacto do repositório e status verificado ligado ao `verify_project`. Falta preservar pendências na compactação de forma explícita
 - [ ] **LU-11 · P2** — Jobs persistentes com estado, custo e cancelamento; depois agenda/recorrência com fuso e recuperação (consolida Fases 4 e 9)
 - [ ] **LU-12 · P2** — ComfyUI opcional: conectar instalação existente, validar workflow texto→imagem e coordenar VRAM; instalação gerenciada depois
 - [ ] **LU-13 · P2** — Galeria persistente por projeto com metadados e reutilização, unificando APIs, toolbox e geração local
@@ -452,3 +452,11 @@ AGPL-3.0-only exige avaliação de obrigações se houver incorporação de cód
   configurações, licença ou versão; `.claude/` preexistente preservada. Verificação: pyflakes sem avisos;
   pytest **192 aprovados, 2 pulados, 64,75 s**; backup de settings fora do repositório; fontes/caminhos e diff
   documental conferidos. As funcionalidades LU-01 a LU-20 continuam pendentes.
+- **2026-10-19 — Grok 4.7**: onda 1 dos modelos locais. Descoberta de Ollama/LM Studio só em loopback, com validação do
+  JSON e sem trocar a IA sozinha. Catálogo pequeno (Qwen3 1.7B/4B e Gemma 3 4B) com estimativa de RAM/VRAM/disco,
+  selo desconhecido quando falta sensor, e tamanho de download separado do consumo. Download do Ollama com um job por
+  modelo, cancelamento que não vira "pronto" e retomada marcada como interrompida se o app fecha; descarregar e remover
+  pelo contrato do Ollama. Modo somente local bloqueia nuvem e gateway localhost não verificado em chat, resumo, equipe,
+  Grok e imagem; terminal, web e MCP ficam bloqueados porque a saída deles não é controlável. Fila de GPU para chat local
+  e mapa de repositório entraram junto porque o loop já dependia deles. Sem versionar. Verificado: pyflakes sem avisos;
+  pytest **296 aprovados, 2 pulados, 55,67 s**. Interface conferida pelo contrato dos eventos; janela real não aberta nesta etapa.

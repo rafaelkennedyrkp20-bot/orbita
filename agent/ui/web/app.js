@@ -1068,6 +1068,12 @@ function onEvent(e) {
     case "models": onModels(e); break;
     case "probe": onProbe(e); break;
     case "pull": onPull(e); break;
+    case "local_engines": localEngines = e.engines || []; engineScanActive = false; renderLocalEngines(); break;
+    case "local_catalog": localCatalog = e; catalogScanActive = false; renderLocalCatalog(); break;
+    case "ollama_action":
+      toast(e.error ? "error" : "success", "Ollama", e.error || e.message);
+      if (!e.error && settingsSection === "modelos") renderSettings();
+      break;
   }
 }
 
@@ -1393,6 +1399,13 @@ function renderSettings() {
       </div>`; break;
     case "modelos":
       html = `<h1>Modelos</h1><p class="lead">Escolha a IA principal, gerencie os modelos locais e como a equipe escolhe modelos.</p>
+        <div class="group"><h3>Onde os dados vão</h3>
+        ${field("Política", "Somente local impede chat, resumo, equipe, visão e imagem de saírem para a nuvem. Um localhost de gateway não conta como offline. Terminal, web e MCP ficam bloqueados nesse modo.", seg("execution_policy", [["open", "Normal"], ["local_only", "Somente local"]], st.execution_policy === "local_only" ? "local_only" : "open"))}
+        <p class="sub">Modelo atual: <b>${esc(DESTINATION[S.data_destination] || "indeterminado")}</b></p></div>
+        <div class="group"><h3>Motores neste computador</h3><p>Encontre Ollama, LM Studio e APIs locais já configuradas. A busca não troca sua IA.</p>
+        <div class="row"><button class="btn" id="engine-scan">${icon("search")} Procurar motores</button><button class="btn small" id="engine-cancel">Cancelar busca</button></div><div id="engine-results"></div></div>
+        <div class="group"><h3>Sugestões para este computador</h3><p>Estimativa de memória, não medição. O tamanho do download não é o uso de VRAM. PT-BR ainda não foi medido nestes modelos.</p>
+        <div class="row"><button class="btn" id="catalog-scan">${icon("cpu")} Avaliar hardware</button></div><div id="catalog-results"></div></div>
         <div class="group"><h3>Modelo principal</h3>
         ${field("Provedor", "De onde vem a IA principal.", `<select class="inp" id="m-prov">${providerOptions(S.provider, false)}</select>`)}
         ${field("Modelo", "Clique em um modelo da lista abaixo ou digite o nome exato.", `<div class="row"><input class="inp" style="flex:1" id="m-model" value="${esc(S.model)}" placeholder="nome do modelo" spellcheck="false" autocomplete="off"><button class="btn small" id="m-refresh" title="Buscar modelos do provedor">${icon("refresh")}</button></div><div class="warn-line" id="m-warn"></div>`)}
@@ -1400,7 +1413,7 @@ function renderSettings() {
         <div class="model-pick" id="m-list"></div>
         <div class="row" style="padding:10px 0"><button class="btn primary" id="m-apply">${icon("check")} Usar este modelo</button><span class="status" id="m-hint"></span></div></div>
         <div class="group"><h3>Modelos locais (Ollama)</h3><div id="local-models"><div class="empty">Carregando…</div></div>
-        <div class="row" style="padding:12px 0"><input class="inp" style="flex:1" id="pull-name" placeholder="baixar modelo, ex.: qwen3:14b, llama3.2-vision, gemma3:12b"><button class="btn" id="pull-btn">${icon("download")} Baixar</button></div>
+        <div class="row" style="padding:12px 0"><input class="inp" style="flex:1" id="pull-name" placeholder="baixar modelo, ex.: qwen3:4b, gemma3:4b"><button class="btn" id="pull-btn">${icon("download")} Baixar</button><button class="btn small" id="pull-cancel">Cancelar</button></div>
         <div id="pull-progress"></div>
         ${field("Contexto do Ollama", "Tokens de memória de trabalho (mais = mais VRAM).", `<input class="inp" type="number" step="2048" data-num="ollama_num_ctx" value="${st.ollama_num_ctx}">`)}
         ${field("Manter carregado", "Tempo que o modelo fica na VRAM entre mensagens (ex.: 10m, 1h, 0).", `<input class="inp" data-text="ollama_keep_alive" value="${esc(st.ollama_keep_alive)}">`)}</div>
@@ -1611,7 +1624,44 @@ function bindSearchableModels({ provEl, modelEl, searchEl, countEl, listEl, warn
   return render;
 }
 let modelList = null;   // redesenha a lista de Configurações › Modelos quando chegam modelos novos
+let localEngines = null, engineScanActive = false;
+let localCatalog = null, catalogScanActive = false;
+const FIT_LABEL = {comfortable: "confortável", tight: "apertado", not_recommended: "não recomendado", unknown: "desconhecido"};
+const DESTINATION = {local: "local neste computador", cloud: "nuvem", unknown: "indeterminado — localhost não prova inferência local"};
+function renderLocalEngines() {
+  const box = $("#engine-results"); if (!box) return;
+  box.innerHTML = engineScanActive ? `<p class="sub">Procurando motores neste computador…</p>`
+    : localEngines === null ? `<p class="sub">Abra o motor local e clique em Procurar motores.</p>`
+    : !localEngines.length ? `<p class="sub">Nenhum endereço local configurado. Instale Ollama ou LM Studio e ative seu servidor. Para outra porta, use API manual.</p>`
+    : localEngines.map(row => `<div class="model-row" style="flex-wrap:wrap"><span class="nm">${esc(row.label)}<br><small>${esc(row.base_url)}</small></span><span class="sz">${esc(row.message)}</span>
+      ${row.status === "available" ? `<select class="inp" style="max-width:280px" data-engine-pick="${esc(row.id)}">${row.models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join("")}</select><button class="btn small" data-engine-use="${esc(row.id)}">Usar modelo</button>` : ""}</div>`).join("");
+  $$("[data-engine-use]", box).forEach(button => button.onclick = async () => {
+    const picker = $$("[data-engine-pick]", box).find(p => p.dataset.enginePick === button.dataset.engineUse);
+    const result = await call("selectModel", button.dataset.engineUse, picker.value);
+    if (!result || result.error) return toast("error", "Modelo local", result?.error || "Não foi possível selecionar.");
+    S = result.state; renderAll(); renderSettings(); toast("success", "Modelo local ativo", S.model_label);
+  });
+}
+function renderLocalCatalog() {
+  const box = $("#catalog-results"); if (!box) return;
+  if (catalogScanActive) { box.innerHTML = `<p class="sub">Medindo RAM, disco e GPU…</p>`; return; }
+  if (!localCatalog) { box.innerHTML = `<p class="sub">A avaliação não baixa modelo nenhum e não troca a IA ativa.</p>`; return; }
+  const hw = localCatalog.hardware || {};
+  const gpus = (hw.gpus || []).map(g => `${esc(g.name)} · livre ${g.free_gb == null ? "desconhecido" : g.free_gb + " GiB"}`).join(", ") || "nenhuma NVIDIA detectada (AMD/Intel não entram nesta leitura)";
+  const rows = (localCatalog.models || []).map(row => `<div class="model-row" style="flex-wrap:wrap"><span class="nm">${esc(row.name || row.id)}<br><small>${esc((row.capabilities || []).join(", "))} · ${esc(row.license || "")}</small></span><span class="sz">${esc(FIT_LABEL[row.fit] || row.fit)} · ${row.estimated_memory_gb == null ? "sem estimativa" : row.estimated_memory_gb + " GiB estimados"} · download ${esc(String(row.download_gb ?? "?"))} GB</span><button class="btn small" data-catalog-pull="${esc(row.id)}">Baixar no Ollama</button><p class="sub" style="flex-basis:100%">${esc(row.rationale || "")}</p></div>`).join("");
+  box.innerHTML = `<p class="sub">RAM livre ${hw.ram_available_gb == null ? "indisponível" : hw.ram_available_gb + " GiB"} · disco livre ${hw.disk_free_gb == null ? "indisponível" : hw.disk_free_gb + " GiB"} · ${gpus}</p>${rows}`;
+  $$("[data-catalog-pull]", box).forEach(button => button.onclick = () => {
+    const name = button.dataset.catalogPull;
+    call("pullModel", name);
+    toast("info", "Ollama", `Baixando ${name}…`);
+  });
+}
 function bindModels() {
+  renderLocalEngines();
+  renderLocalCatalog();
+  $("#engine-scan").onclick = () => { engineScanActive = true; renderLocalEngines(); call("discoverLocalEngines"); };
+  $("#engine-cancel").onclick = () => { call("cancelEngineDiscovery"); engineScanActive = false; renderLocalEngines(); };
+  $("#catalog-scan").onclick = () => { catalogScanActive = true; renderLocalCatalog(); call("recommendLocalModels"); };
   const prov = $("#m-prov"), input = $("#m-model");
   const apply = async model => {
     if (looksLikeKey(model)) return toast("error", "Isso é uma chave", "A chave vai em Configurações › Chaves de API. Aqui escolha um modelo da lista.", 7000);
@@ -1637,10 +1687,25 @@ function bindModels() {
   });
   $("#m-apply").onclick = () => apply(input.value.trim());
   $("#pull-btn").onclick = () => { const n = $("#pull-name").value.trim(); if (n) { call("pullModel", n); toast("info", "Ollama", `Baixando ${n}…`); } };
+  $("#pull-cancel").onclick = () => { const n = $("#pull-name").value.trim(); if (n) call("cancelModelPull", n); };
   call("localModels").then(list => {
-    $("#local-models").innerHTML = (list && list.length) ? list.map(m => `<div class="model-row"><span class="nm">${esc(m.name)}</span><span class="sz">${esc(m.size)} · ${esc(m.params || "")}</span><button class="btn small" data-use-local="${esc(m.name)}">${S.provider === "ollama" && S.model === m.name ? "Em uso ✓" : "Usar"}</button></div>`).join("")
+    const box = $("#local-models"); if (!box) return;
+    box.innerHTML = (list && list.length) ? list.map(m => `<div class="model-row"><span class="nm">${esc(m.name)}</span><span class="sz">${esc(m.size)} · ${esc(m.params || "")}</span><button class="btn small" data-use-local="${esc(m.name)}">${S.provider === "ollama" && S.model === m.name ? "Em uso ✓" : "Usar"}</button><button class="btn small" data-unload="${esc(m.name)}">Descarregar</button><button class="btn small" data-delete-model="${esc(m.name)}">Remover</button></div>`).join("")
       : `<div class="empty">Ollama não está rodando ou não há modelos instalados.</div>`;
     $$("[data-use-local]").forEach(b => b.addEventListener("click", async () => { const r = await call("selectModel", "ollama", b.dataset.useLocal); S = r.state; renderAll(); renderSettings(); toast("success", "Modelo local ativo", b.dataset.useLocal); }));
+    $$("[data-unload]").forEach(b => b.addEventListener("click", () => call("ollamaAction", b.dataset.unload, "unload")));
+    $$("[data-delete-model]").forEach(b => b.addEventListener("click", async () => {
+      if (!await confirmBox("Remover modelo", `Apagar ${b.dataset.deleteModel} do Ollama? Isso não mexe em arquivos de outro programa.`)) return;
+      call("ollamaAction", b.dataset.deleteModel, "delete");
+    }));
+  });
+  call("modelJobs").then(jobs => {
+    const running = (jobs || []).find(job => job.state === "running" || job.state === "interrupted");
+    if (!running) return;
+    const box = $("#pull-progress");
+    if (box) box.innerHTML = `<div style="font-size:12px;color:var(--muted)">${esc(running.model)} · ${esc(running.message || running.state)}</div>`;
+    const input = $("#pull-name");
+    if (input && !input.value) input.value = running.model;
   });
 }
 function bindManualApi() {
@@ -1797,10 +1862,15 @@ function onModels(e) {
   }
 }
 function onPull(e) {
-  const box = $("#pull-progress"); if (!box) { if (e.done) toast(e.error ? "error" : "success", "Ollama", e.error || `${e.model} pronto!`); return; }
+  const box = $("#pull-progress");
   const pct = e.total ? Math.round(e.completed / e.total * 100) : 0;
-  box.innerHTML = `<div style="font-size:12px;color:var(--muted)">${esc(e.model)} · ${esc(e.status || "")} ${pct ? pct + "%" : ""}</div><div class="progress"><i style="width:${pct}%"></i></div>`;
-  if (e.done) { toast(e.error ? "error" : "success", "Ollama", e.error || `${e.model} pronto para usar!`); setTimeout(() => settingsSection === "modelos" && renderSettings(), 600); }
+  const label = e.cancelled ? "cancelado" : (e.status || "");
+  if (box) box.innerHTML = `<div style="font-size:12px;color:var(--muted)">${esc(e.model)} · ${esc(label)} ${pct ? pct + "%" : ""}</div><div class="progress"><i style="width:${pct}%"></i></div>`;
+  if (!e.done) return;
+  const tone = e.error ? "error" : e.cancelled ? "warn" : "success";
+  const text = e.error || (e.cancelled ? `${e.model} cancelado. Nada foi marcado como pronto.` : `${e.model} pronto para usar!`);
+  toast(tone, "Ollama", text);
+  if (!e.error && !e.cancelled) setTimeout(() => settingsSection === "modelos" && renderSettings(), 600);
 }
 
 // ── Primeira execução ──────────────────────────────────────────────────────────

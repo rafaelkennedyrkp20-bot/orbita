@@ -52,7 +52,7 @@ WEB_INDEX = brand.WEB_DIR / "index.html"
 SETTABLE = {"theme", "user_name", "default_workspace", "native_notifications", "show_reasoning", "permission_mode",
             "economy_mode", "turn_token_budget", "daily_token_budget", "voice_replies", "auto_routing",
             "cheap_model", "image_model", "ollama_num_ctx", "ollama_keep_alive", "checkpoints", "update_check",
-            "team_model", "stt_model", "stt_engine", "team_max_parallel"}
+            "team_model", "stt_model", "stt_engine", "team_max_parallel", "execution_policy"}
 # Modo plano: vai junto da mensagem; as ferramentas que alteram algo ficam bloqueadas no turno.
 PLAN_NOTE = ("\n\n[Modo plano] Ainda NÃO execute: não crie, edite nem apague arquivos e não rode comandos que "
              "alterem algo — essas ferramentas estão bloqueadas neste turno. Leia e pesquise o que precisar e "
@@ -296,6 +296,7 @@ class Api(QObject):
         self.brain = window.brain
         self._relay.connect(self.message)   # emissões de outras threads chegam enfileiradas
         self._grok_cache: tuple[float, dict] = (0.0, {})
+        self._engine_scan = threading.Event()
         # Progresso da caixa de ferramentas (instalação pela interface ou pelo agente) vai para a página.
         toolbox.get_toolbox().add_listener(lambda data: self.push({"type": "toolbox", **data}))
 
@@ -348,6 +349,7 @@ class Api(QObject):
             "profiles": profiles,
             "team": [p for p in profiles if p["in_team"]],
             "provider": provider, "model": model, "model_label": _short_model(f"{provider}:{model}"),
+            "data_destination": self._data_destination(provider),
             "workspace": str(workspace),
             "workspace_name": workspace.name,
             "recent_workspaces": brain.recent_workspaces(),
@@ -384,6 +386,15 @@ class Api(QObject):
             sha = updater.local_sha(mode=mode) or ""
             self._install = {"mode": mode, "sha": sha[:7], "repo": updater.REPO}
         return self._install
+
+    def _data_destination(self, provider: str) -> str:
+        from agent.core.local_policy import data_destination
+
+        try:
+            cfg = self.brain.settings.provider(provider)
+        except KeyError:
+            return "unknown"
+        return data_destination(provider, cfg)
 
     def _state_json(self) -> str:
         return json.dumps(self.state(), ensure_ascii=False, default=str)
@@ -794,29 +805,91 @@ class Api(QObject):
                  "params": (m.get("details") or {}).get("parameter_size", "")} for m in models]
         return json.dumps(sorted(rows, key=lambda r: r["name"]))
 
-    @pyqtSlot(str)
-    def pullModel(self, name: str) -> None:
-        base = self.brain.settings.provider("ollama").get("base_url", "http://127.0.0.1:11434").rstrip("/")
+    @pyqtSlot()
+    def discoverLocalEngines(self) -> None:
+        from agent.core.local_engines import detect_local_engines
+
+        self._engine_scan.set()
+        cancel = self._engine_scan = threading.Event()
+        providers = self.brain.settings.providers()
 
         def work():
-            last = 0.0
+            rows = detect_local_engines(providers, cancel=cancel)
+            if not cancel.is_set():
+                self.push({"type": "local_engines", "engines": rows})
+        threading.Thread(target=work, name="engine-discovery", daemon=True).start()
+
+    @pyqtSlot()
+    def cancelEngineDiscovery(self) -> None:
+        self._engine_scan.set()
+
+    def _pull_base(self) -> str:
+        return self.brain.settings.provider("ollama").get("base_url", "http://127.0.0.1:11434").rstrip("/")
+
+    def _emit_pull(self, event: dict) -> None:
+        if event.get("done") and event.get("state") == "done":
+            self.brain._local_models = None
+        self.push({"type": "pull", **event})
+
+    @pyqtSlot(str)
+    def pullModel(self, name: str) -> None:
+        from agent.core.model_manager import get_manager
+
+        try:
+            get_manager().start_pull(self._pull_base(), name, self._emit_pull)
+        except ValueError as error:
+            self.push({"type": "pull", "model": name, "done": True, "error": str(error), "state": "error"})
+
+    @pyqtSlot(str)
+    def cancelModelPull(self, name: str) -> None:
+        from agent.core.model_manager import get_manager
+
+        get_manager().cancel(name)
+
+    @pyqtSlot(result=str)
+    def modelJobs(self) -> str:
+        from agent.core.model_manager import get_manager
+
+        return json.dumps(get_manager().jobs(), ensure_ascii=False)
+
+    @pyqtSlot(str, str)
+    def ollamaAction(self, name: str, action: str) -> None:
+        from agent.core.model_manager import ollama_action
+
+        base = self._pull_base()
+
+        def work():
             try:
-                with httpx.stream("POST", f"{base}/api/pull", json={"model": name, "stream": True}, timeout=None) as r:
-                    for line in r.iter_lines():
-                        if not line.strip():
-                            continue
-                        item = json.loads(line)
-                        if item.get("error"):
-                            raise RuntimeError(item["error"])
-                        if time.time() - last > 0.4:
-                            last = time.time()
-                            self.push({"type": "pull", "model": name, "status": item.get("status", ""),
-                                       "completed": item.get("completed", 0), "total": item.get("total", 0)})
+                message = ollama_action(base, name, action)
                 self.brain._local_models = None
-                self.push({"type": "pull", "model": name, "status": "concluído", "completed": 1, "total": 1, "done": True})
+                self.push({"type": "ollama_action", "model": name, "action": action, "message": message})
             except Exception as error:
-                self.push({"type": "pull", "model": name, "done": True, "error": f"Falha ao baixar {name}: {error}"})
-        threading.Thread(target=work, daemon=True).start()
+                self.push({"type": "ollama_action", "model": name, "action": action, "error": str(error)})
+        threading.Thread(target=work, name="ollama-action", daemon=True).start()
+
+    @pyqtSlot()
+    def recommendLocalModels(self) -> None:
+        from agent.actions.gpu_monitor import get_hardware_info
+        from agent.core.local_catalog import model_recommendations
+
+        def work():
+            hardware = get_hardware_info(PROJECT_ROOT)
+            rows = model_recommendations(hardware)
+            public = [{
+                "id": row.get("id"), "name": row.get("name"), "fit": row.get("fit"),
+                "execution_mode": row.get("execution_mode"), "rationale": row.get("rationale"),
+                "download_gb": row.get("download_gb"), "estimated_memory_gb": row.get("estimated_memory_gb"),
+                "license": row.get("license"), "capabilities": row.get("capabilities") or [],
+                "pt_br_validation": row.get("pt_br_validation"),
+            } for row in rows]
+            self.push({"type": "local_catalog", "hardware": {
+                "ram_total_gb": hardware.get("ram_total_gb"),
+                "ram_available_gb": hardware.get("ram_available_gb"),
+                "disk_free_gb": hardware.get("disk_free_gb"),
+                "gpus": [{"name": gpu.get("name"), "free_gb": gpu.get("free_gb"),
+                          "total_gb": gpu.get("total_gb")} for gpu in hardware.get("gpus") or []],
+            }, "models": public})
+        threading.Thread(target=work, name="local-catalog", daemon=True).start()
 
     # ── MCP, Grok, arquivos ──────────────────────────────────
 
@@ -1175,6 +1248,7 @@ class MainWindow(QMainWindow):
             QApplication.alert(self, 0)
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        self.api.cancelEngineDiscovery()
         self.worker.stop()
         self.worker.wait(3000)
         if self._tray:

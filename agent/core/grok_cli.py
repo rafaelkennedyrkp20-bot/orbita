@@ -159,6 +159,11 @@ class GrokBuildProvider(Provider):
                   cancel: Optional[threading.Event] = None,
                   env: Optional[dict] = None) -> tuple[str, Optional[str], dict]:
         """Executa um turno do Grok Build. Devolve (texto, id da sessão, uso de tokens)."""
+        from agent.core.local_policy import refusal
+
+        blocked = refusal(self.settings, self.name, self.cfg)
+        if blocked:
+            raise ProviderError(blocked)
         exe = executable()
         if not exe:
             raise ProviderError("Grok Build não instalado. Abra ⚙ Configurações → Conta Grok → Instalar.")

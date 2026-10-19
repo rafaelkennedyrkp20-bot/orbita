@@ -238,6 +238,7 @@ def _register_files(r: ToolRegistry) -> None:
         python = _project_python(cwd)
         checks = []
         failed = False
+        incomplete = False
 
         # 1) Lint estático (pyflakes)
         targets = [args["target"]] if args.get("target") else _lint_targets(cwd)
@@ -249,6 +250,7 @@ def _register_files(r: ToolRegistry) -> None:
             )
             out = (proc.stdout + proc.stderr).strip()
             if "No module named pyflakes" in out:
+                incomplete = True
                 checks.append("[SKIP] pyflakes não instalado neste projeto (pip install pyflakes)")
             elif proc.returncode == 0:
                 checks.append(f"[PASS] pyflakes ({lint_target}): 0 erros")
@@ -256,6 +258,7 @@ def _register_files(r: ToolRegistry) -> None:
                 failed = True
                 checks.append(f"[FAIL] pyflakes ({lint_target}):\n{out[:2000]}")
         except Exception as exc:
+            incomplete = True
             checks.append(f"[SKIP] pyflakes indisponível: {exc}")
 
         # 2) Testes automatizados (pytest)
@@ -268,6 +271,7 @@ def _register_files(r: ToolRegistry) -> None:
                 )
                 out = ANSI_RE.sub("", (proc.stdout + proc.stderr).strip())
                 if "No module named pytest" in out:
+                    incomplete = True
                     checks.append("[SKIP] pytest não instalado neste projeto (pip install pytest)")
                 elif proc.returncode == 0:
                     summary_line = out.splitlines()[-1] if out else "ok"
@@ -278,9 +282,12 @@ def _register_files(r: ToolRegistry) -> None:
             except Exception as exc:
                 failed = True
                 checks.append(f"[FAIL] pytest erro: {exc}")
+        elif not args.get("skip_tests"):
+            incomplete = True
+            checks.append("[SKIP] pytest: projeto sem pasta tests; informe pytest_args para verificar outro local")
 
-        status = "FAIL" if failed else "PASS"
-        return ToolResult(text=f"Quality Gate: {status}\n" + "\n".join(checks), is_error=failed)
+        status = "FAIL" if failed else ("INCOMPLETE" if incomplete else "PASS")
+        return ToolResult(text=f"Quality Gate: {status}\n" + "\n".join(checks), is_error=failed or incomplete)
 
 
 def _project_python(folder: Path) -> str:
