@@ -131,7 +131,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "economy_mode": "equilibrado",
     # Freio: pausa e pergunta ao passar destes limites (0 = sem limite).
     # Modelos locais (Ollama) não contam no orçamento diário.
-    "turn_token_budget": 400000,
+    "turn_token_budget": 1_000_000,
     "daily_token_budget": 0,
     # Escolhe automaticamente o melhor modelo por especialidade para subagentes (data/model_catalog.json)
     "auto_routing": True,
@@ -217,6 +217,8 @@ class Settings:
         try:
             stored = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(stored, dict):
+                if stored.get("turn_token_budget") == 400000:   # padrão antigo: sobe junto com o novo padrão
+                    stored["turn_token_budget"] = DEFAULT_SETTINGS["turn_token_budget"]
                 self._data.update(stored)
         except (OSError, json.JSONDecodeError) as error:
             logger.warning("settings.json inválido, usando padrões: %s", error)

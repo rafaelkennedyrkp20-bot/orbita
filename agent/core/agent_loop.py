@@ -919,7 +919,9 @@ class AgentSession:
 
     def _history_budget(self, tools: list[Tool], system_text: str) -> int:
         """Tokens disponíveis para o histórico depois do prompt de sistema e das ferramentas."""
-        budget = self.policy.context_tokens
+        # Até 1M onde o modelo aceita, com 10% de folga para a resposta; o modo de economia pode baixar o teto.
+        window = min(capabilities.context_window(self.provider_name, self.model), capabilities.MAX_CONTEXT)
+        budget = min(self.policy.context_tokens, int(window * 0.9))
         if self.provider_name == "ollama":
             budget = min(budget, int(self.settings.get("ollama_num_ctx", 16384) * 0.8))
         tool_tokens = 0 if self.prompted_tools else sum(

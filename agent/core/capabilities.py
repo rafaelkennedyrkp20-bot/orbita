@@ -52,6 +52,28 @@ def tier(provider: str, model: str) -> str:
     return "standard"
 
 
+# Janela de contexto por modelo (tokens), a primeira regra que casa vence. Claude: guia oficial da Anthropic
+# (2026-10): da linha 4.6 em diante e o Haiku 5.5 têm 1M sem cabeçalho beta; Haiku 4.5 e anteriores, 200K.
+CONTEXT_WINDOWS = [
+    (re.compile(r"claude-(3|haiku-4|(opus|sonnet)-4($|-\d{8}|[-.]?[0-5]($|[^0-9])))", re.I), 200_000),
+    (re.compile(r"claude|fable|mythos", re.I), 1_000_000),
+    (re.compile(r"gpt-4\.1", re.I), 1_047_576),
+    (re.compile(r"gpt-5", re.I), 400_000),
+    (re.compile(r"(^|[/:-])o[134](-|$)", re.I), 200_000),
+    (re.compile(r"gemini", re.I), 1_048_576),
+    (re.compile(r"grok-4(\.\d)?-fast", re.I), 2_000_000),
+    (re.compile(r"grok", re.I), 256_000),
+    (re.compile(r"llama-4", re.I), 1_000_000),
+]
+DEFAULT_CONTEXT = 128_000   # modelo de nuvem desconhecido: valor seguro na maioria das APIs
+MAX_CONTEXT = 1_000_000     # teto do Órbita, mesmo quando o modelo aceita mais
+
+
+def context_window(provider: str, model: str) -> int:
+    """Quantos tokens de contexto o modelo aceita (estimativa pelo nome; desconhecido = 128K)."""
+    return next((tokens for pattern, tokens in CONTEXT_WINDOWS if pattern.search(model or "")), DEFAULT_CONTEXT)
+
+
 def step_multiplier(level: str) -> float:
     return {"frontier": 2.0, "compact": 1.0}.get(level, 1.0)
 

@@ -3,8 +3,8 @@ usage.py — Medidor de consumo de tokens e políticas de economia.
 
 Modos de economia (escolhidos na interface):
     maximo       contexto enxuto, saídas de ferramentas curtas, subagentes no modelo econômico
-    equilibrado  padrão: bom contexto, corta o que é velho/repetido
-    livre        contexto amplo; só o orçamento definido pelo usuário freia
+    equilibrado  padrão: contexto até 1M nos modelos que aceitam, corta o que é velho/repetido
+    livre        contexto até 1M e saídas de ferramentas maiores; só o orçamento do usuário freia
 
 O "freio": se uma tarefa passar do orçamento por tarefa (ou o dia passar do orçamento
 diário), o agente PAUSA e pergunta se deve continuar — nunca gasta tudo de uma vez.
@@ -25,7 +25,7 @@ USAGE_FILE = DATA_DIR / "usage.json"
 
 @dataclass(frozen=True)
 class EconomyPolicy:
-    context_tokens: int          # orçamento de contexto enviado por chamada
+    context_tokens: int          # teto de contexto por chamada (o limite real é o menor entre este e o do modelo)
     tool_output_chars: int       # tamanho máximo de cada resultado de ferramenta
     old_tool_output_chars: int   # resultados antigos (turnos anteriores) são encurtados
     max_steps: int
@@ -38,8 +38,8 @@ class EconomyPolicy:
 
 ECONOMY_POLICIES = {
     "maximo": EconomyPolicy(24_000, 8_000, 600, 15, 2_500),
-    "equilibrado": EconomyPolicy(64_000, 20_000, 1_500, 30, 6_000),
-    "livre": EconomyPolicy(180_000, 40_000, 6_000, 60, 12_000),
+    "equilibrado": EconomyPolicy(1_000_000, 20_000, 1_500, 30, 6_000),
+    "livre": EconomyPolicy(1_000_000, 40_000, 6_000, 60, 12_000),
 }
 
 ECONOMY_LABELS = {
