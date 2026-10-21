@@ -18,6 +18,14 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## [Não lançado]
 
+### Adicionado
+- Integração funcional da Cassandra além das skills: DeepSeek Web pela conta (login manual, Instant/Expert,
+  raciocínio, busca e exclusão opcional da própria sessão), conversa temporária e anexos de arquivos/pastas.
+- Chat no navegador com streaming e aprovações, fila HTTP de pedidos, fontes alternativas Brave/Google e
+  atalhos de terminal com Markdown ao vivo. `--allow-shell` vale somente nesta execução.
+- Guia de uso e matriz de equivalências em `docs/CASSANDRA_PARIDADE.md`. DeepSeek real ainda exige login humano;
+  verificações automatizadas usam transporte simulado e navegador contra servidor local.
+
 ## [0.4.1-alpha] — 2026-10-21
 
 Correção urgente.

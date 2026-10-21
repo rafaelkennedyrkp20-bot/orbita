@@ -5,6 +5,7 @@ Liga todos os módulos e inicia o agente no modo escolhido.
 
 import argparse
 import logging
+import os
 import re
 import shutil
 import sys
@@ -43,7 +44,7 @@ def setup_logging():
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None) -> argparse.Namespace:
     """Analisa os argumentos da linha de comando."""
     parser = argparse.ArgumentParser(
         description="Órbita — seu agente pessoal de IA",
@@ -63,7 +64,35 @@ Modos de execução:
     parser.add_argument("--check", action="store_true", help="Verificar configurações")
     parser.add_argument("--model", type=str, help="provedor:modelo (ex: deepseek:deepseek-chat)")
     parser.add_argument("--profile", type=str, help="Perfil a usar (ex: programador)")
-    return parser.parse_args()
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--web", action="store_true", help="Chat no navegador deste computador")
+    modes.add_argument("--poll", action="store_true", help="Consultar pedidos de uma fila HTTP")
+    modes.add_argument("--deepseek-login", action="store_true", help="Entrar manualmente na conta DeepSeek Web")
+    modes.add_argument("--prompt", type=str, help="Executar um pedido no terminal e sair")
+    parser.add_argument("--port", type=int, default=8080, help="Porta do chat no navegador (padrão: 8080)")
+    parser.add_argument("--poll-url", help="URL completa da fila /agent/pending-prompts")
+    parser.add_argument("--poll-once", action="store_true", help="Consultar a fila uma vez e sair")
+    parser.add_argument("--delay", type=float, default=30, help="Intervalo da consulta à fila em segundos")
+    parser.add_argument("--temporary", "--ghost", action="store_true", help="Sem salvar conversa ou memória desta sessão")
+    parser.add_argument("--allow-shell", action="store_true", help="Modo livre nesta execução: autorizar ferramentas sem perguntas")
+    parser.add_argument("--attach", action="append", default=[], help="Arquivo ou pasta para o pedido --prompt; pode repetir")
+    args = parser.parse_args(argv)
+    if args.attach and args.prompt is None:
+        parser.error("--attach precisa de --prompt; no terminal interativo use :attach caminho")
+    if args.poll_once and not args.poll:
+        parser.error("--poll-once precisa de --poll")
+    if args.poll:
+        from agent.core.prompt_polling import validate_polling
+
+        base = os.getenv("CASSANDRA_API_URL", "").strip().rstrip("/")
+        args.poll_url = args.poll_url or (base + "/agent/pending-prompts" if base else "")
+        try:
+            validate_polling(args.poll_url, args.delay)
+        except ValueError as error:
+            parser.error(str(error))
+    if not 0 <= args.port <= 65535:
+        parser.error("--port precisa estar entre 0 e 65535")
+    return args
 
 
 # Bibliotecas do sistema que a janela (QtWebEngine) usa no Linux e que distros enxutas não trazem.
@@ -258,6 +287,15 @@ def main():
 
     args = parse_args()
 
+    if args.deepseek_login:
+        from agent.core.deepseek_web import login
+        from agent.core.settings import Settings
+
+        settings = Settings()
+        login(settings.provider("deepseek_web"), settings)
+        print("Conta DeepSeek pronta neste perfil do navegador.")
+        return
+
     # Modo de verificação
     if args.check:
         run_health_check()
@@ -273,6 +311,42 @@ def main():
             brain.select_model(provider, model)
         else:
             brain.select_model("ollama", args.model)
+
+    if args.temporary:
+        brain.set_temporary(True)
+    if args.allow_shell:
+        brain.settings.set_session_only("permission_mode", "livre")
+
+    if args.web or args.poll or args.prompt is not None:
+        try:
+            if args.web:
+                from agent.core.browser_chat import BrowserChatServer
+                import webbrowser
+
+                server = BrowserChatServer(brain, port=args.port).start()
+                print(f"Chat do Órbita: {server.url}\nCtrl+C encerra o servidor.")
+                try:
+                    webbrowser.open(server.url)
+                    while not server.wait(.5):
+                        pass
+                finally:
+                    server.stop()
+            elif args.poll:
+                from agent.core.prompt_polling import run_polling
+
+                run_polling(brain, args.poll_url, args.delay, once=args.poll_once,
+                            api_key=os.getenv("CASSANDRA_API_KEY", ""),
+                            approve=brain._terminal_approve, events=brain._terminal_events)
+            else:
+                from agent.ui.terminal import run_terminal_turn
+
+                run_terminal_turn(brain, args.prompt, attachments=args.attach)
+                print()
+        except KeyboardInterrupt:
+            brain.stop()
+        finally:
+            brain.shutdown()
+        return
 
     # Determina o modo de operação
     if args.gui:

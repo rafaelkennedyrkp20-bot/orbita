@@ -43,6 +43,12 @@ DEFAULT_PROVIDERS: dict[str, dict[str, Any]] = {
         "api_key_env": "DEEPSEEK_API_KEY",
         "models": ["deepseek-chat", "deepseek-reasoner"],
     },
+    "deepseek_web": {
+        "type": "deepseek_web",
+        "label": "DeepSeek Web (sua conta)",
+        "base_url": "https://chat.deepseek.com/",
+        "models": ["default", "expert", "default-thinking", "expert-thinking"],
+    },
     "openai": {
         "type": "openai",
         "label": "OpenAI (GPT)",
@@ -208,6 +214,7 @@ class Settings:
         self.path = path
         self._lock = threading.RLock()
         self._data = deepcopy(DEFAULT_SETTINGS)
+        self._session_defaults: dict[str, Any] = {}
         self._providers_cache: tuple[Any, dict[str, dict[str, Any]]] | None = None
         self._load()
 
@@ -228,7 +235,7 @@ class Settings:
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.write_text(json.dumps({**self._data, **self._session_defaults}, ensure_ascii=False, indent=2), encoding="utf-8")
             os.replace(tmp, self.path)
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -238,10 +245,18 @@ class Settings:
     def set(self, key: str, value: Any, save: bool = True) -> None:
         with self._lock:
             self._data[key] = value
+            if save:
+                self._session_defaults.pop(key, None)
             if key == "providers":
                 self._providers_cache = None
         if save:
             self.save()
+
+    def set_session_only(self, key: str, value: Any) -> None:
+        """Preferência desta execução; salvar outro campo não a torna permanente."""
+        with self._lock:
+            self._session_defaults.setdefault(key, deepcopy(self._data.get(key)))
+            self._data[key] = value
 
     # ── Provedores ───────────────────────────────────────────
 
@@ -359,6 +374,15 @@ class Settings:
         if name not in providers:
             raise KeyError(f"Provedor desconhecido: {name}")
         cfg = providers[name]
+        if cfg.get("type") == "deepseek_web":
+            from agent.core.deepseek_web import status
+            from agent.core.providers import ProviderError
+
+            try:
+                info = status(cfg)
+            except (ValueError, ProviderError):
+                return False
+            return info["profile_exists"] or bool(info["cdp_url"])
         if cfg.get("type") == "grok_cli":
             from agent.core import grok_cli
 

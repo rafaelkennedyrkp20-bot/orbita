@@ -11,6 +11,7 @@ const ICONS = {
   moon: "M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z",
   sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
   plus: "M12 5v14M5 12h14",
+  clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2",
   search: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3",
   sidebar: "M3 5h18v14H3zM9 5v14",
   panel: "M3 5h18v14H3zM15 5v14",
@@ -271,7 +272,17 @@ async function action(name, el) {
     case "new": outQueue = []; await call("newConversation"); resetChat(); refreshConvs(); break;
     case "toggle-side": $("#side").classList.toggle("hidden"); break;
     case "toggle-convs": $("#page-chat").classList.toggle("no-convs"); break;
-    case "attach": addAttachments(await call("pickImages") || []); break;
+    case "attach": addAttachments(await call("pickAttachments") || []); break;
+    case "attach-folder": addAttachments(await call("pickAttachmentFolder") || []); break;
+    case "temporary": {
+      if (busy) { toast("info", "Conversa temporária", "Espere o turno terminar."); break; }
+      const r = await call("setTemporary", !S.temporary);
+      if (r?.error) { toast("warn", "Conversa temporária", r.error); break; }
+      if (r) S = r;
+      outQueue = []; resetChat(); renderTopbar(); refreshConvs();
+      if (S.temporary) toast("info", "Conversa temporária", "Conversa e memória ficam nesta sessão. Arquivos criados e retenção do provedor continuam valendo.", 7000);
+      break;
+    }
     case "voice": if (!busy) call("voice"); break;
     case "dictate": toggleDictation(); break;
     case "theme": {
@@ -302,7 +313,9 @@ function renderTopbar() {
   const perm = S.settings.permission_mode;
   $("#perm-name").textContent = { perguntar: "Perguntar", auto: "Auto", livre: "Livre" }[perm] || perm;
   $("#chip-perm").className = "chip perm-" + perm;
-  $("#conv-title").textContent = S.conversation_title || "Nova conversa";
+  $("#conv-title").textContent = S.temporary ? "Conversa temporária" : (S.conversation_title || "Nova conversa");
+  const temporaryButton = $("#temporary-btn");
+  if (temporaryButton) { temporaryButton.classList.toggle("on", !!S.temporary); temporaryButton.setAttribute("aria-pressed", String(!!S.temporary)); }
   const pin = (S.pinned_prompt || "").trim();
   $("#chip-pin").classList.toggle("on", !!pin);
   $("#chip-pin").title = pin ? ("Prompt da conversa: " + pin.slice(0, 140)) : "Definir instruções fixas para esta conversa";
@@ -545,6 +558,7 @@ async function openConversation(id) {
   if (!data) return toast("error", "Conversa", "Não foi possível abrir.");
   resetChat(false);
   S.conversation_id = data.id; S.conversation_title = data.title; S.pinned_prompt = data.pinned_prompt || ""; S.goal = data.goal || "";
+  S.temporary = !!data.temporary;
   renderTopbar(); renderConvs();
   data.blocks.forEach(b => {
     if (b.kind === "user") addUser(b.text, b.images);
@@ -646,7 +660,7 @@ function flushOne() {
   setLive(true, outQueue.length ? "Enviando a próxima da fila…" : "Pensando…");
   if ($(".welcome")) $("#messages").innerHTML = "";
   addUser(item.text, item.images, item.plan);
-  call("send", JSON.stringify({ text: item.text + undoNote, images: item.images, plan: item.plan }));
+  call("send", JSON.stringify({ text: item.text + undoNote, images: item.images, attachments: item.attachments || [], plan: item.plan }));
   undoNote = "";
   maybeLongHint();
 }
@@ -681,8 +695,9 @@ function send(override) {
   closeMention();
   const item = {
     id: "q" + (++qSeq),
-    text: text || "Analise a imagem anexada.",
-    images: attachments.slice(),
+    text: text || "Analise os anexos.",
+    images: attachments.filter(isImagePath),
+    attachments: attachments.filter(p => !isImagePath(p)),
     plan: typed && planMode,
   };
   if (typed) clearComposer();
@@ -1227,14 +1242,15 @@ function addAttachments(paths) {
   const imgs = paths.filter(p => /\.(png|jpe?g|gif|webp|bmp)$/i.test(p))
     .sort((a, b) => name(a).localeCompare(name(b), undefined, { numeric: true, sensitivity: "base" }));
   const others = paths.filter(p => !imgs.includes(p));
-  attachments.push(...imgs);
-  if (others.length) { const i = $("#input"); i.value += (i.value ? " " : "") + others.join(" "); autosize(); }
+  attachments = [...new Set([...attachments, ...imgs, ...others])];
   renderAttachments();
 }
 function renderAttachments() {
-  $("#attachments").innerHTML = attachments.map((p, i) => `<div class="att"><img src="${fileUrl(p)}"><span>${esc(p.split(/[\\/]/).pop())}</span><button data-rm="${i}">${icon("x")}</button></div>`).join("");
+  $("#attachments").innerHTML = attachments.map((p, i) => `<div class="att">${isImagePath(p) ? `<img src="${fileUrl(p)}">` : icon("file")}<span>${esc(p.split(/[\\/]/).pop())}</span><button data-rm="${i}">${icon("x")}</button></div>`).join("");
   $$("[data-rm]", $("#attachments")).forEach(b => b.addEventListener("click", () => { attachments.splice(+b.dataset.rm, 1); renderAttachments(); }));
 }
+
+function isImagePath(path) { return /\.(png|jpe?g|gif|webp|bmp)$/i.test(path); }
 
 // ── Ao vivo / equipe ───────────────────────────────────────────────────────────
 function feed(kind, html, extra = {}) {
@@ -1332,6 +1348,10 @@ function onEvent(e) {
     case "sub_start": dockSubStart(e); feed("sub", `<b>${esc(e.agent)}</b> começou com <b>${esc(e.model)}</b>`); renderAgents({ [e.agent.replace(/ #\d+$/, "")]: true }); break;
     case "sub_end": dockSubEnd(e); feed("ok", `✓ <b>${esc(e.agent)}</b> terminou (${fmt(e.tokens)} tokens)`); renderAgents(); break;
     case "status": setLive(true, e.text); break;
+    case "deepseek_login":
+      toast(e.ok ? "success" : "info", "DeepSeek Web", e.error || (e.ok ? "Login concluído." : "Login cancelado."), 8000);
+      call("getState").then(state => { if (state) S = state; if (settingsSection === "deepseek") renderSettings(); });
+      break;
     case "usage": S.conversation_tokens = e.total; updateMeter(e.total); break;
     case "checkpoint": checkpointCard(e); break;
     case "update": onUpdate(e); break;
@@ -1736,6 +1756,7 @@ async function onToolbox(e) {
 
 // ── Página: Configurações ──────────────────────────────────────────────────────
 const SECTIONS = [
+  ["deepseek", "globe", "Conta DeepSeek"],
   ["geral", "user", "Geral"], ["modelos", "cpu", "Modelos"], ["galeria", "image", "Galeria"], ["memoria", "brain", "Memória"], ["tarefas", "play", "Tarefas"], ["api", "globe", "API manual"], ["chaves", "key", "Chaves de API"], ["grok", "bolt", "Conta Grok"],
   ["economia", "coins", "Economia de tokens"], ["permissoes", "shield", "Permissões"], ["voz", "wave", "Voz"], ["sobre", "info", "Sobre"],
 ];
@@ -1807,6 +1828,12 @@ function renderSettings() {
       html = `<h1>Chaves de API</h1><p class="lead">Ficam somente no arquivo <code>.env</code> deste computador. Deixe em branco para manter a atual. Para um serviço que não está na lista, use <b>API manual</b>.</p><div class="group">
         ${S.providers.filter(p => p.api_key_env).map(p => field(esc(p.label), p.has_credentials ? `<span style="color:var(--ok)">● configurada</span> · ${esc(p.api_key_env)}` : esc(p.api_key_env),
           `<div class="row"><input class="inp" type="password" style="flex:1" data-key="${esc(p.api_key_env)}" placeholder="${p.has_credentials ? "••••••••  (manter)" : "cole a chave"}"><button class="btn small" data-savekey="${esc(p.api_key_env)}">Salvar</button></div>`)).join("")}</div>`;
+      break;
+    case "deepseek":
+      html = `<h1>Conta DeepSeek</h1><p class="lead">Converse pelo site DeepSeek com a sua conta. Entre na janela que abrir; o perfil fica salvo neste computador.</p>
+        <div class="group"><h3>DeepSeek Web</h3><p>O login e qualquer verificação do site são feitos por você. Depois, escolha DeepSeek Web no seletor de modelo: Instant, Expert e opções com raciocínio.</p>
+        <button class="btn primary" id="deepseek-login">${icon("user")} Entrar na conta</button>
+        <p class="sub">Se faltar navegador, o diagnóstico mostra como instalar. A integração pela API continua disponível separadamente.</p></div>`;
       break;
     case "grok": {
       const g = S.grok || {};
@@ -1882,6 +1909,11 @@ async function setSetting(key, value, silent) {
 }
 function bindSettings() {
   const body = $("#set-body");
+  const deepseekLogin = $("#deepseek-login", body);
+  if (deepseekLogin) deepseekLogin.onclick = async () => {
+    const r = await call("deepseekLogin");
+    toast("info", "DeepSeek Web", r?.error || "Abrindo a janela de login. Conclua o acesso por lá.", 7000);
+  };
   $$("[data-set]", body).forEach(t => t.addEventListener("change", () => setSetting(t.dataset.set, t.checked)));
   $$("[data-text]", body).forEach(t => t.addEventListener("change", () => setSetting(t.dataset.text, t.value.trim())));
   $$("[data-num]", body).forEach(t => t.addEventListener("change", () => setSetting(t.dataset.num, +t.value || 0)));

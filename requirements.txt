@@ -28,6 +28,8 @@ keyboard>=0.13.5               # Atalho do modo voz no terminal
 ddgs>=9.0.0                    # Busca pública sem chave
 beautifulsoup4>=4.12.0         # Extrai texto das páginas
 requests>=2.32.3
+playwright>=1.50,<2            # DeepSeek Web pela conta e testes reais de páginas
+rich>=13.9,<15                # Markdown e indicador de espera no terminal
 
 # ─── Controle do sistema ────────────────────────
 pyautogui>=0.9.54              # Mouse, teclado, screenshot

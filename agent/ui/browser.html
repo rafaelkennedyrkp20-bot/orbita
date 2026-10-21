@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Órbita · navegador</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui,sans-serif;background:#11131b;color:#e8eaf4}*{box-sizing:border-box}body{max-width:960px;margin:auto;padding:20px}header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}h1{font-size:24px;margin:0}#state{color:#a9adbf;flex:1}button{background:#292e43;color:inherit;border:1px solid #454c69;border-radius:8px;padding:10px 14px;cursor:pointer}button:hover{background:#38415d}button:disabled{opacity:.5;cursor:default}#chat{min-height:45vh;padding:24px 0}article{padding:16px 20px;border-radius:12px;margin:12px 0;background:#1c2030;overflow-wrap:anywhere}article.user{background:#27243d;white-space:pre-wrap}.label{font-size:12px;color:#aba6d5;margin-bottom:8px}pre{padding:12px;background:#10121b;overflow:auto;white-space:pre-wrap}code{font-family:Consolas,monospace}a{color:#acbfff}details{color:#b9bed2;margin:10px 0}summary{cursor:pointer}textarea{width:100%;resize:vertical;min-height:100px;background:#1c2030;border:1px solid #454c69;color:inherit;padding:14px;border-radius:10px;font:inherit}.actions{display:flex;gap:8px;flex-wrap:wrap;padding-top:10px}.actions #send{margin-left:auto;background:#6553bf}.muted{color:#a9adbf;font-size:13px}#notice{white-space:pre-wrap;color:#f0c886}#attachments{padding:10px 0}.attachment{display:inline-flex;gap:8px;align-items:center;background:#252a3d;border-radius:8px;margin:3px;padding:4px 8px}.attachment button{padding:2px 8px}.approval{border:1px solid #e3b767;padding:12px;margin-top:12px;border-radius:8px}.approval button{margin-right:8px}#thinking{white-space:pre-wrap}.code-h{display:flex;gap:8px;align-items:center}.code-h .copy{font-size:12px;padding:4px 8px}table{border-collapse:collapse}td,th{padding:8px;border:1px solid #454c69}
+</style>
+<style>.settings{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}.settings label{display:flex;align-items:center;gap:6px;font-size:14px}.settings select{max-width:320px;background:#1c2030;color:inherit;border:1px solid #454c69;padding:8px;border-radius:8px}.settings input{accent-color:#8b73eb}</style>
+</head>
+<body>
+<header><h1>Órbita</h1><span id="state">Conectando…</span><button id="new" type="button">Nova conversa</button></header>
+<p class="muted">Este chat usa o modelo, as ferramentas e as permissões do Órbita neste computador.</p>
+<div class="settings"><label>Perfil <select id="profile" aria-label="Perfil"></select></label><label>Modelo <select id="model" aria-label="Modelo"></select></label><label><input id="temporary" type="checkbox">Conversa temporária</label><button id="deepseek-account" type="button">Conta DeepSeek</button></div>
+<main id="chat" aria-live="polite"></main>
+<div id="notice" role="status"></div>
+<section id="approvals" aria-live="polite"></section>
+<form id="form">
+<textarea id="message" aria-label="Mensagem" placeholder="O que vamos fazer?" required></textarea>
+<div id="attachments"></div>
+<div class="actions"><button id="files" type="button">Anexar arquivos</button><button id="folder" type="button">Anexar pasta</button><button id="stop" type="button" disabled>Parar</button><button id="send" type="submit">Enviar</button></div>
+<input id="file-input" type="file" multiple hidden><input id="folder-input" type="file" multiple webkitdirectory hidden>
+</form>
+<p class="muted">Anexos: até 40 arquivos de texto, 100 KB por arquivo e 500 KB no total. Binários e arquivos de segredos são ignorados. O histórico segue a configuração de conversas do Órbita.</p>
+<script nonce="__NONCE__">
+"use strict";
+const $ = id => document.getElementById(id);
+const token = new URLSearchParams(location.hash.slice(1)).get("token") || "";
+const secretNames = new Set(["credentials","credentials.json","secrets","secrets.json","id_rsa","id_ed25519",".git",".ssh"]);
+const binaryExt = /\.(exe|dll|so|png|jpg|jpeg|gif|zip|pdf|docx|xlsx|pyc|wasm|pem|key|p12|pfx)$/i;
+let busy = false, ownRequest = false, temporaryMode = false, attachments = [];
+function notice(text){$("notice").textContent = text;}
+async function api(path, payload){
+  const options = {headers:{Authorization:"Bearer " + token}, cache:"no-store"};
+  if(payload !== undefined){options.method="POST";options.headers["Content-Type"]="application/json";options.body=JSON.stringify(payload);}
+  const response=await fetch(path,options);
+  if(!response.ok){const body=await response.json();throw Error(body.error || "Falha na conexão.");}
+  return response;
+}
+function setBusy(value){busy=value;for(const id of ["send","new","message","profile","model","temporary"])$(id).disabled=value;$("stop").disabled=!value;}
+function option(select,label,value){const item=document.createElement("option");item.textContent=label;item.value=value;select.append(item);}
+async function refresh(){
+  const state=await (await api("/api/state")).json();
+  $("state").textContent=state.profile.name + " · " + state.provider + ":" + state.model;
+  $("profile").replaceChildren();for(const profile of state.profiles)option($("profile"),profile.name,profile.id);
+  $("profile").value=state.profile.id;
+  $("model").replaceChildren();
+  for(const provider of state.providers)for(const model of provider.models)option($("model"),provider.label+" · "+model,JSON.stringify([provider.id,model]));
+  const selected=JSON.stringify([state.provider,state.model]);
+  if(!Array.from($("model").options).some(item=>item.value===selected))option($("model"),state.provider+" · "+state.model,selected);
+  $("model").value=selected;$("temporary").checked=state.temporary;temporaryMode=state.temporary;
+  setBusy(state.busy);
+  for(const entry of state.approvals)approval(entry);
+}
+async function configure(payload){
+  if(busy)return;setBusy(true);ownRequest=true;
+  try{
+    await api("/api/config",payload);
+    if("temporary" in payload){$("chat").replaceChildren();$("approvals").replaceChildren();}
+    notice(payload.temporary===true ? "Conversa temporária: o histórico e a memória desta conversa ficam apenas nesta execução." : "");
+  }catch(error){notice(error.message);}
+  finally{ownRequest=false;try{await refresh();}catch(error){setBusy(false);notice(error.message);}}
+}
+$("profile").onchange=()=>configure({profile:$("profile").value});
+$("model").onchange=()=>{const [provider,model]=JSON.parse($("model").value);configure({provider,model});};
+$("temporary").onchange=()=>configure({temporary:$("temporary").checked});
+$("deepseek-account").onclick=()=>notice("Para entrar na sua conta DeepSeek, abra Configurações › Conta DeepSeek na janela do Órbita ou execute: python -m agent.main --deepseek-login. Conclua o login na janela que abrir e depois escolha DeepSeek Web aqui.");
+function message(role,text){
+  const article=document.createElement("article");article.className=role;
+  const label=document.createElement("div");label.className="label";label.textContent=role==="user" ? "Você" : "Órbita";
+  const content=document.createElement("div");content.textContent=text;article.append(label,content);$("chat").append(article);
+  return content;
+}
+function approval(entry){
+  if($("approval-"+entry.id))return;
+  const box=document.createElement("div");box.id="approval-"+entry.id;box.className="approval";
+  const text=document.createElement("pre");text.textContent=JSON.stringify(entry.request,null,2);box.append(text);
+  for(const [answer,label] of [["yes","Permitir esta ação"],["no","Recusar"]]){
+    const button=document.createElement("button");button.type="button";button.textContent=label;
+    button.onclick=async()=>{try{await api("/api/approve",{id:entry.id,answer});box.remove();}catch(error){notice(error.message);}};box.append(button);
+  }
+  $("approvals").append(box);
+}
+function renderAttachments(){
+  $("attachments").replaceChildren();
+  attachments.forEach((file,index)=>{
+    const row=document.createElement("span");row.className="attachment";
+    const name=document.createElement("span");name.textContent=file.name;
+    const remove=document.createElement("button");remove.type="button";remove.textContent="×";
+    remove.onclick=()=>{attachments.splice(index,1);renderAttachments();};row.append(name,remove);$("attachments").append(row);
+  });
+  $("message").required=attachments.length===0;
+}
+async function addFiles(files){
+  const skipped=[];let total=attachments.reduce((sum,file)=>sum+new TextEncoder().encode(file.content).length,0);
+  for(const file of files){
+    const name=file.webkitRelativePath || file.name;
+    const parts=name.replaceAll("\\","/").toLowerCase().split("/");
+    if(attachments.length>=40 || file.size>100000 || total+file.size>500000 || binaryExt.test(name) || parts.some(part=>part.startsWith(".env") || secretNames.has(part))){skipped.push(name);continue;}
+    try{
+      const bytes=await file.arrayBuffer();const text=new TextDecoder("utf-8",{fatal:true}).decode(bytes);
+      if(text.includes("\0")){skipped.push(name);continue;}
+      const size=new TextEncoder().encode(text).length;
+      if(size>100000 || total+size>500000){skipped.push(name);continue;}
+      attachments.push({name,content:text});total+=size;
+    }catch(_error){skipped.push(name);}
+  }
+  renderAttachments();notice(skipped.length ? "Ignorados: " + skipped.join(", ") : "");
+}
+$("files").onclick=()=>$("file-input").click();$("folder").onclick=()=>$("folder-input").click();
+for(const id of ["file-input","folder-input"])$(id).onchange=async event=>{await addFiles(event.target.files);event.target.value="";};
+$("new").onclick=async()=>{try{await api("/api/new",{});$("chat").replaceChildren();$("approvals").replaceChildren();notice("");await refresh();}catch(error){notice(error.message);}};
+$("stop").onclick=async()=>{try{await api("/api/stop",{});notice("Interrupção solicitada…");}catch(error){notice(error.message);}};
+$("message").addEventListener("keydown",event=>{if(event.key==="Enter" && !event.shiftKey){event.preventDefault();$("form").requestSubmit();}});
+$("form").onsubmit=async event=>{
+  event.preventDefault();if(busy)return;
+  const text=$("message").value.trim();if(!text && !attachments.length)return;
+  const payload={message:text,attachments:attachments.slice(),interactive_approval:true};
+  message("user",text+(attachments.length ? "\n\nAnexos: "+attachments.map(file=>file.name).join(", ") : ""));
+  const output=message("assistant","");let streamed="", lastError="";
+  ownRequest=true;
+  setBusy(true);notice("");
+  try{
+    const response=await api("/api/chat",payload);$("message").value="";attachments=[];renderAttachments();
+    const reader=response.body.getReader(), decoder=new TextDecoder();let buffer="";
+    function consume(line){
+      if(!line.trim())return;const entry=JSON.parse(line);
+      if(entry.type==="text"){streamed+=entry.text || "";output.textContent=streamed;}
+      else if(entry.type==="done"){output.innerHTML=entry.html;}
+      else if(entry.type==="approval")approval(entry);
+      else if(entry.type==="error" || entry.type==="approval_denied"){lastError=entry.message;notice(lastError);}
+      else if(entry.type==="tool_start")notice("Executando: "+(entry.name || "ferramenta"));
+      else if(entry.type==="reasoning"){
+        let detail=output.parentElement.querySelector("details");
+        if(!detail){detail=document.createElement("details");const summary=document.createElement("summary");summary.textContent="Raciocínio";const body=document.createElement("div");body.id="thinking";detail.append(summary,body);output.parentElement.append(detail);}
+        detail.lastElementChild.textContent+=entry.text || "";
+      }
+      window.scrollTo(0,document.body.scrollHeight);
+    }
+    while(true){const {done,value}=await reader.read();buffer+=decoder.decode(value,{stream:!done});let at;while((at=buffer.indexOf("\n"))!==-1){consume(buffer.slice(0,at));buffer=buffer.slice(at+1);}if(done)break;}
+    if(buffer.trim())consume(buffer);notice(lastError);
+  }catch(error){notice(error.message);}
+  finally{ownRequest=false;$("approvals").replaceChildren();try{await refresh();}catch(error){setBusy(false);notice(error.message);}$("message").focus();}
+};
+document.addEventListener("click",event=>{const button=event.target.closest("[data-copy]");if(button)navigator.clipboard.writeText(button.closest(".code").querySelector("code").textContent).catch(error=>notice(error.message));});
+// O navegador pode encerrar sem entregar pagehide; esta limpeza é uma tentativa.
+window.addEventListener("pagehide",()=>{if(temporaryMode || busy)fetch(temporaryMode ? "/api/close" : "/api/stop",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:"{}",keepalive:true}).catch(()=>{});});
+if(!token){notice("Abra o endereço completo com o código de acesso mostrado pelo Órbita no terminal.");setBusy(true);}
+else refresh().catch(error=>notice(error.message));
+setInterval(()=>{if(token && busy && !ownRequest)refresh().catch(error=>notice(error.message));},1000);
+</script>
+</body>
+</html>

@@ -26,7 +26,8 @@ def main() -> int:
 
             assert QWebEngineView is not None
             assert load_catalog()
-            required = [WEB_DIR / "index.html", WEB_DIR / "logo.svg", RESOURCE_ROOT / "components.json"]
+            required = [WEB_DIR / "index.html", WEB_DIR / "logo.svg", RESOURCE_ROOT / "components.json",
+                        RESOURCE_ROOT / "agent" / "ui" / "browser.html"]
             if not all(path.is_file() for path in required):
                 raise RuntimeError("Pacote incompleto: recursos desktop ausentes.")
             result = {"ok": True, "home": str(PROJECT_ROOT), "data": str(DATA_DIR), "web": str(WEB_DIR)}

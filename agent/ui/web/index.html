@@ -29,6 +29,7 @@
       <div class="head">
         <h2>Conversas</h2>
         <button class="icon-btn" data-action="new" title="Nova conversa (Ctrl+N)"><svg class="i" data-ic="plus"></svg></button>
+        <button class="icon-btn" data-action="temporary" id="temporary-btn" title="Conversa temporária: sem salvar conversa nem memória"><svg class="i" data-ic="clock"></svg></button>
       </div>
       <label class="search"><svg class="i" data-ic="search"></svg><input id="conv-search" placeholder="Buscar conversas"></label>
       <div id="conv-list"></div>
@@ -64,7 +65,8 @@
           <div class="attach-row" id="attachments"></div>
           <textarea id="input" rows="1" placeholder="Peça qualquer coisa… (@ cita um arquivo, /goal define a meta, Shift+Enter quebra linha)"></textarea>
           <div class="c-row">
-            <button class="icon-btn" data-action="attach" title="Anexar imagens"><svg class="i" data-ic="clip"></svg></button>
+            <button class="icon-btn" data-action="attach" title="Anexar arquivos ou imagens"><svg class="i" data-ic="clip"></svg></button>
+            <button class="icon-btn" data-action="attach-folder" title="Anexar textos de uma pasta"><svg class="i" data-ic="folder"></svg></button>
             <button class="icon-btn" id="mic" data-action="dictate" title="Ditar: clique, fale e clique de novo — o texto aparece no campo"><svg class="i" data-ic="mic"></svg></button>
             <button class="mode-btn" id="plan-btn" title="Modo plano: o agente lê, planeja e espera o seu OK antes de alterar qualquer coisa"><svg class="i" data-ic="map"></svg>Planejar</button>
             <div class="spacer"></div>

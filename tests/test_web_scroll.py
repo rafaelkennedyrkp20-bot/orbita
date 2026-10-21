@@ -6,13 +6,19 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWebEngineWidgets")
 
-from PyQt6.QtCore import QEvent, QEventLoop, QObject, QPoint, QPointF, Qt, QTimer, QUrl  # noqa: E402
+from PyQt6.QtCore import QEvent, QEventLoop, QObject, QPoint, QPointF, Qt, QTimer, QUrl, pyqtSignal, pyqtSlot  # noqa: E402
 from PyQt6.QtGui import QMouseEvent  # noqa: E402
 from PyQt6.QtWebChannel import QWebChannel  # noqa: E402
 from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from agent.gui import WEB_INDEX  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def qt_app():
+    # QtWebEngine não aceita destruir e recriar QApplication no mesmo processo.
+    return QApplication.instance() or QApplication(["orbita-test"])
 
 
 def _wait(ms: int) -> None:
@@ -36,10 +42,10 @@ def _mouse(view: QWebEngineView, kind: QEvent.Type, x: int, y: int) -> None:
                                                           button, held, Qt.KeyboardModifier.NoModifier))
 
 
-def test_middle_click_does_not_fling_the_conversation_to_the_top():
+def test_middle_click_does_not_fling_the_conversation_to_the_top(qt_app):
     """Caso real: clique na roda ligava a autorrolagem do Chromium; ao mexer o mouse a conversa ia para o topo e a
     roda parava de responder ("rolagem travada lá em cima")."""
-    app = QApplication.instance() or QApplication(["orbita-test"])   # sem argv[0] o Chromium cai no Windows
+    app = qt_app
     view = QWebEngineView()
     channel = QWebChannel(view.page())
     stub = QObject()
@@ -67,5 +73,54 @@ def test_middle_click_does_not_fling_the_conversation_to_the_top():
         _mouse(view, QEvent.Type.MouseMove, x, y - dy)
         _wait(300)
     assert _js(view, "Math.round(document.querySelector('#messages').scrollTop)") == 10000
+    view.close()
+    app.processEvents()
+
+
+def test_cassandra_controls_in_real_desktop_page(tmp_path, qt_app):
+    """Anexos distintos, modo temporário e login usam os contratos visíveis da página real."""
+    class ApiStub(QObject):
+        message = pyqtSignal(str)
+
+        @pyqtSlot(result=str)
+        def getState(self):
+            return json.dumps({"settings": {"onboarded": True, "permission_mode": "auto", "theme": "dark"},
+                               "profile": {"id": "geral", "name": "Assistente Geral"}, "temporary": True,
+                               "providers": [], "team": [], "mcp": [], "conversations": []})
+
+        @pyqtSlot(str, result=str)
+        def openConversation(self, conversation_id):
+            return json.dumps({"id": conversation_id, "title": "Conversa salva", "temporary": False,
+                               "blocks": []})
+
+    app = qt_app
+    view = QWebEngineView()
+    channel = QWebChannel(view.page())
+    stub = ApiStub()
+    channel.registerObject("api", stub)
+    view.page().setWebChannel(channel)
+    view.resize(1440, 900)
+    loaded = QEventLoop()
+    view.loadFinished.connect(lambda _ok: loaded.quit())
+    view.load(QUrl.fromLocalFile(str(WEB_INDEX)))
+    view.show()
+    QTimer.singleShot(15000, loaded.quit)
+    loaded.exec()
+    _wait(600)
+    assert _js(view, "document.querySelector('#temporary-btn').getAttribute('aria-pressed')") == "true"
+    assert _js(view, "document.querySelector('#temporary-btn svg path').getAttribute('d').length") > 10
+    _js(view, "addAttachments(['C:/projeto/nota.txt', 'C:/projeto/foto.png', 'C:/projeto/pasta']);")
+    assert _js(view, "document.querySelectorAll('#attachments .att').length") == 3
+    assert _js(view, "document.querySelectorAll('#attachments img').length") == 1
+    assert _js(view, "document.querySelector('#input').value") == ""
+    _js(view, "openConversation('antiga');")
+    _wait(200)
+    assert _js(view, "document.querySelector('#temporary-btn').getAttribute('aria-pressed')") == "false"
+    assert _js(view, "document.querySelector('#conv-title').textContent") == "Conversa salva"
+    _js(view, "settingsSection='deepseek'; go('settings');")
+    _wait(200)
+    assert _js(view, "document.querySelector('#deepseek-login').textContent.includes('Entrar')")
+    assert _js(view, "document.querySelector('#page-settings').classList.contains('active')")
+    assert view.grab().save(str(tmp_path / "cassandra-desktop.png"))
     view.close()
     app.processEvents()

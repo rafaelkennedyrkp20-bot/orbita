@@ -872,6 +872,9 @@ def get_provider(name: str, settings) -> Provider:
     key = (name, json.dumps(cfg, sort_keys=True), settings.api_key(cfg))
     with _cache_lock:
         if key not in _cache:
+            if cfg.get("type") == "deepseek_web":
+                from agent.core.deepseek_web import DeepSeekWebProvider
+                PROVIDER_TYPES["deepseek_web"] = DeepSeekWebProvider
             if cfg.get("type") == "grok_cli":
                 from agent.core.grok_cli import GrokBuildProvider  # import tardio: evita ciclo
                 PROVIDER_TYPES["grok_cli"] = GrokBuildProvider

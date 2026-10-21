@@ -26,6 +26,17 @@ def test_resources_are_allowlisted_and_reject_private_files(tmp_path):
     assert {path.relative_to(tmp_path).as_posix() for path, _ in resources} == set(names[:4])
 
 
+def test_browser_page_is_an_explicit_resource_without_allowing_other_ui_files(tmp_path):
+    names = ["agent/ui/browser.html", "agent/ui/private.html", "agent/ui/settings.json"]
+    for name in names:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("conteúdo", encoding="utf-8")
+    included = build.resources(tmp_path, names)
+    assert [(source.relative_to(tmp_path).as_posix(), destination) for source, destination in included] == [
+        ("agent/ui/browser.html", "agent/ui")]
+
+
 def test_resource_symlink_cannot_escape_project(tmp_path):
     outside = tmp_path / "chave.md"
     outside.write_text("segredo", encoding="utf-8")
@@ -60,7 +71,7 @@ def test_manifest_records_components_hashes_without_machine_paths():
     assert not manifest["components"]["local_voice"]["included"]
     assert not manifest["components"]["ollama"]["included"]
     paths = {row["path"] for row in manifest["resources"]}
-    assert {"agent/ui/web/index.html", "agent/ui/web/logo.svg", "skills/spec-plan-tdd/SKILL.md",
+    assert {"agent/ui/web/index.html", "agent/ui/web/logo.svg", "agent/ui/browser.html", "skills/spec-plan-tdd/SKILL.md",
             "agent/core/local_models.json"} <= paths
     assert all(len(row["sha256"]) == 64 for row in manifest["resources"])
     assert str(ROOT) not in json.dumps(manifest)

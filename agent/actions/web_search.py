@@ -2,6 +2,7 @@
 
 import logging
 import ipaddress
+import os
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
@@ -26,22 +27,73 @@ logger = logging.getLogger(__name__)
 
 
 def _search_results(query: str, max_results: int, region: str) -> list[dict]:
-    """Busca resultados, removendo URLs repetidas."""
+    """DuckDuckGo primeiro; Brave e Google configurados cobrem erro ou busca vazia."""
+    limit = max(1, min(int(max_results), 100))
+    failed = False
+    for label, search in (
+        ("DuckDuckGo", lambda: _ddgs_results(query, limit, region)),
+        ("Brave", lambda: _brave_results(query, limit)),
+        ("Google", lambda: _google_results(query, limit)),
+    ):
+        try:
+            results = _unique_results(search(), limit)
+        except Exception as error:
+            # HTTPError pode trazer a URL inteira, inclusive a chave do Google.
+            logger.warning("Busca %s indisponível (%s).", label, type(error).__name__)
+            failed = True
+            continue
+        if results:
+            return results
+    if failed:
+        raise RuntimeError("Serviços de busca indisponíveis. Confira a conexão e as credenciais configuradas.")
+    return []
+
+
+def _ddgs_results(query: str, limit: int, region: str) -> list[dict]:
     with DDGS() as ddgs:
-        raw_results = list(ddgs.text(
-            query,
-            region=region,
-            safesearch="moderate",
-            max_results=max_results,
-            backend=WEB_SEARCH_BACKEND,
-        ))
+        return list(ddgs.text(query, region=region, safesearch="moderate",
+                              max_results=limit, backend=WEB_SEARCH_BACKEND))
+
+
+def _brave_results(query: str, limit: int) -> list[dict]:
+    key = os.environ.get("BRAVE_SEARCH_API_KEY", "").strip()
+    if not key:
+        return []
+    response = requests.get("https://api.search.brave.com/res/v1/web/search",
+                            params={"q": query, "count": min(limit, 20)},
+                            headers={"Accept": "application/json", "X-Subscription-Token": key},
+                            timeout=WEB_RESEARCH_TIMEOUT_SECONDS, allow_redirects=False)
+    response.raise_for_status()
+    return [{"title": row.get("title"), "href": row.get("url"), "body": row.get("description")}
+            for row in response.json().get("web", {}).get("results", []) if isinstance(row, dict)]
+
+
+def _google_results(query: str, limit: int) -> list[dict]:
+    key = os.environ.get("GOOGLE_SEARCH_API_KEY", "").strip()
+    cx = os.environ.get("GOOGLE_SEARCH_CX", "").strip()
+    if not key or not cx:
+        return []
+    response = requests.get("https://www.googleapis.com/customsearch/v1",
+                            params={"key": key, "cx": cx, "q": query, "num": min(limit, 10)},
+                            timeout=WEB_RESEARCH_TIMEOUT_SECONDS, allow_redirects=False)
+    response.raise_for_status()
+    return [{"title": row.get("title"), "href": row.get("link"), "body": row.get("snippet")}
+            for row in response.json().get("items", []) if isinstance(row, dict)]
+
+
+def _unique_results(raw_results: list[dict], limit: int) -> list[dict]:
     results, seen_urls = [], set()
     for result in raw_results:
-        url = result.get("href", "")
-        if not url or url in seen_urls:
+        if not isinstance(result, dict):
+            continue
+        url = str(result.get("href") or "").strip()
+        if not url.startswith(("http://", "https://")) or url in seen_urls:
             continue
         seen_urls.add(url)
-        results.append(result)
+        results.append({"title": str(result.get("title") or "Sem título"), "href": url,
+                        "body": str(result.get("body") or "Sem descrição")})
+        if len(results) >= limit:
+            break
     return results
 
 

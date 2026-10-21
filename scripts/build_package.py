@@ -19,6 +19,7 @@ PRIVATE_PARTS = {"data", "models", "venv", ".venv", "env", "daily_logs", "long_t
 OPTIONAL_MODULES = ("torch", "torchaudio", "tensorflow", "faster_whisper", "ctranslate2", "kokoro_onnx",
                     "onnxruntime", "silero_vad", "nvidia", "PySide6", "PyQt5")
 CATALOG = "agent/core/local_models.json"
+BROWSER_PAGE = "agent/ui/browser.html"
 
 
 def tracked_files(root: Path) -> list[str]:
@@ -30,8 +31,8 @@ def tracked_files(root: Path) -> list[str]:
 
 def resources(root: Path, names: list[str] | None = None) -> list[tuple[Path, str]]:
     result = []
-    # Catálogo tem nome fixo; não varre outros JSONs (podem conter preferências).
-    selected = tracked_files(root) + [CATALOG] if names is None else names
+    # Recursos fixos: não varre outros JSONs nem HTMLs (podem conter dados locais).
+    selected = tracked_files(root) + [CATALOG, BROWSER_PAGE] if names is None else names
     for name in selected:
         rel = PurePosixPath(name)
         if rel.is_absolute() or ".." in rel.parts or "\\" in name:
@@ -40,7 +41,7 @@ def resources(root: Path, names: list[str] | None = None) -> list[tuple[Path, st
             continue
         web = str(rel.parent) == "agent/ui/web" and rel.name in WEB_FILES
         skill = len(rel.parts) >= 3 and rel.parts[0] == "skills" and rel.suffix in {".md", ".py"}
-        if not (web or skill or name == CATALOG):
+        if not (web or skill or name in {CATALOG, BROWSER_PAGE}):
             continue
         source = root / name
         if source.is_symlink() or source.resolve() != root.resolve() / name:

@@ -62,6 +62,7 @@ PLAN_NOTE = ("\n\n[Modo plano] Ainda NÃO execute: não crie, edite nem apague a
              "responda com um plano curto: objetivo, arquivos envolvidos, passos numerados, riscos e como "
              "verificar. Termine perguntando se pode executar.")
 _MENTIONS_MARK = "\n\n---\nArquivos citados pelo usuário"
+_ATTACHMENTS_MARK = "\n\n---\nAnexos selecionados pelo usuário"
 QUICK_PROMPTS = [
     {"label": "Resumir esta conversa", "text": "Resuma o que fizemos até agora e o que ficou pendente."},
     {"label": "Revisar com a equipe", "text": "Peça ao revisor da equipe para revisar o que foi feito e corrija os problemas encontrados."},
@@ -132,7 +133,7 @@ def turn_outputs(text: str, workspace: Path, limit: int = 4) -> list[dict]:
 
 def _visible_user_text(text: str) -> str:
     """O que o usuário digitou, sem o anexo de @arquivos nem a nota do modo plano."""
-    return text.split(_MENTIONS_MARK, 1)[0].replace(PLAN_NOTE, "")
+    return text.split(_MENTIONS_MARK, 1)[0].split(_ATTACHMENTS_MARK, 1)[0].replace(PLAN_NOTE, "")
 
 
 def project_folder(brain: Brain) -> Optional[Path]:
@@ -159,6 +160,7 @@ class AgentWorker(QThread):
         self.brain = brain
         self.push = push
         self.commands: queue.Queue = queue.Queue()
+        self.login_cancel = threading.Event()
         self.running = True
         self._approval_lock = threading.Lock()
         self._pending: dict[str, tuple[threading.Event, list]] = {}
@@ -220,16 +222,31 @@ class AgentWorker(QThread):
                 elif command == "compact":
                     self.events("status", {"text": "Compactando o histórico…"})
                     self.push({"type": "compact_done", **self.brain.compact_current_session()})
+                elif command == "deepseek_login":
+                    from agent.core.deepseek_web import login
+
+                    self.login_cancel.clear()
+                    try:
+                        result = login(self.brain.settings.provider("deepseek_web"), self.brain.settings,
+                                       cancel=self.login_cancel)
+                        self.push({"type": "deepseek_login", **result})
+                    except Exception as error:
+                        self.push({"type": "deepseek_login", "error": str(error)})
             except Exception as error:
                 logger.exception("Falha no processamento")
                 self.events("error", {"message": f"Falha: {error}"})
             finally:
                 self.busy.emit(False)
 
-    def _turn(self, text: str, images: list[str], speak: bool, plan: bool = False) -> None:
+    def _turn(self, text: str, images: list[str], speak: bool, plan: bool = False,
+              attachments: Optional[list[str]] = None) -> None:
         provider, model = self.brain.current_model
         self.events("turn_start", {"model": f"{provider}:{model}"})
-        folder = project_folder(self.brain) if self.brain.settings.get("checkpoints", True) else None
+        folder = project_folder(self.brain) if (self.brain.settings.get("checkpoints", True)
+                                              and not getattr(self.brain, "temporary", False)) else None
+        if attachments:
+            text = mentions.attach_paths(text, attachments, workspace=self.brain.effective_workspace(),
+                                         project_only=self.brain.settings.get("file_scope") == "project")
         label = " ".join(_visible_user_text(text).split())[:120]
         before = self.checkpoints.snapshot(folder, f"antes: {label}") if folder and not plan else None
         failed = False
@@ -275,7 +292,7 @@ class AgentWorker(QThread):
             yield
         finally:
             self.plan_active = False
-            settings.set("permission_mode", previous)
+            settings.set("permission_mode", previous, save=False)
             if self.brain.session:
                 self.brain.session.always_allowed |= allowed
 
@@ -297,6 +314,7 @@ class AgentWorker(QThread):
 
     def stop(self) -> None:
         self.running = False
+        self.login_cancel.set()
         self.brain.stop()
         for done, _ in list(self._pending.values()):
             done.set()
@@ -389,6 +407,7 @@ class Api(QObject):
             "conversations": brain.conversations.list(),
             "conversation_id": brain.conversation_id,
             "conversation_title": brain.conversation_title,
+            "temporary": getattr(brain, "temporary", False),
             "pinned_prompt": brain.pinned_prompt,
             "goal": brain.goal,
             "conversation_tokens": session.total_tokens if session else 0,
@@ -443,7 +462,10 @@ class Api(QObject):
                 text = mentions.expand(text, folder)
             except OSError as error:
                 logger.warning("Falha ao anexar @arquivos: %s", error)
-        self.win.worker.commands.put(("turn", (text, data.get("images") or [], False, plan)))
+        payload = (text, data.get("images") or [], False, plan)
+        if data.get("attachments"):
+            payload += (data["attachments"],)
+        self.win.worker.commands.put(("turn", payload))
 
     @pyqtSlot(str, result=str)
     def searchFiles(self, query: str) -> str:
@@ -475,6 +497,7 @@ class Api(QObject):
     @pyqtSlot()
     def stop(self) -> None:
         self.brain.stop()
+        self.win.worker.login_cancel.set()
         self.win.worker.deny_pending()
         self.push({"type": "status", "text": "Parando…"})
 
@@ -587,6 +610,13 @@ class Api(QObject):
         self.win.start_prompt_if_any()
         return "{}"
 
+    @pyqtSlot(bool, result=str)
+    def setTemporary(self, enabled: bool) -> str:
+        if self.win.busy:
+            return json.dumps({"error": "Espere o turno terminar antes de trocar o modo da conversa."})
+        self.brain.set_temporary(enabled)
+        return self._state_json()
+
     @pyqtSlot(str, result=str)
     def setPinnedPrompt(self, prompt: str) -> str:
         return json.dumps({"pinned_prompt": self.brain.set_pinned_prompt(prompt)}, ensure_ascii=False)
@@ -624,6 +654,7 @@ class Api(QObject):
             elif block["kind"] == "tool":
                 block["summary"] = _args_summary(block.get("args") or {})
         payload = {"id": data["id"], "title": data.get("title", ""), "pinned_prompt": data.get("pinned_prompt", ""),
+                   "temporary": getattr(self.brain, "temporary", False),
                    "goal": data.get("goal", ""),
                    "blocks": data["blocks"], "model_label": f"{data.get('provider', '')}:{data.get('model', '')}"}
         return json.dumps(payload, ensure_ascii=False, default=str)
@@ -1198,6 +1229,13 @@ class Api(QObject):
 
     # ── MCP, Grok, arquivos ──────────────────────────────────
 
+    @pyqtSlot(result=str)
+    def deepseekLogin(self) -> str:
+        if self.win.busy:
+            return json.dumps({"error": "Espere o turno terminar antes de entrar na conta."})
+        self.win.worker.commands.put(("deepseek_login", None))
+        return "{}"
+
     @pyqtSlot(str, bool)
     def mcpToggle(self, name: str, enabled: bool) -> None:
         threading.Thread(target=self.brain.mcp.set_enabled, args=(name, enabled), daemon=True).start()
@@ -1266,6 +1304,17 @@ class Api(QObject):
         files, _ = QFileDialog.getOpenFileNames(self.win, "Anexar imagens", str(Path.home()),
                                                 "Imagens (*.png *.jpg *.jpeg *.gif *.webp *.bmp)")
         return json.dumps(files)
+
+    @pyqtSlot(result=str)
+    def pickAttachments(self) -> str:
+        files, _ = QFileDialog.getOpenFileNames(self.win, "Anexar arquivos", str(Path.home()),
+                                                "Todos os arquivos (*)")
+        return json.dumps(files)
+
+    @pyqtSlot(result=str)
+    def pickAttachmentFolder(self) -> str:
+        folder = QFileDialog.getExistingDirectory(self.win, "Anexar pasta", str(self.brain.effective_workspace()))
+        return json.dumps([folder] if folder else [])
 
     @pyqtSlot(str, result=str)
     def pickFolder(self, current: str) -> str:

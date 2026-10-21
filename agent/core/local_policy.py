@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 from agent.core.local_engines import is_loopback_url
 
-_CLOUD_TYPES = {"anthropic", "grok_cli"}
+_CLOUD_TYPES = {"anthropic", "grok_cli", "deepseek_web"}
 _KNOWN_PORTS = {11434, 1234}
 # check_web_page: até um .html local carrega scripts e subrecursos externos, e o
 # navegador não tem isolamento de rede confiável. Bloqueia antes de abrir.

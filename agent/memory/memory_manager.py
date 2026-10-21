@@ -53,10 +53,18 @@ class MemoryManager:
 
     def __init__(self, daily_dir: Path | None = None, long_dir: Path | None = None,
                  legacy_daily: Path | None = None, legacy_long: Path | None = None,
-                 profile_path: Path | None = None):
+                 profile_path: Path | None = None, memory_only: bool = False):
+        self.memory_only = memory_only
         self.daily_dir = Path(daily_dir or DAILY_LOGS_DIR)
         self.long_dir = Path(long_dir or LONG_TERM_DIR)
         self.profile_path = Path(profile_path or USER_PROFILE)
+        if memory_only:
+            self._session_log = []
+            self._today = datetime.now().strftime("%Y-%m-%d")
+            self._facts_cache = None
+            self._long_term = {"facts": [], "preferences": {}, "topics": {}}
+            self._profile = {"name": "Usuário", "preferences": {}, "notes": []}
+            return
         migrate_memory(self.daily_dir, self.long_dir, legacy_daily or LEGACY_DAILY_LOGS_DIR,
                        legacy_long or LEGACY_LONG_TERM_DIR)
         self.daily_dir.mkdir(parents=True, exist_ok=True)
@@ -115,6 +123,8 @@ class MemoryManager:
         self._session_log.append(entry)
         if len(self._session_log) > DAILY_LOG_MAX_ENTRIES:
             self._session_log = self._session_log[-DAILY_LOG_MAX_ENTRIES:]
+        if self.memory_only:
+            return
         try:
             with open(self._today_jsonl_file, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -187,6 +197,8 @@ class MemoryManager:
 
     def save_long_term(self):
         """Salva memória de longo prazo em disco."""
+        if self.memory_only:
+            return
         try:
             temporary_file = self._long_term_file.with_suffix(".json.tmp")
             with open(temporary_file, "w", encoding="utf-8") as f:
@@ -250,7 +262,8 @@ class MemoryManager:
         self._long_term["facts"] = facts[-100:]
         self._facts_cache = None
         self.save_long_term()
-        logger.info("Fato registrado: %s", fact[:60])
+        if not self.memory_only:
+            logger.info("Fato registrado: %s", fact[:60])
 
     def list_facts(self, project: str = "") -> list[dict]:
         return [dict(item) for item in self._visible(project)]
@@ -325,6 +338,8 @@ class MemoryManager:
 
     def save_profile(self):
         """Salva o perfil do usuário."""
+        if self.memory_only:
+            return
         try:
             with open(self.profile_path, "w", encoding="utf-8") as f:
                 json.dump(self._profile, f, ensure_ascii=False, indent=2)

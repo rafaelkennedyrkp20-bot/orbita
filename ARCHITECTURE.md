@@ -28,6 +28,10 @@ Você ──► GUI (agent/gui.py) / terminal / voz
 |---|---|
 | `agent/core/settings.py` | Preferências (`data/settings.json`), catálogo de provedores, chaves no `.env`, vínculo modelo→perfil |
 | `agent/core/providers.py` | Adaptadores de IA com formato interno único de mensagens; streaming; detecção de modelo sem ferramentas |
+| `agent/core/deepseek_web.py` | Conta DeepSeek pelo site em Playwright: login humano, perfil dedicado/CDP local, texto e raciocínio SSE, ferramentas por prompt; busca e exclusão da própria sessão opcionais |
+| `agent/core/browser_chat.py` · `agent/ui/browser.html` | Chat em loopback com token por execução, streaming, aprovações interativas, seletores, anexos textuais e cancelamento; usa `Brain.run_turn` |
+| `agent/core/prompt_polling.py` | Fila HTTP explícita de pedidos: cotas, deduplicação em memória, cancelamento e mesmas permissões do loop |
+| `agent/ui/terminal.py` | Markdown ao vivo com Rich, raciocínio, ferramentas e pausa do desenho para autorização no terminal |
 | `agent/core/grok_cli.py` | Grok Build (xAI) com a conta do usuário: login/estado do CLI oficial e provedor "agente externo" (`grok -p --resume`) |
 | `agent/core/grok_bridge.py` | Ponte MCP "orbita" para o Grok Build: com ele como principal, chama a equipe (`delegate_task`), skills, ferramentas de criação e `check_web_page` do Órbita, com as permissões de sempre |
 | `agent/core/agent_loop.py` | `AgentSession`: loop, permissões, contexto, freio de tokens, ferramentas por prompt, delegação |
@@ -73,6 +77,12 @@ Você ──► GUI (agent/gui.py) / terminal / voz
   O teto é o menor entre o modo de economia e a janela do modelo (`capabilities.context_window`), até 1M. A
   compactação nunca desiste: modelo econômico, principal e, por fim, resumo extraído do histórico.
 - **Subagentes** compartilham o botão Parar e o orçamento do principal; profundidade máxima 2.
+- **Conversa temporária** usa `MemoryManager(memory_only=True)` sem ler/gravar fatos anteriores, e não salva a conversa
+  nem cria checkpoints. Nova conversa descarta essa memória; sair do modo restaura a memória persistente original.
+  A política não apaga arquivos criados por ferramentas, logs técnicos ou dados retidos pelo provedor.
+- **Anexos e menções**: `@arquivo` é expandido somente na entrada original da pessoa (GUI/terminal). O conteúdo de
+  anexos ou fontes web não é reinterpretado como pedido para ler outros arquivos. Seleções de pastas têm cotas e
+  excluem links e arquivos de segredos.
 
 ## Dados (pasta `data/`)
 

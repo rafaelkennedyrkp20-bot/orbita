@@ -71,6 +71,12 @@ respostas precisa do Kokoro (`python setup_voz.py`); sem ele, é usado o `espeak
 - **Notificações** no canto da janela e do Windows (quando a janela não está em foco), pedidos de **permissão** claros.
 - **Ctrl+K** paleta de comandos · **Ctrl+N** nova conversa · **Ctrl+B** painel ao vivo · **Esc** para · tema claro/escuro.
 - **Equipe e perfis** e **Conexões (MCP + skills)** têm páginas próprias.
+- **Anexos**: o clipe aceita arquivos e imagens; o botão de pasta anexa textos de uma pasta com limites de tamanho.
+- **Conversa temporária**: botão do relógio na lateral, sem salvar conversa ou memória dessa conversa.
+- **Conta DeepSeek**: Configurações → Conta DeepSeek abre o login; escolha **DeepSeek Web** como provedor.
+
+Chat no navegador (`--web`), consulta de pedidos (`--poll`), novas opções de terminal e limites:
+[guia da integração Cassandra](docs/CASSANDRA_PARIDADE.md).
 
 <p align="center">
   <img src="docs/screenshots/conversa.png" alt="Conversa com a equipe" width="920"><br>
