@@ -176,6 +176,9 @@ function go(page) {
 }
 
 function bindChrome() {
+  // Clique na roda liga a autorrolagem do Chromium: um movimento do mouse dispara a conversa para o topo e a roda
+  // para de responder até outro clique (parecia "rolagem travada lá em cima"). Ninguém usa isso aqui.
+  document.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); }, true);
   document.addEventListener("click", e => {
     if (!e.target.closest("#ctx-menu")) closeCtxMenu();
     const goEl = e.target.closest("[data-go]");

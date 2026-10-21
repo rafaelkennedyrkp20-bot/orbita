@@ -18,6 +18,15 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## [Não lançado]
 
+## [0.4.1-alpha] — 2026-10-21
+
+Correção urgente.
+
+### Correções
+- **Rolagem do chat travada no topo**: um clique na roda do mouse (fácil de dar sem querer ao rolar) ligava a
+  autorrolagem do navegador interno. Ao mexer o mouse, a conversa disparava para o começo e a roda parava de
+  responder até outro clique. O clique da roda agora é ignorado na janela do Órbita.
+
 ## [0.4.0-alpha] — 2026-10-19
 
 Imagens no DeepSeek V4 e no Grok Build, capítulo de manhwa no chat, issues #3 a #6 (turno longo em modelo local, REA e
