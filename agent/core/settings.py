@@ -49,6 +49,17 @@ DEFAULT_PROVIDERS: dict[str, dict[str, Any]] = {
         "base_url": "https://chat.deepseek.com/",
         "models": ["default", "expert", "default-thinking", "expert-thinking"],
     },
+    "moonshot": {
+        "type": "openai",
+        "label": "Moonshot (Kimi)",
+        "base_url": "https://api.moonshot.ai/v1",
+        "api_key_env": "MOONSHOT_API_KEY",
+        "models": ["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"],
+        # K3.1 mantém thinking ligado e exige a temperatura fixa da API.
+        # Fonte: platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart
+        "omit_temperature": True,
+        "max_tokens_param": "max_completion_tokens",
+    },
     "openai": {
         "type": "openai",
         "label": "OpenAI (GPT)",

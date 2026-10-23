@@ -13,7 +13,7 @@ import re
 
 FRONTIER = re.compile(
     r"claude|fable|gpt-5|gpt-4\.1(?!-(mini|nano))|(^|[/:-])o[134](-|$)|grok-[4-9]|gemini-(2\.5-pro|[3-9])"
-    r"|deepseek-(v[3-9]|r1|reasoner|chat)|kimi-k2|qwen3-(max|coder-plus|235b)|glm-[4-9]\.[5-9]|glm-[5-9]"
+    r"|deepseek-(v[3-9]|r1|reasoner|chat)|kimi-k2|kimi-k3($|\.1-pro)|qwen3-(max|coder-plus|235b)|glm-[4-9]\.[5-9]|glm-[5-9]"
     r"|mistral-large|llama-4-maverick|nemotron-.*(super|ultra)", re.I)
 COMPACT_NAME = re.compile(r"(^|[^a-z])(mini|nano|lite|tiny|small)([^a-z]|$)", re.I)
 PARAMS = re.compile(r"(\d+(?:\.\d+)?)\s*b(?![a-z])", re.I)
@@ -55,6 +55,7 @@ def tier(provider: str, model: str) -> str:
 # Janela de contexto por modelo (tokens), a primeira regra que casa vence. Claude: guia oficial da Anthropic
 # (2026-10): da linha 4.6 em diante e o Haiku 5.5 têm 1M sem cabeçalho beta; Haiku 4.5 e anteriores, 200K.
 CONTEXT_WINDOWS = [
+    (re.compile(r"(^|/)kimi-k3($|\.1-pro(-highspeed)?$)", re.I), 1_000_000),
     (re.compile(r"claude-(3|haiku-4|(opus|sonnet)-4($|-\d{8}|[-.]?[0-5]($|[^0-9])))", re.I), 200_000),
     (re.compile(r"claude|fable|mythos", re.I), 1_000_000),
     (re.compile(r"gpt-4\.1", re.I), 1_047_576),

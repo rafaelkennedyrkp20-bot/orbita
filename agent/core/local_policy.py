@@ -16,7 +16,8 @@ _CLOUD_TYPES = {"anthropic", "grok_cli", "deepseek_web"}
 _KNOWN_PORTS = {11434, 1234}
 # check_web_page: até um .html local carrega scripts e subrecursos externos, e o
 # navegador não tem isolamento de rede confiável. Bloqueia antes de abrir.
-_BLOCKED_TOOLS = {"run_shell", "web_search", "fetch_url", "check_web_page"}
+_BLOCKED_TOOLS = {"run_shell", "web_search", "fetch_url", "check_web_page", "unreal_call", "blender_run_script",
+                  "creative_app_run", "unity_install_bridge", "unity_create_primitive"}
 _BLOCKED = (
     "Modo somente local: esta ação pode sair do computador e o Órbita não "
     "controla o destino desses dados. Terminal, pesquisa na web, verificação "

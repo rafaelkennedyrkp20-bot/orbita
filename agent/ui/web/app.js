@@ -129,6 +129,7 @@ let S = {};              // estado vindo do Python
 let busy = false, attachments = [], liveTimer = null, liveStart = 0, planMode = false, longHintShown = false;
 let turnEl = null, segEls = {}, stepEls = {}, stepsBox = null;
 let settingsSection = "geral";
+let connectionsTab = "studio", connectionsSearch = "", studioDraft = null, studioPending = false;
 
 function call(method, ...args) {
   return new Promise(resolve => {
@@ -1005,6 +1006,11 @@ const TOOL_INFO = {
   recall: ["brain", "Lembrando"], use_skill: ["book", "Carregando skill"], delegate_task: ["users", "Delegando à equipe"],
   find_tools: ["plug", "Buscando ferramentas"], generate_image: ["image", "Gerando imagem"], show_file: ["eye", "Mostrando arquivo"],
   toolbox_install: ["download", "Instalar programa de criação"], toolbox_list: ["layers", "Ferramentas de criação"],
+  studio3d_status: ["layers", "Diagnóstico do estúdio 3D"], unreal_call: ["layers", "Executar no Unreal Engine"],
+  studio3d_configure: ["plug", "Configurar integração 3D"],
+  unreal_describe: ["layers", "Inspecionar objeto no Unreal"], blender_run_script: ["layers", "Executar cena no Blender"],
+  unity_scene: ["layers", "Consultar cena do Unity"], unity_create_primitive: ["layers", "Criar objeto no Unity"],
+  unity_install_bridge: ["plug", "Conectar projeto Unity"], creative_app_run: ["layers", "Executar ferramenta de criação"],
   check_web_page: ["globe", "Testando página"],
 };
 function toolInfo(name) {
@@ -1383,6 +1389,12 @@ function onEvent(e) {
       break;
     case "dictation": onDictation(e); break;
     case "toolbox": onToolbox(e); break;
+    case "studio3d":
+      studioPending = false;
+      if (e.status) { S.studio3d = e.status; studioDraft = null; }
+      if (e.error) toast("error", "Estúdio 3D", e.error);
+      if ($("#page-connections").classList.contains("active")) renderStudio3D();
+      break;
     case "ghidra": onGhidra(e); break;
     case "voice_gpu":
       if (e.state === "done") { toast("success", "Ditado", "Pronto: o ditado agora usa a placa de vídeo."); renderVoiceGpu({ cuda: true, libs: true }); }
@@ -1504,6 +1516,7 @@ function palette(initial = "") {
     ["cpu", "Trocar modelo", () => { settingsSection = "modelos"; go("settings"); }],
     ["users", "Equipe e perfis", () => go("team")],
     ["plug", "Conexões MCP e skills", () => go("connections")],
+    ["layers", "Estúdio 3D · Unity, Unreal e Blender", () => { connectionsTab = "studio"; go("connections"); }],
     ["panel", "Mostrar/ocultar painel ao vivo", () => action("toggle-side"), "Ctrl+B"],
     ["mic", "Ditar mensagem (fala vira texto)", () => toggleDictation(), "Ctrl+M"],
     ["wave", "Conversa por voz (fala e ouve a resposta)", () => action("voice")],
@@ -1656,22 +1669,101 @@ function profileEditor(p) {
 const MCP_STATUS = { falta: "precisa instalar", indisponivel: "indisponível neste sistema" };
 function renderConnections() {
   const servers = S.mcp || [];
-  $("#conn-body").innerHTML = `<h1>Ferramentas de criação</h1><p class="lead">Programas que a IA sabe usar para editar imagens, modelar em 3D, fazer jogos e mexer em vídeo. Nada vem instalado: baixe só o que quiser (versão fixa, do site oficial, com conferência de integridade). O agente também pode pedir para instalar — sempre com a sua permissão.</p>
+  $("#conn-body").innerHTML = `<h1>Estúdio e conexões</h1><p class="lead">Conecte suas ferramentas. Crie com o modelo e a equipe que você escolher.</p>
+    <div class="connections-tabs" role="tablist" aria-label="Áreas de conexão">${[["studio", "layers", "Estúdio 3D"], ["tools", "download", "Programas"], ["mcp", "plug", "MCP"], ["skills", "book", "Skills"]].map(([id, ic, label]) => `<button class="btn" role="tab" id="conn-tab-${id}" aria-controls="conn-${id}" aria-selected="${connectionsTab === id}" data-conn-tab="${id}">${icon(ic)}${label}</button>`).join("")}</div>
+    <div class="search connections-search"><span>${icon("search")}</span><input id="conn-search" aria-label="Buscar conexões e skills" placeholder="Buscar nesta área…" value="${esc(connectionsSearch)}"></div>
+    <section class="connections-panel" id="conn-studio" role="tabpanel" aria-labelledby="conn-tab-studio"><div id="studio-panel"></div></section>
+    <section class="connections-panel" id="conn-tools" role="tabpanel" aria-labelledby="conn-tab-tools"><h2>Ferramentas de criação</h2><p class="lead">Programas para imagens, 3D, jogos e vídeo. Baixe só o que precisar: versões fixas, fontes oficiais e integridade conferida.</p>
     <div class="grid" id="tb-grid"></div>
-    <h1 style="margin-top:34px">Conexões</h1><p class="lead">Servidores MCP ligam o agente a programas (REA, navegador, Windows, Photoshop…). Servidores grandes carregam ferramentas sob demanda para economizar tokens.</p>
+    </section><section class="connections-panel" id="conn-mcp" role="tabpanel" aria-labelledby="conn-tab-mcp"><h2>Conexões MCP</h2><p class="lead">Ligue outros programas ao agente. Ferramentas de servidores grandes carregam sob demanda.</p>
     <div class="row" style="margin-bottom:18px"><button class="btn" id="mc-reload">${icon("refresh")} Reconectar</button><button class="btn" id="mc-import">${icon("download")} Importar do Claude/Cursor</button><button class="btn" id="mc-edit">${icon("code")} Editar mcp.json</button></div>
-    <div class="grid">${servers.map(s => `<div class="tile ${s.status === "indisponivel" ? "off" : ""}"><div class="top"><div class="em">${icon("plug")}</div><div style="flex:1"><h3>${esc(s.name)}</h3><span class="status ${s.status}"><i></i>${esc(MCP_STATUS[s.status] || s.status)}${s.status === "conectado" ? ` · ${s.tools} ferramentas${s.deferred ? " (sob demanda)" : ""}` : ""}</span></div>
+    <div class="grid">${servers.map(s => `<div class="tile ${s.status === "indisponivel" ? "off" : ""}"><div class="top"><div class="em">${icon("plug")}</div><div style="flex:1"><h3>${esc(s.name)}</h3><span class="status ${esc(s.status)}"><i></i>${esc(MCP_STATUS[s.status] || s.status)}${s.status === "conectado" ? ` · ${Number(s.tools) || 0} ferramentas${s.deferred ? " (sob demanda)" : ""}` : ""}</span></div>
       <label class="toggle"><input type="checkbox" data-mcp="${esc(s.name)}" ${s.enabled ? "checked" : ""} ${s.status === "indisponivel" ? "disabled" : ""}><span></span></label></div>
-      <div class="desc">${esc(s.description || "")}${s.error ? `<div class="mcp-err ${s.status}">${esc(s.error)}</div>` : ""}${s.status === "conectado" && s.warm ? mcpWarmLine(s) : ""}</div></div>`).join("")}</div>
+      <div class="desc">${esc(s.description || "")}${s.error ? `<div class="mcp-err ${esc(s.status)}">${esc(s.error)}</div>` : ""}${s.status === "conectado" && s.warm ? mcpWarmLine(s) : ""}</div></div>`).join("") || '<div class="empty">Nenhum servidor configurado.</div>'}</div>
     <div id="ghidra-box" class="ghidra-box"></div>
-    <h1 style="margin-top:34px">Skills</h1><p class="lead">Instruções especializadas no padrão <b>SKILL.md</b>, lidas de <code>skills/</code>, plugins e das pastas do Claude/Codex.</p>
-    <div class="grid">${(S.skills || []).map(k => `<div class="tile"><div class="top"><div class="em">${icon("book")}</div><div><h3>${esc(k.name)}</h3><span class="tag">${esc(k.origin)}</span></div></div><div class="desc">${esc(k.description)}</div></div>`).join("") || `<div class="empty">Nenhuma skill encontrada.</div>`}</div>`;
+    </section><section class="connections-panel" id="conn-skills" role="tabpanel" aria-labelledby="conn-tab-skills"><h2>Skills</h2><p class="lead">Instruções especializadas do projeto, plugins e pastas do Claude/Codex.</p>
+    <div class="grid" id="skills-grid">${(S.skills || []).map(k => `<div class="tile"><div class="top"><div class="em">${icon("book")}</div><div><h3>${esc(k.name)}</h3><span class="tag">${esc(k.origin)}</span></div></div><div class="desc">${esc(k.description)}</div></div>`).join("") || `<div class="empty">Nenhuma skill encontrada.</div>`}</div></section><p id="conn-no-results" class="empty" hidden>Nenhum resultado nesta área.</p>`;
+  $$("[data-conn-tab]").forEach(b => b.onclick = () => { connectionsTab = b.dataset.connTab; filterConnections(); });
+  $("#conn-search").oninput = e => { connectionsSearch = e.target.value; filterConnections(); };
   $$("[data-mcp]", $("#conn-body")).forEach(t => t.addEventListener("change", () => { call("mcpToggle", t.dataset.mcp, t.checked); toast("info", "MCP", `${t.dataset.mcp} ${t.checked ? "ligando…" : "desligado"}`); }));
   $("#mc-reload").onclick = () => { call("mcpReload"); toast("info", "MCP", "Reconectando servidores…"); };
   $("#mc-import").onclick = async () => { const r = await call("mcpImport"); toast(r.length ? "success" : "info", "Importação MCP", r.length ? `Importados (desligados): ${r.join(", ")}` : "Nenhum servidor novo encontrado."); };
   $("#mc-edit").onclick = () => call("openPath", "mcp");
   renderToolbox();
   renderGhidra();
+  renderStudio3D();
+  filterConnections();
+}
+
+function filterConnections() {
+  $$("[data-conn-tab]").forEach(b => b.setAttribute("aria-selected", b.dataset.connTab === connectionsTab));
+  $$(".connections-panel").forEach(p => { p.hidden = p.id !== `conn-${connectionsTab}`; });
+  $$("#conn-studio .tile").forEach(t => { t.hidden = false; });
+  const norm = v => String(v).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const words = norm(connectionsSearch).split(/\s+/).filter(Boolean);
+  const tiles = connectionsTab === "studio" ? [] : $$(".tile", $(`#conn-${connectionsTab}`));
+  let matches = 0;
+  tiles.forEach(t => { t.hidden = !words.every(w => norm(t.textContent).includes(w)); if (!t.hidden) matches++; });
+  $("#conn-search").disabled = connectionsTab === "studio";
+  $("#conn-search").closest(".search").hidden = connectionsTab === "studio";
+  $("#conn-no-results").hidden = connectionsTab === "studio" || !tiles.length || matches > 0;
+}
+
+// Configuração não executa código; diagnóstico e operações do editor ficam no backend.
+function renderStudio3D() {
+  const box = $("#studio-panel");
+  if (!box) return;
+  const s = S.studio3d || {}, unreal = s.unreal || {}, blender = s.blender || {}, unity = s.unity || {};
+  const draft = studioDraft || { unreal: { enabled: !!unreal.enabled, url: unreal.url || "http://127.0.0.1:30010" }, blender: { path: blender.configured_path ?? blender.path ?? "" }, unity: { enabled: !!unity.enabled, url: unity.url || "http://127.0.0.1:30012", project_path: unity.project_path || "" } };
+  const labels = { disabled: "Desligado", unchecked: "Não testado", not_checked: "Não testado", configured: "Não testado", available: "Disponível", connected: "API disponível", ready: "Disponível", missing: "Não encontrado", error: "Requer atenção" };
+  const badge = (v, enabled = true, apiConnection = false) => {
+    const state = enabled ? v.state || "unchecked" : "disabled";
+    const css = ["available", "connected", "ready"].includes(state) ? "conectado" : state === "error" ? "erro" : "";
+    return `<span class="status ${css}"><i></i>${esc(state === "available" && apiConnection ? "API disponível" : labels[state] || state)}</span>`;
+  };
+  box.innerHTML = `<div class="studio-hero"><div><span class="tag grad">ESTÚDIO 3D</span><h2>Da ideia à cena.</h2><p>Unity e Unreal no editor. Blender, Godot e OpenSCAD por suas ferramentas nativas. Seu modelo e sua equipe, no mesmo espaço.</p><span class="studio-model">${icon("cpu")}${esc(S.model_label || "Modelo selecionado no chat")}</span></div><div class="studio-mark" aria-hidden="true">${icon("layers")}</div></div>
+    ${s.config_error ? `<div class="studio-note" role="alert">${esc(s.config_error)}</div>` : ""}
+    <div class="grid studio-grid">
+      <article class="tile"><div class="top"><div class="em">${icon("layers")}</div><div><h3>Unreal Engine</h3>${badge(unreal, unreal.enabled, true)}</div></div><p class="desc">Controle o projeto aberto pela API oficial Remote Control.</p>
+        <label class="studio-check"><input type="checkbox" id="studio-unreal-enabled" ${draft.unreal.enabled ? "checked" : ""}> Permitir conexão com o Unreal</label>
+        <label for="studio-unreal-url">Endereço local do editor</label><input class="inp" id="studio-unreal-url" value="${esc(draft.unreal.url)}" placeholder="http://127.0.0.1:30010" spellcheck="false">
+        <div class="studio-note" role="status">${esc(unreal.message || "Salve o endereço e teste a conexão com o editor aberto.")}</div>
+        <details class="studio-help"><summary>Como preparar o Unreal</summary><ol><li>No seu projeto, ative o plugin <b>Remote Control API</b> e reinicie o editor.</li><li>Abra o <b>Output Log</b> e execute <code>WebControl.StartServer</code>.</li><li>Salve aqui e clique em <b>Testar conexões</b>. O teste consulta a API, sem alterar a cena.</li></ol></details></article>
+      <article class="tile"><div class="top"><div class="em">${icon("layers")}</div><div><h3>Unity</h3>${badge(unity, unity.enabled, true)}</div></div><p class="desc">Ponte local do Órbita: consulte a hierarquia e crie objetos com suporte a Desfazer no editor.</p>
+        <label class="studio-check"><input type="checkbox" id="studio-unity-enabled" ${draft.unity.enabled ? "checked" : ""}> Permitir conexão com o Unity</label>
+        <label for="studio-unity-project">Pasta do projeto Unity</label><input class="inp" id="studio-unity-project" value="${esc(draft.unity.project_path)}" placeholder="Pasta que contém Assets e ProjectSettings" spellcheck="false">
+        <label for="studio-unity-url">Endereço local da ponte (fixo)</label><input class="inp" id="studio-unity-url" value="${esc(draft.unity.url)}" readonly spellcheck="false">
+        <div class="studio-note" role="status">${esc(unity.message || "Peça no chat para conectar seu projeto Unity. A IA instala a ponte com a sua autorização.")}</div>
+        <details class="studio-help"><summary>Como preparar o Unity</summary><p>Abra seu projeto no Órbita e peça <b>Conectar projeto Unity</b>. A ferramenta instala a ponte em Assets/Editor. Abra o mesmo projeto no Unity e aguarde a compilação; depois teste a conexão aqui. Unity Hub e editor são instalados pelo distribuidor oficial.</p></details></article>
+      <article class="tile"><div class="top"><div class="em">${icon("layers")}</div><div><h3>Blender</h3>${badge(blender)}</div></div><p class="desc">Scripts Python em processo separado, com a pasta do projeto como diretório de trabalho.</p>
+        <label for="studio-blender-path">Executável do Blender (opcional)</label><div class="studio-path"><input class="inp" id="studio-blender-path" value="${esc(draft.blender.path)}" placeholder="Automático: caixa de ferramentas ou sistema" spellcheck="false"><button class="btn" id="studio-blender-choose" title="Escolher executável" aria-label="Escolher executável do Blender">${icon("folder")}</button></div>
+        <div class="studio-note" role="status">${esc(blender.message || "Usa o Blender instalado pela caixa de ferramentas ou disponível no sistema.")}</div>
+        ${blender.path ? `<div class="tb-path" title="${esc(blender.path)}">${esc(blender.path)}</div>` : ""}
+        <p class="desc">Não tem o Blender? Instale na aba <b>Programas</b>. Godot e OpenSCAD continuam disponíveis por lá.</p>
+        <div class="row"><span class="tag">Modelagem</span><span class="tag">Materiais e luz</span><span class="tag">GLB / FBX / render</span></div></article>
+      <article class="tile"><div class="top"><div class="em">${icon("bolt")}</div><div><h3>Godot e OpenSCAD</h3><span class="status"><i></i>Ferramentas nativas</span></div></div><p class="desc">Godot para cenas e jogos 2D/3D; OpenSCAD para peças paramétricas e impressão 3D. A IA pode detectar os programas, pedir instalação e executar os comandos no projeto.</p><div class="studio-note">${(s.apps || []).filter(a => ["godot", "openscad"].includes(a.id)).map(a => `${esc(a.name)}: ${a.installed || a.system_exe ? "executável encontrado" : "não encontrado"}`).join("<br>") || "Confira a disponibilidade na aba Programas."}</div><button class="btn small" id="studio-programs">${icon("download")}Ver programas e instalar</button></article></div>
+    <div class="studio-actions"><button class="btn primary" id="studio-save" ${studioPending ? "disabled" : ""}>${icon("check")}Salvar configuração</button><button class="btn" id="studio-probe" ${studioPending ? "disabled" : ""}>${icon("refresh")}${studioPending ? "Aguarde…" : "Testar conexões"}</button><span>O diagnóstico usa a configuração salva. Não instala nem abre programas.</span></div>
+    <div class="studio-start"><h3>Comece pelo chat</h3><p>Prepare um pedido e ajuste antes de enviar. A equipe pode dividir scripts e revisão; operações no mesmo editor ficam em sequência.</p><div class="row"><button class="btn small" data-studio-prompt="diagnose">Diagnosticar ferramentas</button><button class="btn small" data-studio-prompt="blender">Criar asset no Blender</button><button class="btn small" data-studio-prompt="unity">Conectar projeto Unity</button><button class="btn small" data-studio-prompt="unreal">Trabalhar no Unreal</button><button class="btn small" data-studio-prompt="godot">Criar no Godot</button></div></div>
+    <div class="studio-more"><h3>Outros programas 3D</h3><p>Maya, Houdini, 3ds Max e outras ferramentas podem entrar pelo MCP quando houver um servidor compatível instalado. Cada conexão informa suas próprias ferramentas.</p><button class="btn small" id="studio-mcp">${icon("plug")}Configurar conexões MCP</button></div>`;
+  const capture = () => { studioDraft = { unreal: { enabled: $("#studio-unreal-enabled").checked, url: $("#studio-unreal-url").value.trim() }, blender: { path: $("#studio-blender-path").value.trim() }, unity: { enabled: $("#studio-unity-enabled").checked, url: $("#studio-unity-url").value.trim(), project_path: $("#studio-unity-project").value.trim() } }; };
+  $$("input", box).forEach(i => { i.oninput = capture; i.onchange = capture; i.disabled = studioPending; });
+  $("#studio-blender-choose").disabled = studioPending;
+  $("#studio-save").onclick = () => { capture(); submitStudio("studio3dConfigure", JSON.stringify(studioDraft)); };
+  $("#studio-probe").onclick = () => submitStudio("studio3dProbe");
+  $("#studio-blender-choose").onclick = async () => { const r = await call("studio3dChooseBlender"); if (r && r.path) { $("#studio-blender-path").value = r.path; capture(); } };
+  $("#studio-programs").onclick = () => { connectionsTab = "tools"; filterConnections(); };
+  $("#studio-mcp").onclick = () => { connectionsTab = "mcp"; filterConnections(); };
+  const prompts = { diagnose: "Faça um diagnóstico das integrações 3D com studio3d_status. Mostre o que está disponível e o que falta configurar. Se faltar Blender, Godot ou OpenSCAD, explique o tamanho e peça autorização para instalar com toolbox_install; não baixe nada silenciosamente.", blender: "Crie um asset 3D no Blender para este projeto. Primeiro confira studio3d_status e carregue a skill modelagem-3d. Se faltar o programa, peça autorização para toolbox_install. Salve o script no projeto, execute com blender_run_script e confira o render de prévia antes de entregar o GLB.", unity: "Conecte este projeto Unity ao estúdio 3D. Confira studio3d_status, valide Assets e ProjectSettings, e peça autorização para unity_install_bridge. Depois consulte unity_scene para confirmar a conexão antes de criar qualquer objeto. Se faltar Unity, explique a instalação oficial via Unity Hub.", unreal: "Confira a integração Unreal com studio3d_status. Identifique o projeto e os objetos disponíveis antes de alterar a cena; use apenas caminhos e funções confirmados, via unreal_describe e unreal_call. Preserve o trabalho aberto e verifique o resultado.", godot: "Prepare uma cena 3D no Godot neste projeto. Confira studio3d_status, carregue a skill jogos-godot, e peça autorização para toolbox_install se o programa faltar. Use creative_app_run para validar e executar em modo headless antes de entregar." };
+  $$("[data-studio-prompt]", box).forEach(b => b.onclick = () => { $("#input").value = prompts[b.dataset.studioPrompt]; go("chat"); autosize(); });
+}
+
+async function submitStudio(method, ...args) {
+  if (studioPending) return;
+  studioPending = true; renderStudio3D();
+  try {
+    const r = await call(method, ...args);
+    if (!r || r.error || !r.accepted) { studioPending = false; renderStudio3D(); toast("error", "Estúdio 3D", r?.error || "A conexão com o aplicativo não respondeu."); }
+  } catch (e) { studioPending = false; renderStudio3D(); toast("error", "Estúdio 3D", String(e)); }
 }
 // Estado do motor de um servidor MCP (REA): só leitura, com o tempo e o progresso medidos no backend.
 function mcpWarmLine(s) {

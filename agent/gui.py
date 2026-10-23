@@ -35,7 +35,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMainWindow, QMenu, QSystemTrayIcon
 
 from agent import __version__
-from agent.core import checkpoints, grok_cli, mentions, routing, toolbox, updater
+from agent.core import checkpoints, grok_cli, mentions, routing, studio3d, toolbox, updater
 from agent.core.brain import Brain
 from agent.core.config import (
     DATA_DIR, GUI_VOICE_MAX_RECORD_SECONDS, GUI_VOICE_NO_SPEECH_TIMEOUT, GUI_VOICE_SILENCE_SECONDS, LOGS_DIR,
@@ -338,6 +338,7 @@ class Api(QObject):
         self._relay.connect(self.message)   # emissões de outras threads chegam enfileiradas
         self._grok_cache: tuple[float, dict] = (0.0, {})
         self._engine_scan = threading.Event()
+        self._studio_lock = threading.Lock()
         self._jobs = None
         self._ensure_jobs()
         # Progresso da caixa de ferramentas (instalação pela interface ou pelo agente) vai para a página.
@@ -404,6 +405,7 @@ class Api(QObject):
             "skills": [{"name": s.name, "description": s.description, "origin": s.origin}
                        for s in sorted(brain.skills.skills.values(), key=lambda s: s.name)],
             "toolbox": toolbox.get_toolbox().list(),
+            "studio3d": studio3d.get_studio3d().status(),
             "conversations": brain.conversations.list(),
             "conversation_id": brain.conversation_id,
             "conversation_title": brain.conversation_title,
@@ -1248,6 +1250,47 @@ class Api(QObject):
     def mcpImport(self) -> str:
         return json.dumps(self.brain.mcp.import_external())
 
+    # ── Estúdio 3D ──────────────────────────────────────────
+
+    def _studio_work(self, config: Optional[dict] = None) -> str:
+        if self.win.busy:
+            return json.dumps({"error": "Espere o turno terminar antes de mudar ou testar a conexão 3D."})
+        if not self._studio_lock.acquire(blocking=False):
+            return json.dumps({"error": "O diagnóstico 3D ainda está em andamento."})
+
+        def work():
+            try:
+                studio = studio3d.get_studio3d()
+                status = studio.probe() if config is None else studio.configure(config)
+                self.push({"type": "studio3d", "status": status})
+            except Exception as error:
+                logger.warning("Estúdio 3D: %s", error)
+                self.push({"type": "studio3d", "error": str(error)})
+            finally:
+                self._studio_lock.release()
+
+        threading.Thread(target=work, name="studio3d-diagnostics", daemon=True).start()
+        return json.dumps({"accepted": True})
+
+    @pyqtSlot(str, result=str)
+    def studio3dConfigure(self, raw: str) -> str:
+        try:
+            config = json.loads(raw)
+            if not isinstance(config, dict):
+                raise ValueError("Configuração 3D deve ser um objeto JSON.")
+        except (ValueError, TypeError) as error:
+            return json.dumps({"error": str(error)})
+        return self._studio_work(config)
+
+    @pyqtSlot(result=str)
+    def studio3dProbe(self) -> str:
+        return self._studio_work()
+
+    @pyqtSlot(result=str)
+    def studio3dChooseBlender(self) -> str:
+        path, _ = QFileDialog.getOpenFileName(self.win, "Escolher executável do Blender", "", "Todos os arquivos (*)")
+        return json.dumps({"path": path}, ensure_ascii=False)
+
     # ── Caixa de ferramentas (programas opcionais) ───────────
 
     @pyqtSlot(result=str)
@@ -1562,6 +1605,8 @@ class MainWindow(QMainWindow):
         elif kind == "mcp_progress":
             push({"type": "mcp_progress", "id": data.get("id"), "elapsed": data.get("elapsed", 0),
                   "message": data.get("message", "")})
+        elif kind == "studio3d":
+            push({"type": "studio3d", **data})
         elif kind == "preview":
             path = data.get("path", "")
             if Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}:

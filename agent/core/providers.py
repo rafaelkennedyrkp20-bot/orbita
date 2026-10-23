@@ -117,6 +117,11 @@ def new_call_id() -> str:
     return "call_" + uuid.uuid4().hex[:20]
 
 
+def preserves_thinking(model: str) -> bool:
+    """Kimi exige reasoning_content integral nas mensagens anteriores destes modelos."""
+    return bool(re.search(r"(^|/)kimi-(k3|(k3\.1-pro|k2\.7-code)(-highspeed)?)$", model or "", re.I))
+
+
 def _image_b64(path: str) -> tuple[str, str]:
     data = Path(path).read_bytes()
     mime = mimetypes.guess_type(path)[0] or "image/png"
@@ -456,7 +461,7 @@ class OpenAICompatProvider(Provider):
                 flush_images()
             if role == "assistant":
                 item: dict[str, Any] = {"role": "assistant", "content": msg.get("content") or None}
-                if msg.get("reasoning") and msg.get("tool_calls"):
+                if msg.get("reasoning") and (msg.get("tool_calls") or preserves_thinking(model)):
                     item["reasoning_content"] = msg["reasoning"]
                 if msg.get("tool_calls"):
                     item["tool_calls"] = [{
@@ -488,6 +493,12 @@ class OpenAICompatProvider(Provider):
             payload["temperature"] = temperature
         if max_tokens:
             payload[self.cfg.get("max_tokens_param", "max_tokens")] = max_tokens
+        # K3/K3.1 usam esforço no nível superior; não aceitam o parâmetro thinking.
+        if re.search(r"(^|/)kimi-k3($|\.1-pro(-highspeed)?$)", model or "", re.I) and extra.get("effort"):
+            effort = extra["effort"]
+            if effort not in ("low", "high", "max"):
+                raise ProviderError("Kimi K3/K3.1 aceita esforço low, high ou max. Ajuste o perfil.")
+            payload["reasoning_effort"] = effort
         if "openai.com" in self.base_url or "deepseek" in self.base_url:
             payload["stream_options"] = {"include_usage": True}
 

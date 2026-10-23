@@ -183,6 +183,13 @@ Legenda: `[x]` feito e verificado · `[~]` parcial · `[ ]` pendente · ⭐ prio
 
 ## Fase 9 — Ferramentas de criação e o que os usuários mais pedem (pesquisa 2026-10-16)
 
+- [x] **Base do estúdio 3D nativo e multiaplicativo (23/10/2026)**: integração Unreal Remote Control, ponte Unity de cena/primitivas,
+  Blender por Python e Godot/OpenSCAD por CLI, diagnóstico/instalação sob permissão e painel com abas/busca.
+  Preset Moonshot/Kimi e preservação de raciocínio. Gate: 661 aprovados, 2 pulados; Blender/OpenSCAD reais conferidos.
+  Contratos Unity/Unreal e API Kimi testados com transporte local/simulado; limites em `docs/ESTUDIO_3D.md`.
+- [ ] **Validação adicional do estúdio 3D**: Unity/Unreal nos editores reais, Godot real e API paga Kimi;
+  ponte Unity ainda limitada a hierarquia/primitivas (importação avançada de assets e edição geral não implementadas).
+
 > Fontes: discussões de usuários de agentes pessoais (memória persistente é o pedido nº 1; controle de programas é a
 > maior lacuna; local-first com permissões por escopo é o mais elogiado) e de quem faz jogos com IA (Blender gera os
 > assets 3D, Godot monta o jogo; ImageMagick é o padrão de edição de imagem por linha de comando).
@@ -238,6 +245,8 @@ Preservar Python/PyQt6/QWebEngine; sem migração Tauri, novos pesos ou instala�
 AGPL-3.0-only exige avaliação de obrigações se houver incorporação de código; esta etapa só registra ideias e fontes.
 
 ## Diário
+
+- **2026-10-23 — Codex (GPT-6), com subagentes de backend, APIs e revisão independente**: vistoria e implementação do Estúdio 3D multiaplicativo. Blender e OpenSCAD já existiam na caixa; agora há ferramentas nativas com saída limitada, timeout/cancelamento e instalação sob permissão, Unreal via Remote Control oficial e Unity por ponte própria de Editor (token local, hierarquia/primitivas e Undo). Godot usa CLI headless. A IA pode configurar a conexão pelo chat; reservas por sessão impedem redirecionar um editor ocupado. Interface dividida em Estúdio/Programas/MCP/Skills com busca, configuração preservada e temas claro/escuro. Moonshot/Kimi ganhou preset K3.1 Pro/Highspeed e preservação obrigatória de raciocínio/custo no contexto para as gerações documentadas. Verificado: baseline **575 aprovados, 2 pulados**; final **661 aprovados, 2 pulados, 158,96 s**, pyflakes **0 avisos**, node check e diff check sem erros. Página Qt real conferida; Blender 4.5.9 gerou PNG/GLB/.blend e OpenSCAD 2021.01 gerou STL/PNG pelas novas ferramentas, com prévias inspecionadas. C# compilado com stubs Unity e warnaserror, sem avisos; **não equivale a teste no Unity**. Unity/Unreal reais, Godot real e API paga Kimi continuam pendentes. Configurações pessoais preservadas (SHA-256 de settings igual); sem baixar aplicativos, mudar versão/tag ou enviar ao GitHub. Guia e critérios em `docs/ESTUDIO_3D.md`.
 
 - **2026-10-15 — Claude (Opus 5.5)**: diagnóstico completo; criação do ROADMAP, ARCHITECTURE e AGENTS.md;
   núcleo agêntico novo (provedores, ferramentas, permissões, contexto, economia), perfis com prompts de

@@ -18,6 +18,12 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## [Não lançado]
 
+- **Estúdio 3D** em Conexões: configuração/diagnóstico para Unity, Unreal e Blender, execução nativa de Godot/OpenSCAD,
+  pedidos prontos no chat, programas instaláveis sob permissão, abas e busca de MCP/skills. Ponte Unity com
+  hierarquia/primitivas e Desfazer; Unreal pela API oficial. Guia e limites em `docs/ESTUDIO_3D.md`.
+- **Moonshot/Kimi por API**: preset oficial K3.1 Pro/Highspeed e correção da preservação de raciocínio exigida
+  por K3/K3.1/K2.7 Code, contabilizado no contexto. Nenhuma mudança da versão pública.
+
 ### Adicionado
 - Integração funcional da Cassandra além das skills: DeepSeek Web pela conta (login manual, Instant/Expert,
   raciocínio, busca e exclusão opcional da própria sessão), conversa temporária e anexos de arquivos/pastas.

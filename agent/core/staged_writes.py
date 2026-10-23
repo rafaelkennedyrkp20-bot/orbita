@@ -193,7 +193,8 @@ def staged_block(settings, tool) -> str | None:
     if settings is None or settings.get("staged_writes") != "on":
         return None
     source = str(getattr(tool, "source", "") or "")
-    if getattr(tool, "name", "") == "run_shell" or source.startswith("mcp:"):
+    if getattr(tool, "name", "") in {"run_shell", "unreal_call", "blender_run_script", "creative_app_run",
+                                    "unity_install_bridge", "unity_create_primitive"} or source.startswith("mcp:"):
         return ("A revisão antes de gravar está ligada. O terminal e o MCP ficam bloqueados "
                 "porque podem alterar arquivos sem passar pela proposta.")
     return None

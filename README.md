@@ -120,6 +120,11 @@ Cada turno do Grok Build tem um custo-base de cerca de 16 mil tokens (o prompt d
 
 ## Ferramentas de criação (imagem, 3D, jogos, vídeo)
 
+O novo **Conexões → Estúdio 3D** reúne Unity, Unreal Engine, Blender, Godot e OpenSCAD, com diagnóstico,
+configuração e pedidos prontos para a IA. Ela pode oferecer a instalação dos programas da caixa de ferramentas,
+sempre pelas permissões normais. Unity/Unreal usam instalação própria; outros programas continuam conectáveis
+por MCP. [Como conectar, usar com APIs e equipe, e o que foi validado](docs/ESTUDIO_3D.md).
+
 Na página **Conexões**, a seção *Ferramentas de criação* oferece programas que a IA sabe usar. **Nada vem instalado**:
 você baixa só o que quiser, ou o agente pede permissão mostrando nome, tamanho e origem.
 

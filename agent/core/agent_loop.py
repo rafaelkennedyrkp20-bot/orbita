@@ -33,7 +33,7 @@ from typing import Callable, Optional
 from agent.core import capabilities, grok_bridge, grok_cli, integration, repo_map, routing, teamwork
 from agent.core.mcp_hub import SERVER_LEASES
 from agent.core.profiles import Profile
-from agent.core.providers import ChatResult, ProviderError, ToolsUnsupported, get_provider, new_call_id
+from agent.core.providers import ChatResult, ProviderError, ToolsUnsupported, get_provider, new_call_id, preserves_thinking
 from agent.core.settings import resolve_workspace
 from agent.core.tools import Tool, ToolContext, ToolResult
 from agent.core.usage import CACHE_INPUT_KEYS, EconomyPolicy, estimate_tokens, input_tokens
@@ -71,7 +71,7 @@ def _step_note(step: int, depth: int) -> str:
     return ""
 
 
-def _mask_old_observations(history: list[dict], start: int) -> None:
+def _mask_old_observations(history: list[dict], start: int, *, preserve_assistants: bool = False) -> None:
     """Mascara observações antigas do turno atual (técnica de 'observation masking'): o modelo continua sabendo
     o que fez, mas não recebe de novo, a cada passo, arquivos inteiros que já leu ou gravou.
 
@@ -95,7 +95,7 @@ def _mask_old_observations(history: list[dict], start: int) -> None:
     cutoff = tool_idx[-KEEP_RECENT_RESULTS] if len(tool_idx) > KEEP_RECENT_RESULTS else len(history)
     for i in range(start, cutoff):
         msg = history[i]
-        if msg["role"] != "assistant":
+        if msg["role"] != "assistant" or preserve_assistants:
             continue
         for call in msg.get("tool_calls") or []:
             args = call.get("arguments")
@@ -935,8 +935,9 @@ class AgentSession:
         # 1) Resultados de ferramentas de turnos anteriores ficam curtos.
         starts = _turn_starts(history)
         recent_start = starts[-1] if starts else 0
+        keep_thinking = preserves_thinking(self.model)
         for i, msg in enumerate(history[:recent_start]):
-            if msg["role"] == "assistant" and "reasoning" in msg:
+            if msg["role"] == "assistant" and "reasoning" in msg and not keep_thinking:
                 history[i].pop("reasoning", None)
             if msg["role"] == "tool" and len(msg.get("content") or "") > policy.old_tool_output_chars:
                 cut = msg["content"][:policy.old_tool_output_chars]
@@ -946,7 +947,7 @@ class AgentSession:
 
         # 1b) Dentro do turno atual (onde tarefas longas e ajudantes gastam quase tudo): só os passos recentes vão
         #     inteiros. Resultados antigos ficam com o começo; conteúdo já gravado em arquivo vira uma nota.
-        _mask_old_observations(history, recent_start)
+        _mask_old_observations(history, recent_start, preserve_assistants=keep_thinking)
         drop_stale_native(history)
 
         # 1c) Mapa do projeto e sugestão do ambiente vão só no pedido enviado deste turno (não ficam gravados).
@@ -967,6 +968,9 @@ class AgentSession:
                 break
             history = history[starts[0]:]
         history = _fit_turn(history, available, size)
+        if keep_thinking and size(history) > available:
+            raise ProviderError("O raciocínio preservado do Kimi excede o contexto disponível. "
+                                "Use a compactação ou inicie uma nova conversa antes de continuar.")
 
         # 3) Ferramentas por prompt: converte para mensagens de texto.
         if self.prompted_tools:
@@ -997,6 +1001,7 @@ class AgentSession:
     @staticmethod
     def _history_size(messages: list[dict]) -> int:
         return sum(estimate_tokens(m.get("content") or "") + 800 * len(m.get("images") or [])
+                   + (estimate_tokens(m["reasoning"]) if m.get("reasoning") else 0)
                    + estimate_tokens(json.dumps(m.get("tool_calls") or [], ensure_ascii=False)) for m in messages)
 
     # ── Compactação inteligente ──────────────────────────────

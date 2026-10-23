@@ -42,6 +42,8 @@ Você ──► GUI (agent/gui.py) / terminal / voz
 | `agent/core/skills.py` | Skills `SKILL.md` + plugins. `when` vira roteador no prompt; `context: models` anexa a tabela só ao carregar |
 | `agent/core/usage.py` | Medidor de tokens (`data/usage.json`) e políticas de economia |
 | `agent/core/brain.py` | Fachada: liga tudo, seleção de perfil/modelo, modos texto/voz |
+| `agent/core/studio3d.py` · `agent/actions/studio3d.py` · `creative_apps.py` | Estúdio 3D: diagnóstico local, Unreal Remote Control, ponte Unity autenticada, Blender por script e CLI Godot/OpenSCAD; risco exec nas mutações e reservas por sessão nos editores |
+| `agent/integrations/unity/OrbitaBridge.cs` | Recurso instalado sob autorização em Assets/Editor; HTTP loopback com token, fila para a thread Unity e Undo; não entra no jogo compilado |
 | `agent/gui.py` | Janela (QWebEngine), ponte `Api` (QWebChannel) com a página, worker do agente, bandeja e notificações |
 | `agent/ui/web/` | Interface: `index.html`, `app.css` (design system "Órbita"), `app.js` (sem dependências externas), `logo.svg` |
 | `agent/ui/render.py` | Markdown → HTML **sanitizado** (sem HTML cru, sem `javascript:`) e texto para a voz |
