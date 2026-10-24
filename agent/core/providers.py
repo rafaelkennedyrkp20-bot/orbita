@@ -117,6 +117,9 @@ def new_call_id() -> str:
     return "call_" + uuid.uuid4().hex[:20]
 
 
+KIMI_EFFORT = {"low": "low", "medium": "high", "high": "high", "xhigh": "max", "max": "max"}
+
+
 def preserves_thinking(model: str) -> bool:
     """Kimi exige reasoning_content integral nas mensagens anteriores destes modelos."""
     return bool(re.search(r"(^|/)kimi-(k3|(k3\.1-pro|k2\.7-code)(-highspeed)?)$", model or "", re.I))
@@ -493,12 +496,12 @@ class OpenAICompatProvider(Provider):
             payload["temperature"] = temperature
         if max_tokens:
             payload[self.cfg.get("max_tokens_param", "max_tokens")] = max_tokens
-        # K3/K3.1 usam esforço no nível superior; não aceitam o parâmetro thinking.
+        # K3/K3.1 usam esforço no nível superior (low, high, max); não aceitam o parâmetro thinking. O perfil guarda
+        # o vocabulário do Claude e a interface não edita esse campo: aproxima em vez de recusar o pedido inteiro.
         if re.search(r"(^|/)kimi-k3($|\.1-pro(-highspeed)?$)", model or "", re.I) and extra.get("effort"):
-            effort = extra["effort"]
-            if effort not in ("low", "high", "max"):
-                raise ProviderError("Kimi K3/K3.1 aceita esforço low, high ou max. Ajuste o perfil.")
-            payload["reasoning_effort"] = effort
+            effort = KIMI_EFFORT.get(str(extra["effort"]).lower())
+            if effort:
+                payload["reasoning_effort"] = effort
         if "openai.com" in self.base_url or "deepseek" in self.base_url:
             payload["stream_options"] = {"include_usage": True}
 

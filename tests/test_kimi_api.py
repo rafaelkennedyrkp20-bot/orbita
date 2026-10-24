@@ -104,11 +104,23 @@ def test_kimi_agent_session_replays_complete_assistants_across_two_turns(brain, 
     assert any(m.get("tool_call_id") == "c1" for m in requests[2]["messages"])
 
 
-def test_kimi_rejects_unsupported_effort_before_network(monkeypatch):
-    provider = OpenAICompatProvider("moonshot", DEFAULT_PROVIDERS["moonshot"])
-    monkeypatch.setattr(providers, "_shared_http_client", lambda: pytest.fail("não deve chamar a rede"))
-    with pytest.raises(ProviderError, match="low, high ou max"):
-        provider.chat("kimi-k3.1-pro", [{"role": "user", "content": "oi"}], effort="medium")
+@pytest.mark.parametrize("effort,sent", [("medium", "high"), ("xhigh", "max"), ("low", "low"), ("turbo", None)])
+def test_kimi_maps_profile_effort_instead_of_failing_the_turn(monkeypatch, effort, sent):
+    """O perfil guarda o esforço no vocabulário do Claude e a interface não edita esse campo: recusar ("Ajuste o
+    perfil") fazia todo pedido ao Kimi falhar sem saída pela janela."""
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        body = 'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+        return httpx.Response(200, text=body, headers={"Content-Type": "text/event-stream"})
+
+    monkeypatch.setenv("MOONSHOT_API_KEY", "isolated-test-key")
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        monkeypatch.setattr(providers, "_shared_http_client", lambda: client)
+        provider = OpenAICompatProvider("moonshot", DEFAULT_PROVIDERS["moonshot"])
+        assert provider.chat("kimi-k3.1-pro", [{"role": "user", "content": "oi"}], effort=effort).text == "ok"
+    assert requests[0].get("reasoning_effort") == sent
 
 
 @pytest.mark.parametrize("model,keep", [("kimi-k3", True), ("kimi-k3.1-pro", True), ("kimi-k2.7-code", True),

@@ -6,25 +6,30 @@ Formato inspirado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## Como versionamos
 
-- **Correções e melhorias pequenas não mudam a versão.** Elas entram no GitHub normalmente e são anotadas em
-  **[Não lançado]** abaixo.
-- **Atualização grande** (um conjunto de recursos novos, ou algo que muda o jeito de usar) sobe o segundo número:
-  `0.1.0-alpha` → `0.2.0-alpha`. As notas de "Não lançado" passam para a versão nova e o git ganha a tag
-  `v0.2.0-alpha`.
-- **Correção urgente** entre duas versões grandes sobe o terceiro número: `0.1.1-alpha`.
+- **Desde a 0.4.1, todo lançamento sobe só o último número** (`0.4.1` → `0.4.2` → `0.4.3`…), seja correção ou
+  recurso novo; a `0.5` não será usada (decisão do dono do projeto, 23/10/2026). Mudanças são commitadas aos poucos,
+  anotadas em **[Não lançado]** abaixo e sobem juntas quando o lançamento sai, com a tag `v0.4.N-alpha`.
 - **`1.0.0`** só quando o programa for declarado estável. Até lá, o sufixo `-alpha` avisa que ainda pode mudar.
 - Nenhuma versão vem compilada: o Órbita é distribuído só como código-fonte.
 - A versão fica em `agent/__init__.py` e aparece em Configurações › Sobre.
 
 ## [Não lançado]
 
+## [0.4.2-alpha] — 2026-10-23
+
+Estúdio 3D, Kimi por API e funções da Cassandra no Órbita.
+
+### Correções
+- **Kimi não recusa mais o pedido por causa do esforço do perfil**: um perfil com esforço "medium" ou "xhigh"
+  (vocabulário do Claude, que a janela não edita) fazia todo pedido ao Kimi K3/K3.1 falhar. Agora o valor é
+  aproximado ao que o Kimi aceita (medium → high, xhigh → max).
+
+### Adicionado
 - **Estúdio 3D** em Conexões: configuração/diagnóstico para Unity, Unreal e Blender, execução nativa de Godot/OpenSCAD,
   pedidos prontos no chat, programas instaláveis sob permissão, abas e busca de MCP/skills. Ponte Unity com
   hierarquia/primitivas e Desfazer; Unreal pela API oficial. Guia e limites em `docs/ESTUDIO_3D.md`.
 - **Moonshot/Kimi por API**: preset oficial K3.1 Pro/Highspeed e correção da preservação de raciocínio exigida
-  por K3/K3.1/K2.7 Code, contabilizado no contexto. Nenhuma mudança da versão pública.
-
-### Adicionado
+  por K3/K3.1/K2.7 Code, contabilizado no contexto.
 - Integração funcional da Cassandra além das skills: DeepSeek Web pela conta (login manual, Instant/Expert,
   raciocínio, busca e exclusão opcional da própria sessão), conversa temporária e anexos de arquivos/pastas.
 - Chat no navegador com streaming e aprovações, fila HTTP de pedidos, fontes alternativas Brave/Google e

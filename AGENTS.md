@@ -32,7 +32,7 @@ venv\Scripts\python.exe -m pytest tests -q                                # 100%
 
 ## 4. Registro e versão
 - Ao concluir: ROADMAP `[x]`/`[~]` + Diário (data, modelo, o que mudou, como verificou). Commit em português. Não envie ao GitHub sem pedido.
-- Versão só com autorização do usuário (`agent/__init__.py`, CHANGELOG). Correção pequena: `## [Não lançado]`, sem subir versão. Conjunto grande: sobe o segundo número (`0.1.0-alpha` → `0.2.0-alpha`) e cria a tag. Urgente: terceiro número. `1.0.0` só quando o usuário declarar estável.
+- Versão só com autorização do usuário (`agent/__init__.py`, CHANGELOG). Desde a 0.4.1, todo lançamento sobe só o último número (`0.4.2-alpha`, `0.4.3-alpha`…) e cria a tag; a `0.5` não será usada. Entre lançamentos, commits locais com notas em `## [Não lançado]`. `1.0.0` só quando o usuário declarar estável.
 
 ## 5. Skills (`skills/<nome>/SKILL.md`, `use_skill`)
 O campo `when` é o roteador injetado no prompt. Não copie o corpo para cá.
